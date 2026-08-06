@@ -211,9 +211,11 @@ jobs:
       # every other access control in the application pointless.
       - name: Create the private bucket
         run: |
-          docker run --rm --network host \
+          # --entrypoint: the mc image's entrypoint is `mc` itself, so a bare
+          # `/bin/sh -c ...` would be read as arguments to mc.
+          docker run --rm --network host --entrypoint /bin/sh \
             minio/mc:RELEASE.2025-04-16T18-13-26Z \
-            /bin/sh -c '
+            -c '
               mc alias set ci http://127.0.0.1:9000 ci-access-key ci-secret-key &&
               mc mb --ignore-existing ci/wdrg-ci &&
               mc anonymous set none ci/wdrg-ci
