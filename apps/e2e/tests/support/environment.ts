@@ -105,6 +105,19 @@ export const productionApiEnv: Record<string, string> = {
   API_PORT: String(API_PRODUCTION_PORT),
   API_PUBLIC_URL: API_PRODUCTION_URL,
   MONGODB_URI: mongoUri(PRODUCTION_DATABASE_NAME),
+  /*
+   * A production-safe configuration, because production refuses an unsafe one —
+   * which is the behaviour this suite relies on elsewhere.
+   *
+   * An absolute storage root (a relative one moves with the working directory),
+   * a real session secret, and `reject` for the scanner: this instance exists
+   * only to observe the cookie flags production sets, and it never accepts an
+   * upload, so refusing all of them is the honest setting rather than claiming a
+   * scanner that is not running.
+   */
+  UPLOAD_STORAGE_ROOT: resolve(PACKAGE_ROOT, '.artifacts', 'storage-production'),
+  MALWARE_SCANNER: 'reject',
+  PROJECT_SESSION_SECRET: 'e2e-production-mode-session-secret-00000000',
 };
 
 export const webEnv: Record<string, string> = {

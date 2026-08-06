@@ -67,5 +67,8 @@ env_value() {
 
 validate_port MONGODB_HOST_PORT "$(env_value MONGODB_HOST_PORT)"
 validate_port MONGO_EXPRESS_HOST_PORT "$(env_value MONGO_EXPRESS_HOST_PORT)"
+validate_port MINIO_HOST_PORT "$(env_value MINIO_HOST_PORT)"
+validate_port MINIO_CONSOLE_HOST_PORT "$(env_value MINIO_CONSOLE_HOST_PORT)"
+validate_port CLAMAV_HOST_PORT "$(env_value CLAMAV_HOST_PORT)"
 
 exec docker compose "${args[@]}" "$@"

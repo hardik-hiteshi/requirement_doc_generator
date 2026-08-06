@@ -59,8 +59,37 @@ export const apiEnvSchema = z.object({
   PROJECT_EXPIRY_DAYS: integerSchema({ default: 30, min: 1, max: 365 }),
 
   /* --------------------------------------------- requirement ingestion */
-  /** Where the local storage adapter keeps uploaded files. Never web-served. */
+  /**
+   * Which storage adapter to use.
+   *
+   * `filesystem` is for local development. `s3` speaks the S3 protocol to a
+   * **self-hosted** server — MinIO in this repository's compose stack — and
+   * requires no cloud account. No default reaches a public cloud service: the
+   * default is the local disk, and choosing `s3` means naming an endpoint you
+   * run yourself.
+   */
+  STORAGE_ADAPTER: z.enum(['filesystem', 's3']).default('filesystem'),
+  /** Where the filesystem adapter keeps uploaded files. Never web-served. */
   UPLOAD_STORAGE_ROOT: z.string().min(1).default('./storage/uploads'),
+
+  /* ---------------------------------------------- self-hosted S3 (MinIO) */
+  /**
+   * Host and port of the S3-compatible server. Deliberately **not** defaulted
+   * to any vendor endpoint — a blank value with `STORAGE_ADAPTER=s3` fails
+   * startup rather than silently reaching for a cloud.
+   */
+  S3_ENDPOINT: z.string().default(''),
+  S3_PORT: integerSchema({ default: 9000, min: 1, max: 65535 }),
+  /** TLS to the storage server. False is correct for a compose-local MinIO. */
+  S3_USE_SSL: booleanFromString(false),
+  S3_BUCKET: z.string().default(''),
+  S3_ACCESS_KEY: z.string().default(''),
+  /** Never logged, never returned, never bundled. Placeholder in .env.example. */
+  S3_SECRET_KEY: z.string().default(''),
+  /** Sent in requests; MinIO ignores it, other S3 servers may not. */
+  S3_REGION: z.string().min(1).default('us-east-1'),
+  /** Lifetime of a presigned download URL, when one is issued. */
+  S3_SIGNED_URL_TTL_SECONDS: integerSchema({ default: 300, min: 30, max: 3_600 }),
   /** Largest single upload. Independent of the JSON body limit above. */
   UPLOAD_MAX_FILE_BYTES: integerSchema({ default: 26_214_400, min: 1_024, max: 268_435_456 }),
   /** Total bytes one project may hold across every file. */
@@ -125,11 +154,46 @@ export const apiEnvSchema = z.object({
 
   /* -------------------------------------------------------------- malware */
   /**
-   * `none` records NOT_SCANNED and keeps the file; `reject` refuses every file
-   * because no scanner is available. A real scanner adapter arrives with the
-   * deployment phase — see ADR-0016.
+   * Which scanner to use.
+   *
+   * `clamav` is the real one: a self-hosted ClamAV daemon, spoken to over its
+   * own TCP protocol. `none` records NOT_SCANNED — deliberately never `CLEAN` —
+   * and is rejected outright at startup in production. `reject` refuses every
+   * upload, for a deployment that would rather accept nothing than accept
+   * something unscanned.
    */
-  MALWARE_SCANNER: z.enum(['none', 'reject']).default('none'),
+  MALWARE_SCANNER: z.enum(['clamav', 'none', 'reject']).default('none'),
+  CLAMAV_HOST: z.string().min(1).default('127.0.0.1'),
+  CLAMAV_PORT: integerSchema({ default: 3310, min: 1, max: 65535 }),
+  /**
+   * Ceiling for one scan. ClamAV is fast on small files and slow on large
+   * archives, and a hung scan must not hold an upload open indefinitely.
+   */
+  CLAMAV_TIMEOUT_MS: integerSchema({ default: 30_000, min: 1_000, max: 300_000 }),
+  /**
+   * What to do when the scanner cannot be reached.
+   *
+   * `true` (fail closed) refuses the upload. `false` accepts it and records
+   * UNAVAILABLE. Production is forced closed regardless of this value — an
+   * unreachable scanner must never become a silent bypass.
+   */
+  MALWARE_FAIL_CLOSED: booleanFromString(true),
+
+  /* ------------------------------------------------ AI provider (Phase 4) */
+  /**
+   * Reserved for Phase 4, and constrained now so a paid provider cannot be
+   * assumed later.
+   *
+   * `disabled` is the default and the only value Phase 3 accepts. The other two
+   * are **self-hosted inference servers** — Ollama for development, an
+   * OpenAI-protocol-compatible local server such as vLLM for production. The
+   * protocol is borrowed; the service is not. See ADR-0017.
+   */
+  AI_PROVIDER: z.enum(['disabled', 'ollama', 'local-openai-compatible']).default('disabled'),
+  /** Base URL of the self-hosted inference server. Never a vendor endpoint. */
+  AI_BASE_URL: z.string().default(''),
+  /** Model identifier, e.g. `llama3.1:8b`. Weights are never committed. */
+  AI_MODEL: z.string().default(''),
 
   /* ---------------------------------------------------------------- docs */
   /** Serve the interactive OpenAPI UI. Disabled by default in production. */

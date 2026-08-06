@@ -36,7 +36,38 @@ export interface ProjectConfig {
   readonly webPublicUrl: string;
 }
 
+export type StorageAdapterName = 'filesystem' | 's3';
+export type MalwareScannerName = 'clamav' | 'none' | 'reject';
+export type AiProviderName = 'disabled' | 'ollama' | 'local-openai-compatible';
+
+export interface S3Config {
+  readonly endpoint: string;
+  readonly port: number;
+  readonly useSsl: boolean;
+  readonly bucket: string;
+  readonly accessKey: string;
+  readonly secretKey: string;
+  readonly region: string;
+  readonly signedUrlTtlSeconds: number;
+}
+
+export interface MalwareConfig {
+  readonly scanner: MalwareScannerName;
+  readonly host: string;
+  readonly port: number;
+  readonly timeoutMs: number;
+  /** Production is always fail-closed, whatever this says. */
+  readonly failClosed: boolean;
+}
+
+export interface AiConfig {
+  readonly provider: AiProviderName;
+  readonly baseUrl: string;
+  readonly model: string;
+}
+
 export interface UploadConfig {
+  readonly adapter: StorageAdapterName;
   readonly storageRoot: string;
   readonly maxFileBytes: number;
   readonly maxProjectBytes: number;
@@ -147,6 +178,7 @@ export class AppConfigService {
 
   get upload(): UploadConfig {
     return {
+      adapter: this.config.get('STORAGE_ADAPTER', { infer: true }),
       storageRoot: this.config.get('UPLOAD_STORAGE_ROOT', { infer: true }),
       maxFileBytes: this.config.get('UPLOAD_MAX_FILE_BYTES', { infer: true }),
       maxProjectBytes: this.config.get('UPLOAD_MAX_PROJECT_BYTES', { infer: true }),
@@ -189,8 +221,37 @@ export class AppConfigService {
     };
   }
 
-  get malwareScanner(): 'none' | 'reject' {
-    return this.config.get('MALWARE_SCANNER', { infer: true });
+  get s3(): S3Config {
+    return {
+      endpoint: this.config.get('S3_ENDPOINT', { infer: true }),
+      port: this.config.get('S3_PORT', { infer: true }),
+      useSsl: this.config.get('S3_USE_SSL', { infer: true }),
+      bucket: this.config.get('S3_BUCKET', { infer: true }),
+      accessKey: this.config.get('S3_ACCESS_KEY', { infer: true }),
+      secretKey: this.config.get('S3_SECRET_KEY', { infer: true }),
+      region: this.config.get('S3_REGION', { infer: true }),
+      signedUrlTtlSeconds: this.config.get('S3_SIGNED_URL_TTL_SECONDS', { infer: true }),
+    };
+  }
+
+  get malware(): MalwareConfig {
+    return {
+      scanner: this.config.get('MALWARE_SCANNER', { infer: true }),
+      host: this.config.get('CLAMAV_HOST', { infer: true }),
+      port: this.config.get('CLAMAV_PORT', { infer: true }),
+      timeoutMs: this.config.get('CLAMAV_TIMEOUT_MS', { infer: true }),
+      // Production ignores the flag: an unreachable scanner must never become a
+      // silent bypass on the one deployment where it matters.
+      failClosed: this.isProduction || this.config.get('MALWARE_FAIL_CLOSED', { infer: true }),
+    };
+  }
+
+  get ai(): AiConfig {
+    return {
+      provider: this.config.get('AI_PROVIDER', { infer: true }),
+      baseUrl: this.config.get('AI_BASE_URL', { infer: true }),
+      model: this.config.get('AI_MODEL', { infer: true }),
+    };
   }
 
   get openApiEnabled(): boolean {

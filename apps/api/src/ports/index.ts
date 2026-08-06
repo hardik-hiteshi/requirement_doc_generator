@@ -6,3 +6,4 @@ export * from './file-extraction.port';
 export * from './document-export.port';
 export * from './ocr-provider.port';
 export * from './legacy-conversion.port';
+export * from './malware-scanner.port';

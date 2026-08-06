@@ -50,3 +50,4 @@ think is part of the value.
 | [0014](0014-ocr-provider.md)                        | Tesseract as a local binary, behind a port     | Accepted |
 | [0015](0015-legacy-file-strategy.md)                | A conversion boundary for .doc and .xls        | Accepted |
 | [0016](0016-source-revision-model.md)               | Append-only content revisions                  | Accepted |
+| [0017](0017-self-hosted-ai-inference.md)            | Self-hosted inference, never a model vendor    | Accepted |

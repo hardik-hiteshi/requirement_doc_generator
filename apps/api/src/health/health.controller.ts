@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   HttpStatus,
+  Inject,
   Res,
   ServiceUnavailableException,
   VERSION_NEUTRAL,
@@ -22,9 +23,14 @@ import type { LivenessResponse, ReadinessResponse } from '@wdrg/contracts';
 import type { Response } from 'express';
 
 import { API_SERVICE_NAME, API_SERVICE_VERSION } from '../app.constants';
+import { AppConfigService } from '../config/app-config.service';
+import { MALWARE_SCANNER_PORT, type MalwareScannerPort } from '../ports';
 
 /** Heap ceiling above which the process is considered unhealthy. */
 const HEAP_LIMIT_BYTES = 512 * 1024 * 1024;
+
+/** What Terminus expects one indicator to return. */
+type IndicatorResult = Record<string, { status: 'up' | 'down'; [key: string]: unknown }>;
 
 /**
  * Operational probes.
@@ -40,6 +46,8 @@ export class HealthController {
     private readonly health: HealthCheckService,
     private readonly mongoose: MongooseHealthIndicator,
     private readonly memory: MemoryHealthIndicator,
+    private readonly config: AppConfigService,
+    @Inject(MALWARE_SCANNER_PORT) private readonly scanner: MalwareScannerPort,
   ) {}
 
   @Get('live')
@@ -59,11 +67,45 @@ export class HealthController {
     };
   }
 
+  /**
+   * Scanner health, as a readiness indicator.
+   *
+   * Only reported as *down* where a scanner is configured and unreachable. A
+   * deployment running `none` is not broken — it is configured that way, and
+   * production refuses that configuration at startup — so reporting it down
+   * would make every development instance permanently unready.
+   *
+   * Where ClamAV *is* configured, an unreachable daemon makes this instance
+   * unready, because with fail-closed policy it can no longer accept uploads.
+   */
+  private async checkScanner(): Promise<IndicatorResult> {
+    if (this.config.malware.scanner !== 'clamav') {
+      return {
+        malware_scanner: {
+          status: 'up',
+          configured: this.config.malware.scanner,
+          scanning: false,
+        },
+      };
+    }
+
+    const health = await this.scanner.health();
+
+    return {
+      malware_scanner: {
+        status: health.available ? 'up' : 'down',
+        configured: 'clamav',
+        scanning: health.available,
+        ...(health.signatureVersion ? { signatureVersion: health.signatureVersion } : {}),
+      },
+    };
+  }
+
   @Get('ready')
   @ApiOperation({
     summary: 'Readiness probe',
     description:
-      'Reports whether this instance can serve traffic. Checks every dependency required to handle a request — currently MongoDB and process memory.',
+      'Reports whether this instance can serve traffic. Checks every dependency required to handle a request: MongoDB, process memory, and — where one is configured — the malware scanner.',
   })
   @ApiOkResponse({ description: 'Every dependency is reachable.' })
   @ApiServiceUnavailableResponse({ description: 'At least one dependency is unavailable.' })
@@ -73,6 +115,7 @@ export class HealthController {
         await this.health.check([
           () => this.mongoose.pingCheck('mongodb'),
           () => this.memory.checkHeap('memory_heap', HEAP_LIMIT_BYTES),
+          () => this.checkScanner(),
         ]),
       );
     } catch (error) {

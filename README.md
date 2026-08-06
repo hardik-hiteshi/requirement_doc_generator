@@ -48,7 +48,8 @@ Full setup notes and troubleshooting:
 | `pnpm typecheck`                 | `tsc --noEmit` across every package                 |
 | `pnpm format` / `format:check`   | Prettier                                            |
 | `pnpm verify`                    | Every gate, in CI order                             |
-| `pnpm docker:up` / `docker:down` | Local MongoDB                                       |
+| `pnpm docker:up` / `docker:down` | MongoDB, MinIO and ClamAV                           |
+| `pnpm docker:wait:all`           | Block until every service answers                   |
 
 Scope any command to one package with
 `pnpm --filter @wdrg/api <command>`.
@@ -89,6 +90,8 @@ Detail: [architecture overview](docs/architecture/overview.md) ·
 [API conventions](docs/api/README.md) ·
 [project data model](docs/architecture/project-data-model.md) ·
 [requirement ingestion](docs/architecture/requirement-ingestion.md) ·
+[dependency inventory](docs/architecture/dependency-and-service-inventory.md) ·
+[self-hosting](docs/operations/self-hosting.md) ·
 [anonymous-access threat model](docs/architecture/anonymous-access-threat-model.md)
 
 ## How project access works
@@ -127,6 +130,22 @@ still-live credential as spent:
 **A lost link is an unrecoverable project.** The UI states all of this and
 requires an acknowledgement before you leave the creation screen. Rationale and
 rejected alternatives: [ADR-0010](docs/adr/0010-anonymous-project-access.md).
+
+## Self-hosted by design
+
+> The core application is designed to operate using self-hosted open-source
+> components. No paid third-party API or managed SaaS service is required for
+> requirement ingestion, OCR, storage, malware scanning, AI processing,
+> estimation, document generation, or export.
+
+MongoDB, MinIO, ClamAV, Tesseract and — from Phase 4 — Ollama or vLLM. All
+open-source, all running on hardware you control, and **no client requirement
+document ever leaves your network**.
+
+That is a statement about vendor dependency, not about cost: servers, storage,
+GPUs, backups and patching are still yours, and this is more operational work
+than a managed stack, not less. See [self-hosting](docs/operations/self-hosting.md)
+and the [dependency and service inventory](docs/architecture/dependency-and-service-inventory.md).
 
 ## Requirement ingestion
 
@@ -175,6 +194,7 @@ Recorded as [ADRs](docs/adr/), with the reasoning and the rejected alternatives:
 | [0014](docs/adr/0014-ocr-provider.md)                        | Tesseract as a local binary, behind an OCR port                                       |
 | [0015](docs/adr/0015-legacy-file-strategy.md)                | A conversion boundary for .doc and .xls, off by default                               |
 | [0016](docs/adr/0016-source-revision-model.md)               | Append-only content revisions with an explicit effective pointer                      |
+| [0017](docs/adr/0017-self-hosted-ai-inference.md)            | Self-hosted inference, never a hosted model vendor                                    |
 | [0009](docs/adr/0009-request-validation-and-mapping.md)      | Reject undeclared properties; map explicitly to domain types                          |
 | [0010](docs/adr/0010-anonymous-project-access.md)            | Anonymous access: split identifier, secret in the URL fragment, stateless session     |
 

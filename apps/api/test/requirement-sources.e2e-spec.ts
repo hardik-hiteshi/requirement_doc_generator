@@ -14,6 +14,8 @@ import {
 } from '@wdrg/contracts';
 import request from 'supertest';
 
+import { getConnectionToken } from '@nestjs/mongoose';
+
 import { AppModule } from '../src/app.module';
 import { AppConfigService } from '../src/config';
 import { ExtractionWorker } from '../src/requirements/queue/extraction.worker';
@@ -498,6 +500,93 @@ describe('Requirement sources (e2e)', () => {
         sourceId,
       );
     });
+  });
+
+  /* ----------------------------------------------------- malware scanning */
+
+  describe('malware scanning', () => {
+    /**
+     * EICAR: the industry-standard harmless test string, assembled at runtime so
+     * the repository does not contain a file a developer's own antivirus will
+     * quarantine mid-checkout.
+     */
+    const eicar = (): Buffer =>
+      Buffer.from(
+        ['X5O!P%@AP[4\\PZX54(P^)7CC)7}', '$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!', '$H+H*'].join(''),
+        'ascii',
+      );
+
+    const scannerConfigured = (): boolean => app.get(AppConfigService).malware.scanner === 'clamav';
+
+    it('rejects an infected upload before anything is stored or extracted', async () => {
+      if (!scannerConfigured()) {
+        console.warn('SKIPPING infected-upload test: MALWARE_SCANNER is not clamav');
+        return;
+      }
+
+      const session = await newProject();
+
+      const response = await session.agent
+        .post(REQUIREMENT_ROUTES.uploads)
+        .set('x-csrf-token', session.csrf)
+        .attach(UPLOAD_FIELD_NAME, eicar(), { filename: 'invoice.txt' })
+        .expect(201);
+
+      expect(response.body.outcomes[0].accepted).toBe(false);
+      expect(response.body.outcomes[0].errorCode).toBe('MALWARE_DETECTED');
+
+      // Nothing was created, so nothing can be extracted, downloaded or
+      // recovered. The rejection happens at the only point where refusing costs
+      // nothing.
+      const list = await session.agent.get(REQUIREMENT_ROUTES.sources).expect(200);
+      expect(list.body.sources).toHaveLength(0);
+      expect(list.body.usage.fileCount).toBe(0);
+
+      // And the worker has no job to run.
+      await drainWorker();
+      const after = await session.agent.get(REQUIREMENT_ROUTES.sources).expect(200);
+      expect(after.body.sources).toHaveLength(0);
+    }, 60_000);
+
+    it('accepts a clean upload and records that it was scanned', async () => {
+      if (!scannerConfigured()) {
+        return;
+      }
+
+      const session = await newProject();
+      const response = await uploadFixture(session, 'requirements.txt');
+
+      expect(response.body.outcomes[0].accepted).toBe(true);
+      expect(response.body.outcomes[0].source.file.malwareScanResult).toBe('CLEAN');
+    }, 60_000);
+
+    it('never puts the malicious content or the filename in an audit document', async () => {
+      if (!scannerConfigured()) {
+        return;
+      }
+
+      const session = await newProject();
+
+      await session.agent
+        .post(REQUIREMENT_ROUTES.uploads)
+        .set('x-csrf-token', session.csrf)
+        .attach(UPLOAD_FIELD_NAME, eicar(), { filename: 'secret-client-name.txt' })
+        .expect(201);
+
+      const events = await app
+        .get(getConnectionToken())
+        .collection('audit_events')
+        .find({ type: 'REQUIREMENT_SOURCE_REJECTED' })
+        .toArray();
+
+      const serialised = JSON.stringify(events);
+
+      // A signature name is fine and useful. The content and the filename are
+      // not — an audit document must be safe to read and to ship.
+      expect(serialised).not.toContain('EICAR-STANDARD-ANTIVIRUS-TEST-FILE');
+      expect(serialised).not.toContain('secret-client-name');
+      expect(serialised).toContain('MALWARE_DETECTED');
+    }, 60_000);
   });
 
   /* ------------------------------------------------------- authorization */

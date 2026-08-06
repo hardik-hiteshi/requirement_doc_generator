@@ -17,3 +17,4 @@ export const DOCUMENT_EXPORT_PORT = Symbol('DocumentExportPort');
 /* Phase 3 additions. */
 export const OCR_PROVIDER_PORT = Symbol('OcrProviderPort');
 export const LEGACY_CONVERSION_PORT = Symbol('LegacyConversionPort');
+export const MALWARE_SCANNER_PORT = Symbol('MalwareScannerPort');

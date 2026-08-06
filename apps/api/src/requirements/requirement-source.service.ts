@@ -23,7 +23,13 @@ import {
 import { AuditService } from '../audit/audit.service';
 import { AppException, ValidationFailedException } from '../common/errors';
 import { AppConfigService } from '../config/app-config.service';
-import { FILE_STORAGE_PORT, type FileStoragePort } from '../ports';
+import {
+  FILE_STORAGE_PORT,
+  MALWARE_SCANNER_PORT,
+  type FileStoragePort,
+  type MalwareScannerPort,
+  type ScanVerdict,
+} from '../ports';
 import { ExtractionQueue } from './queue/extraction.queue';
 import { LocalFileStorageAdapter } from './storage/local-file-storage.adapter';
 import {
@@ -60,6 +66,7 @@ export class RequirementSourceService {
     private readonly audit: AuditService,
     private readonly config: AppConfigService,
     @Inject(FILE_STORAGE_PORT) private readonly storage: FileStoragePort,
+    @Inject(MALWARE_SCANNER_PORT) private readonly scanner: MalwareScannerPort,
   ) {}
 
   /* ------------------------------------------------------------------ list */
@@ -253,24 +260,37 @@ export class RequirementSourceService {
 
     const file = outcome.file;
 
-    /* Malware scan, before anything is written. */
-    const scanResult = await this.scan();
+    /*
+     * Malware scan, before anything is written and long before any parser sees
+     * the bytes. An infected file is never stored, never queued and never
+     * extracted — the rejection happens here, at the only point where refusing
+     * costs nothing.
+     */
+    const scan = await this.scanner.scan({
+      content: candidate.content,
+      correlationId: context.correlationId,
+    });
 
-    if (scanResult === 'INFECTED' || scanResult === 'UNAVAILABLE') {
+    const scanOutcome = this.judgeScan(scan.verdict);
+
+    if (scanOutcome.reject) {
       await this.audit.record({
         type: 'REQUIREMENT_SOURCE_REJECTED',
         projectId: context.projectId,
         correlationId: context.correlationId,
-        reason: scanResult === 'INFECTED' ? 'MALWARE_DETECTED' : 'MALWARE_SCAN_UNAVAILABLE',
+        reason: scanOutcome.code,
+        // The signature name and the verdict. Never the filename, never the
+        // content — an audit document must be safe to read and to ship.
+        metadata: {
+          verdict: scan.verdict,
+          ...(scan.signature ? { signature: scan.signature } : {}),
+        },
       });
 
-      return rejected(
-        candidate,
-        scanResult === 'INFECTED'
-          ? REQUIREMENT_ERROR_CODES.MALWARE_DETECTED
-          : REQUIREMENT_ERROR_CODES.MALWARE_SCAN_UNAVAILABLE,
-      );
+      return rejected(candidate, scanOutcome.code);
     }
+
+    const scanResult = toStoredScanResult(scan.verdict);
 
     /* Duplicate detection: same bytes, same project. */
     const duplicate = await this.repository.findByChecksum(context.projectId, file.checksumSha256);
@@ -366,16 +386,30 @@ export class RequirementSourceService {
   }
 
   /**
-   * The malware-scanning boundary.
+   * What a scan verdict means for this upload.
    *
-   * No real scanner ships in this phase. `none` records that no scan happened —
-   * which is what `NOT_SCANNED` means, and it is deliberately not `CLEAN`;
-   * `reject` refuses every file, for a deployment that would rather accept
-   * nothing than accept something unscanned. A ClamAV adapter belongs with the
-   * deployment work — see ADR-0016.
+   * `INFECTED` is always a rejection. `ERROR` and `TIMEOUT` depend on the
+   * fail-closed policy — refuse, or accept and record that the scan did not
+   * happen — and production is always closed, so an unreachable scanner there
+   * stops uploads rather than silently passing them.
+   *
+   * `NOT_SCANNED` is accepted only because production rejects that
+   * configuration at startup. It is never treated as clean, and it is recorded
+   * as what it is.
    */
-  private scan(): Promise<'NOT_SCANNED' | 'CLEAN' | 'INFECTED' | 'UNAVAILABLE'> {
-    return Promise.resolve(this.config.malwareScanner === 'reject' ? 'UNAVAILABLE' : 'NOT_SCANNED');
+  private judgeScan(verdict: ScanVerdict): { reject: boolean; code: RequirementErrorCode } {
+    if (verdict === 'INFECTED') {
+      return { reject: true, code: REQUIREMENT_ERROR_CODES.MALWARE_DETECTED };
+    }
+
+    if (verdict === 'ERROR' || verdict === 'TIMEOUT') {
+      return {
+        reject: this.config.malware.failClosed,
+        code: REQUIREMENT_ERROR_CODES.MALWARE_SCAN_UNAVAILABLE,
+      };
+    }
+
+    return { reject: false, code: REQUIREMENT_ERROR_CODES.MALWARE_SCAN_UNAVAILABLE };
   }
 
   /* ------------------------------------------------------------------ read */
@@ -736,6 +770,24 @@ function rejected(candidate: FileCandidate, code: RequirementErrorCode): UploadO
     errorCode: code,
     errorMessage: requirementErrorMessage(code),
   };
+}
+
+/** The verdict as it is stored on the source record. */
+function toStoredScanResult(
+  verdict: ScanVerdict,
+): 'NOT_SCANNED' | 'CLEAN' | 'INFECTED' | 'UNAVAILABLE' {
+  switch (verdict) {
+    case 'CLEAN':
+      return 'CLEAN';
+    case 'INFECTED':
+      return 'INFECTED';
+    case 'NOT_SCANNED':
+      return 'NOT_SCANNED';
+    // A scan that could not complete is recorded as unavailable, never as
+    // clean. Where the policy is fail-open, this is the record that says so.
+    default:
+      return 'UNAVAILABLE';
+  }
 }
 
 function isRetryableFailure(code: string): boolean {

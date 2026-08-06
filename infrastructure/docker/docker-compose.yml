@@ -4,11 +4,17 @@ name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}
 # images are defined in the deployment phase; running the apps directly with
 # `pnpm dev` keeps the edit-reload loop fast.
 #
-# The MongoDB *host* port is configurable via MONGODB_HOST_PORT so the stack can
-# start on a machine that already runs MongoDB on 27017. The *container* port is
-# always 27017, so nothing inside the compose network has to change.
-# MONGODB_HOST_PORT is validated by infrastructure/scripts/compose.sh before
-# docker compose is invoked.
+# Every service here is open-source and self-hosted. Nothing in this stack — or
+# in the application it supports — requires a paid API, a managed service or a
+# cloud account. See docs/operations/self-hosting.md.
+#
+# Host ports are configurable so the stack starts on a machine that already runs
+# any of these. Container ports never change, so nothing inside the compose
+# network has to be reconfigured. Host ports are validated by
+# infrastructure/scripts/compose.sh before docker compose is invoked.
+#
+# Everything binds to 127.0.0.1. A development database, object store or virus
+# scanner reachable from the network is a liability, not a convenience.
 
 services:
   mongodb:
@@ -16,7 +22,6 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-mongodb
     restart: unless-stopped
     ports:
-      # Bound to localhost so the database is never exposed on the network.
       - '127.0.0.1:${MONGODB_HOST_PORT:-27017}:27017'
     environment:
       MONGO_INITDB_DATABASE: wdrg
@@ -29,6 +34,84 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  # Self-hosted S3-compatible object storage. No AWS account, no cloud
+  # credentials: the access key below is a local development credential, and a
+  # real deployment supplies its own.
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - '127.0.0.1:${MINIO_HOST_PORT:-9000}:9000'
+      # The browser console, for looking at what the application stored.
+      - '127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001'
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-wdrg-dev-access-key}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-wdrg-dev-secret-key}
+      # Anonymous access is off by default; stated explicitly so a future edit
+      # has to make the change deliberately.
+      MINIO_BROWSER_REDIRECT_URL: http://127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # Creates the bucket and locks it down. Runs once and exits — `docker compose
+  # ps` showing it stopped is the success case, not a failure.
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    container_name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-wdrg-dev-access-key}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-wdrg-dev-secret-key}
+      BUCKET: ${S3_BUCKET:-wdrg-requirements}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc mb --ignore-existing "local/$$BUCKET"
+        # Private, explicitly. A bucket that is readable without credentials
+        # would make every other access control in the application pointless.
+        mc anonymous set none "local/$$BUCKET"
+        echo "Bucket $$BUCKET is ready and private."
+    restart: 'no'
+
+  # Self-hosted malware scanning. The image ships with a signature database, so
+  # a first start does not need to download several hundred megabytes before it
+  # can answer — which matters most in CI.
+  clamav:
+    image: clamav/clamav:1.4
+    container_name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-clamav
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${CLAMAV_HOST_PORT:-3310}:3310'
+    environment:
+      # Signature updates run in the background. Turning them off would leave a
+      # scanner that is running and progressively useless.
+      CLAMAV_NO_FRESHCLAMD: 'false'
+    volumes:
+      - clamav-data:/var/lib/clamav
+    healthcheck:
+      # PING is the daemon's own liveness command, and it only answers once the
+      # signature database is loaded — which is the thing that takes time.
+      test: ['CMD-SHELL', 'clamdcheck.sh || exit 1']
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      # Loading ~1 GB of signatures into memory is genuinely slow on a cold
+      # start. A short start_period here would report a healthy daemon as broken.
+      start_period: 120s
 
   mongo-express:
     image: mongo-express:1.0.2
@@ -47,7 +130,12 @@ services:
         condition: service_healthy
 
 volumes:
+  # Namespaced by project so a throwaway verification stack cannot collide with
+  # — or destroy — a developer's working data. `docker compose down` removes
+  # containers and leaves these; `down -v` is the deliberate act that does not.
   mongodb-data:
-    # Namespaced by project so a throwaway verification stack cannot collide
-    # with — or destroy — a developer's working data volume.
     name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-mongodb-data
+  minio-data:
+    name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-minio-data
+  clamav-data:
+    name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-clamav-data

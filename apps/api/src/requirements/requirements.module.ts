@@ -19,6 +19,7 @@ import { DocxExtractor, XlsxExtractor } from './extraction/office-extractors';
 import { PdfExtractor } from './extraction/pdf-extractor';
 import { CsvExtractor, TxtExtractor } from './extraction/text-extractors';
 import { LibreOfficeConversionAdapter } from './legacy/libreoffice-conversion.adapter';
+import { MalwareModule } from './malware/malware.module';
 import { TesseractOcrAdapter } from './ocr/tesseract-ocr.adapter';
 import { ExtractionQueue } from './queue/extraction.queue';
 import { ExtractionWorker } from './queue/extraction.worker';
@@ -33,6 +34,7 @@ import {
   RequirementSourceSchema,
 } from './schemas/requirement-source.schema';
 import { LocalFileStorageAdapter } from './storage/local-file-storage.adapter';
+import { S3FileStorageAdapter } from './storage/s3-file-storage.adapter';
 import { FileValidator } from './validation/file-validator';
 
 /**
@@ -49,6 +51,7 @@ import { FileValidator } from './validation/file-validator';
     AppConfigModule,
     AuditModule,
     ProjectAccessModule,
+    MalwareModule,
     MongooseModule.forFeature([
       { name: RequirementSourceRecord.name, schema: RequirementSourceSchema },
       { name: ExtractedContentRecord.name, schema: ExtractedContentSchema },
@@ -96,11 +99,29 @@ import { FileValidator } from './validation/file-validator';
 
     /* Adapters. Concrete classes, bound to tokens below. */
     LocalFileStorageAdapter,
+    S3FileStorageAdapter,
     MongoJobQueueAdapter,
     TesseractOcrAdapter,
     LibreOfficeConversionAdapter,
 
-    { provide: FILE_STORAGE_PORT, useExisting: LocalFileStorageAdapter },
+    /*
+     * Storage is chosen by configuration, not by environment.
+     *
+     * A deployment says which adapter it wants; nothing is inferred from
+     * NODE_ENV. That is what lets a staging environment run the same object
+     * storage as production, and what stops "it worked in development" from
+     * meaning "it used a different storage engine".
+     */
+    {
+      provide: FILE_STORAGE_PORT,
+      inject: [AppConfigService, LocalFileStorageAdapter, S3FileStorageAdapter],
+      useFactory: (
+        config: AppConfigService,
+        filesystem: LocalFileStorageAdapter,
+        s3: S3FileStorageAdapter,
+      ) => (config.upload.adapter === 's3' ? s3 : filesystem),
+    },
+
     { provide: JOB_QUEUE_PORT, useExisting: MongoJobQueueAdapter },
     { provide: FILE_EXTRACTION_PORT, useExisting: ExtractionService },
     { provide: OCR_PROVIDER_PORT, useExisting: TesseractOcrAdapter },
