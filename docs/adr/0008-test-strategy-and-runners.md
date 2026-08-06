@@ -21,13 +21,13 @@ coverage. Two constraints shape how that is arranged:
 **Two runners, chosen per environment rather than standardised for its own
 sake:**
 
-| Scope                       | Runner                   | Why                                                                                                                       |
-| --------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| API unit + service          | Jest + `@swc/jest`       | The Nest ecosystem targets Jest; SWC applies the same decorator transform as the production build, via the same `.swcrc`. |
-| API integration             | Jest, separate config    | Boots the real app over HTTP with supertest.                                                                              |
-| Web unit + component + a11y | Vitest + Testing Library | Shares the app's Vite-compatible transform pipeline; no second toolchain for JSX and ESM.                                 |
-| Shared packages             | Vitest                   | Framework-free code; fastest option.                                                                                      |
-| End-to-end                  | Playwright (Phase 14)    | Real browser against the deployed stack.                                                                                  |
+| Scope                       | Runner                              | Why                                                                                                                                                    |
+| --------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| API unit + service          | Jest + `@swc/jest`                  | The Nest ecosystem targets Jest; SWC applies the same decorator transform as the production build, via the same `.swcrc`.                              |
+| API integration             | Jest, separate config               | Boots the real app over HTTP with supertest.                                                                                                           |
+| Web unit + component + a11y | Vitest + Testing Library            | Shares the app's Vite-compatible transform pipeline; no second toolchain for JSX and ESM.                                                              |
+| Shared packages             | Vitest                              | Framework-free code; fastest option.                                                                                                                   |
+| Browser end-to-end          | Playwright + `@axe-core/playwright` | A real engine against production builds of both applications. The only layer that can see cookies, URL fragments, history, layout and computed colour. |
 
 **Tests are split by infrastructure requirement, not by name:**
 
@@ -35,18 +35,37 @@ sake:**
   Docker. Runs anywhere in seconds.
 - `pnpm test:e2e` — integration tests that need MongoDB. Explicit and separate,
   with its own Jest config and a service container in CI.
+- `pnpm --filter @wdrg/e2e test:e2e` — browser tests that need MongoDB, a browser
+  and production builds of both applications. A third package, `apps/e2e`, so
+  Playwright's dependencies and its ~120 MB browser download stay out of every
+  other job's install.
 
-Both run in CI. Only the first is expected to run constantly during development.
+All three run in CI. Only the first is expected to run constantly during
+development.
 
 **Assertions target behaviour and contracts, not implementation.** Health and
 error tests assert against the shared Zod schemas, so a response that drifts from
 the published contract fails the test — the test cannot rot into asserting
 whatever the code happens to produce.
 
-**Accessibility is asserted in component tests** via axe-core through
-`@wdrg/testing`, at WCAG 2.2 AA rule tags. Automated checks catch perhaps a third
-of real issues; they are a regression guard, not a substitute for the manual
-audit in the hardening phase.
+**Accessibility is asserted at two levels**, with the same WCAG 2.2 AA tag set
+imported from `@wdrg/testing` so the two cannot drift:
+
+- **Component tests** via axe-core in jsdom — fast, and they run in the edit loop.
+- **Browser tests** via `@axe-core/playwright` — the only place contrast, focus
+  order, reflow and a genuinely modal `<dialog>` can be evaluated, because jsdom
+  computes no colour and performs no layout.
+
+The second level is not redundant. It found three real defects the first could
+not: locked workflow steps failing contrast behind `opacity-60`, a destructive
+button rendering white-on-white because Tailwind never scanned the design-system
+package, and the recovery link being unmounted before the user could read it.
+Automated checks still catch perhaps a third of real issues; they are a
+regression guard, not a substitute for the manual audit in the hardening phase.
+
+**Browser tests never mock the API.** A suite that stubs the server can only
+prove the client is self-consistent, which is precisely the property that was
+already true while the recovery link was being destroyed.
 
 ## Consequences
 
@@ -59,7 +78,13 @@ audit in the hardening phase.
   production compile decorators identically. A DI failure in tests is a real
   failure, not a configuration artefact.
 - CI runs the integration job with a MongoDB service container and waits for
-  readiness with a real check rather than a fixed sleep.
+  readiness with a real check rather than a fixed sleep. The browser job does the
+  same on a third host port, and uploads traces, screenshots and captured server
+  logs only when it fails.
+- The browser suite runs serially on one worker. Several of its assertions are
+  about process-wide state — the contents of the application log, the cookies a
+  context holds — which concurrency would make depend on what another test was
+  doing.
 - Lint runs with `--max-warnings 0`. A warning nobody must fix is a warning
   everybody ignores.
 

@@ -14,6 +14,8 @@ dist/
 build/
 out/
 .next/
+# The browser E2E suite's own Next.js build (a different API origin is inlined).
+.next-e2e/
 *.tsbuildinfo
 
 # --- Caches ------------------------------------------------------------------
@@ -58,6 +60,8 @@ playwright-report/
 blob-report/
 junit.xml
 *.lcov
+# Browser E2E: captured server logs, traces, videos and reports.
+apps/e2e/.artifacts/
 
 # --- Docker runtime data -----------------------------------------------------
 # The compose stack uses named volumes, so nothing should land here — but a

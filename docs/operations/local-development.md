@@ -38,6 +38,7 @@ the web app is up but cannot reach the API — check `NEXT_PUBLIC_API_BASE_URL`.
 | `pnpm --filter @wdrg/web dev`                    | Web only                                          |
 | `pnpm test`                                      | Unit + component tests. No infrastructure needed. |
 | `pnpm test:e2e`                                  | API integration tests. **Requires MongoDB.**      |
+| `pnpm test:browser`                              | Browser E2E. **Requires MongoDB + Chromium.**     |
 | `pnpm lint` / `pnpm lint:fix`                    | ESLint, zero warnings tolerated                   |
 | `pnpm typecheck`                                 | `tsc --noEmit` across every package               |
 | `pnpm format` / `pnpm format:check`              | Prettier                                          |
@@ -45,8 +46,42 @@ the web app is up but cannot reach the API — check `NEXT_PUBLIC_API_BASE_URL`.
 | `pnpm verify`                                    | Every gate, in CI order                           |
 | `pnpm docker:up` / `docker:down` / `docker:logs` | Local MongoDB                                     |
 
-Run `pnpm verify` before pushing. It is exactly what CI runs, so a green local
-run means a green pipeline.
+Run `pnpm verify` before pushing. It covers formatting, lint, typecheck, unit
+tests and the production build. The two suites that need infrastructure —
+`pnpm test:e2e` and `pnpm test:browser` — are deliberately separate, and CI runs
+all of them.
+
+### Browser end-to-end tests
+
+One-time setup, then a run:
+
+```bash
+pnpm --filter @wdrg/e2e exec playwright install --with-deps chromium
+pnpm build
+
+# Point the suite at your MongoDB. Default is 27017; the docker-compose stack
+# uses whatever MONGODB_HOST_PORT you set.
+export MONGODB_HOST_PORT=27017
+pnpm test:browser
+```
+
+Playwright starts the API, a second API in production mode (for the `Secure`
+cookie assertion) and a production build of the web application on ports
+3210–3212, then shuts them all down. It uses its own databases
+(`wdrg_e2e_browser*`) and its own Next.js build directory (`.next-e2e`), so it
+touches neither your development data nor your development build.
+
+When something fails, everything you need is under `apps/e2e/.artifacts/`:
+captured server logs, a trace, a screenshot, a video and an HTML report. Open the
+report with:
+
+```bash
+pnpm --filter @wdrg/e2e exec playwright show-report .artifacts/report
+```
+
+The browser download is an explicit step because pnpm blocks dependency lifecycle
+scripts by policy — see `pnpm-workspace.yaml`. Installing dependencies will not
+silently fetch 120 MB of browser.
 
 Optional: `pnpm turbo telemetry disable` — Turborepo collects anonymous usage
 telemetry by default. CI sets `TURBO_TELEMETRY_DISABLED=1`.

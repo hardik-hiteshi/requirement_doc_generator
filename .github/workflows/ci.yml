@@ -98,6 +98,77 @@ jobs:
       - name: Run API integration tests
         run: pnpm --filter @wdrg/api test:e2e
 
+  browser:
+    name: Browser end-to-end tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      mongodb:
+        image: mongo:8.0
+        ports:
+          # A third host port, so this job can run alongside the integration job
+          # on a self-hosted runner without either binding over the other.
+          - 27019:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1}).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # The suite's own databases are named in apps/e2e; this only says where
+      # MongoDB is listening.
+      MONGODB_HOST_PORT: '27019'
+      MONGODB_URI: mongodb://127.0.0.1:27019/wdrg_ci
+      LOG_LEVEL: debug
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The documented installation route. pnpm blocks dependency lifecycle
+      # scripts by policy, so the browser download is an explicit step rather
+      # than a postinstall side effect — which also keeps it out of every other
+      # job's install.
+      - name: Install Playwright browsers
+        run: pnpm --filter @wdrg/e2e exec playwright install --with-deps chromium
+
+      # The API is served from its production build, and the web application
+      # from a Next.js production build. Playwright starts both, waits on their
+      # readiness endpoints, and shuts them down when the run ends.
+      - name: Build applications and packages
+        run: pnpm build
+
+      - name: Wait for MongoDB
+        run: bash infrastructure/scripts/wait-for-mongo.sh
+
+      - name: Run browser end-to-end tests
+        run: pnpm --filter @wdrg/e2e test:e2e
+
+      # Only on failure. A green run should leave nothing to download, and
+      # traces and videos are large.
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-e2e-diagnostics
+          path: |
+            apps/e2e/.artifacts/report/
+            apps/e2e/.artifacts/test-results/
+            apps/e2e/.artifacts/*.log
+          retention-days: 7
+          if-no-files-found: warn
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest

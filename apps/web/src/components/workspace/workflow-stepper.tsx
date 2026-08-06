@@ -43,7 +43,12 @@ export function WorkflowStepper({ states, currentStepId }: WorkflowStepperProps)
                 className={cn(
                   'flex items-start gap-3 rounded-md border border-transparent px-3 py-2.5',
                   isCurrent && 'border-accent/30 bg-accent-soft',
-                  state === 'locked' && !isCurrent && 'opacity-60',
+                  // Recessed with colour, not opacity. `opacity-60` fades the
+                  // text *and* its background together, which drops every
+                  // locked step below the WCAG AA contrast threshold — a
+                  // failure no jsdom test can see, because jsdom does not
+                  // compute colour.
+                  state === 'locked' && !isCurrent && 'text-muted',
                 )}
               >
                 <span

@@ -14,11 +14,17 @@ website-doc-requirement-generator/
 │   │   │   └── main.ts         Bootstrap: security, versioning, OpenAPI
 │   │   └── test/               Integration tests (need MongoDB)
 │   │
-│   └── web/                    Next.js App Router workspace
-│       └── src/
-│           ├── app/            Routes, layout, providers
-│           ├── components/     Feature components
-│           └── lib/            API client, env config, query keys
+│   ├── web/                    Next.js App Router workspace
+│   │   └── src/
+│   │       ├── app/            Routes, layout, providers
+│   │       ├── components/     Feature components
+│   │       └── lib/            API client, env config, query keys
+│   │
+│   └── e2e/                    Playwright browser suite (drives both apps)
+│       ├── scripts/            Its own web build, into .next-e2e
+│       └── tests/
+│           ├── support/        Servers, database fixtures, page objects
+│           └── *.spec.ts       Journey, cookies, responsive, accessibility
 │
 ├── packages/
 │   ├── contracts/              Shared API surface — imported by BOTH apps
@@ -54,7 +60,11 @@ Enforced by `package.json` declarations under pnpm's strict, non-flat
 `node_modules` layout — a package can only import what it declares.
 
 1. **`apps/*` never import each other.** They communicate over HTTP, using the
-   contracts package as the shared definition.
+   contracts package as the shared definition. `apps/e2e` is the one exception
+   in spirit: it depends on `api` and `web` as workspace packages purely so the
+   build graph orders them before it, and imports nothing from either — only
+   `@wdrg/contracts`, so its assertions are made against the published contract
+   rather than against restated literals.
 2. **`packages/*` never import from `apps/*`.** The dependency arrow points one
    way. A shared package that reaches into an application is no longer shared.
 3. **`packages/contracts` is runtime-neutral.** No Node APIs, no DOM APIs, no
@@ -70,7 +80,7 @@ Enforced by `package.json` declarations under pnpm's strict, non-flat
 | `contracts`                           | The two apps must agree on every request, response, error code and workflow constant. Defined once, a mismatch is a compile error rather than a production surprise. |
 | `config`                              | Both apps validate environment variables and both should fail the same way — listing every problem at once, never echoing a value into a log.                        |
 | `ui`                                  | Accessibility decisions (focus rings, status text alongside colour) belong in one place. Re-implemented per component, they get forgotten.                           |
-| `testing`                             | An accessibility assertion written slightly differently in each suite tests slightly different things.                                                               |
+| `testing`                             | An accessibility assertion written slightly differently in each suite tests slightly different things. Its WCAG tag set is shared by the jsdom and browser suites.   |
 | `eslint-config` / `typescript-config` | Strictness that can be relaxed per package is not strictness.                                                                                                        |
 
 ## Naming and conventions
@@ -79,6 +89,8 @@ Enforced by `package.json` declarations under pnpm's strict, non-flat
   `*.controller.ts`, `*.service.ts`, `*.repository.ts`, `*.port.ts`.
 - Tests sit beside the code they cover: `*.spec.ts` (API), `*.test.ts(x)` (web
   and packages). Integration tests live in `apps/api/test/` as `*.e2e-spec.ts`.
+  Browser tests live in `apps/e2e/tests/` as `*.spec.ts` — a separate package so
+  Playwright's runner and its browser download stay out of every other install.
 - Every package exposes the same script names — `build`, `lint`, `typecheck`,
   `test`, `clean` — so `turbo run <task>` works uniformly and CI does not need
   per-package special cases.

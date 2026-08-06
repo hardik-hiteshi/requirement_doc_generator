@@ -42,3 +42,5 @@ think is part of the value.
 | [0006](0006-api-error-model-and-correlation-ids.md) | Single API error envelope with correlation ids | Accepted |
 | [0007](0007-zod-as-single-schema-language.md)       | Zod as the single schema language              | Accepted |
 | [0008](0008-test-strategy-and-runners.md)           | Layered test strategy with two runners         | Accepted |
+| [0009](0009-request-validation-and-mapping.md)      | Request validation and explicit mapping        | Accepted |
+| [0010](0010-anonymous-project-access.md)            | Anonymous project access and stateless session | Accepted |
