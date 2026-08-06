@@ -48,7 +48,9 @@ export default defineConfig({
   workers: 1,
   forbidOnly: isCi,
   retries: isCi ? 1 : 0,
-  timeout: 60_000,
+  // Generous: an OCR pass over a real image, and a Next.js production page load,
+  // are both seconds rather than milliseconds.
+  timeout: 120_000,
   expect: { timeout: 10_000 },
   globalSetup: require.resolve('./tests/support/global-setup'),
 

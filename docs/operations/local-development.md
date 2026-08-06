@@ -39,6 +39,7 @@ the web app is up but cannot reach the API — check `NEXT_PUBLIC_API_BASE_URL`.
 | `pnpm test`                                      | Unit + component tests. No infrastructure needed. |
 | `pnpm test:e2e`                                  | API integration tests. **Requires MongoDB.**      |
 | `pnpm test:browser`                              | Browser E2E. **Requires MongoDB + Chromium.**     |
+| `node test/fixtures/generate-fixtures.mjs`       | Rebuilds the binary test fixtures (from apps/api) |
 | `pnpm lint` / `pnpm lint:fix`                    | ESLint, zero warnings tolerated                   |
 | `pnpm typecheck`                                 | `tsc --noEmit` across every package               |
 | `pnpm format` / `pnpm format:check`              | Prettier                                          |
@@ -50,6 +51,42 @@ Run `pnpm verify` before pushing. It covers formatting, lint, typecheck, unit
 tests and the production build. The two suites that need infrastructure —
 `pnpm test:e2e` and `pnpm test:browser` — are deliberately separate, and CI runs
 all of them.
+
+### Text recognition (OCR)
+
+Requirement images and scanned PDFs are read with Tesseract, which is a system
+package rather than an npm dependency:
+
+```bash
+sudo apt-get install tesseract-ocr tesseract-ocr-eng   # Debian / Ubuntu
+brew install tesseract                                  # macOS
+```
+
+Without it, image sources fail with a clear message rather than returning empty
+content. To run deliberately without OCR, set `OCR_ENABLED=false` — image
+uploads are then refused, and everything else works.
+
+Extra languages need their own trained data (`tesseract-ocr-deu`, …) and go in
+`OCR_LANGUAGES` as `eng+deu`.
+
+### Legacy .doc and .xls
+
+Off by default. Enabling it needs headless LibreOffice:
+
+```bash
+sudo apt-get install libreoffice-writer libreoffice-calc
+export LEGACY_CONVERSION_ENABLED=true
+```
+
+While it is off, `.doc` and `.xls` uploads are refused with a message asking for
+`.docx` or `.xlsx`. See [ADR-0015](../adr/0015-legacy-file-strategy.md).
+
+### Uploaded files
+
+Stored under `UPLOAD_STORAGE_ROOT` (`./storage/uploads` by default), which is
+gitignored and never web-served. Removing that directory is safe — the source
+records remain, and their extraction is already in MongoDB — but the original
+files are then gone and cannot be downloaded again.
 
 ### Browser end-to-end tests
 

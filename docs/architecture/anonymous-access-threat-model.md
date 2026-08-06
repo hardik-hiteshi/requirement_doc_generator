@@ -68,6 +68,44 @@ in the UI, not just here.
    Until then, brute force is bounded only by the 256-bit secret — infeasible,
    but unmetered.
 
+## Phase 3: uploaded files
+
+Requirement documents are the most sensitive thing this application holds — they
+are the client's own material, not metadata about it.
+
+| Asset             | Threat                                | Control                                                                                                                                                                         |
+| ----------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Uploaded file     | Read by another project               | Every query is scoped by `projectId`, and a source id from elsewhere answers 404 — identical to one that never existed                                                          |
+| Uploaded file     | Reached without a session             | Nothing is web-served. The storage root is outside every static directory, and the only route to a file checks the session first                                                |
+| Uploaded file     | Path traversal                        | Paths are built only from an application-minted project id and object id. A client filename never participates in a path                                                        |
+| Uploaded file     | Rendered in our origin                | `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` on every download, so an HTML or SVG upload cannot become stored XSS                                    |
+| Uploaded file     | Disguised executable                  | Extension, declared MIME and leading bytes must all agree. A recognised-but-wrong format is named in the rejection                                                              |
+| Parser            | Zip bomb                              | The ZIP directory's declared sizes are summed without inflating anything, and the compression ratio is bounded                                                                  |
+| Parser            | XXE                                   | Libraries do not resolve external entities; an entity-declaration check is a second line                                                                                        |
+| Parser            | Formula execution                     | Formulas are read as text, never evaluated, in both CSV and XLSX                                                                                                                |
+| Parser            | Runaway resource use                  | Wall-clock timeout per extraction, plus block, row and page ceilings                                                                                                            |
+| Storage           | Unbounded growth                      | Per-file, per-project and file-count quotas, enforced per file within a batch                                                                                                   |
+| Extracted content | Prompt injection into a later phase   | Content is typed as `EVIDENCE` and never placed where instructions are read. Instruction-shaped text is flagged for the user and kept verbatim — see the ingestion architecture |
+| Audit trail       | Requirement content leaking into it   | Audit metadata records counts, ids and codes. No block text, no filename content, no pasted text                                                                                |
+| Logs              | Requirement content leaking into them | Failures log a code and an operator detail. The browser suite asserts a recovery secret never reaches a log; content is held to the same rule by the audit sanitiser            |
+
+### Accepted risks, Phase 3
+
+1. **No malware scanning ships.** `MALWARE_SCANNER=none` records `NOT_SCANNED` —
+   deliberately not `CLEAN` — and keeps the file. A deployment that cannot accept
+   that sets `reject`, which refuses every upload until a scanner adapter exists.
+   Files are never executed, never served inline, and never rendered in our
+   origin, which bounds what an infected upload could do here; it does not bound
+   what it could do to whoever downloads it.
+2. **Files are stored unencrypted at rest**, beyond whatever the underlying disk
+   provides. Encryption at rest belongs with the deployment phase.
+3. **A deleted source's file is removed immediately, but its extracted content
+   revisions are not.** The record is soft-deleted and its content stays until
+   the Phase 12 retention job.
+4. **Extraction runs in the API process.** A pathological file consumes worker
+   time that HTTP requests would otherwise have. Bounded by the timeout and by
+   one-job-at-a-time, not eliminated.
+
 ## Out of scope for Phase 2
 
 Malware scanning and upload validation (Phase 3, no uploads exist yet); CAPTCHA

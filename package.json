@@ -25,7 +25,8 @@
     "docker:down": "bash infrastructure/scripts/compose.sh down",
     "docker:logs": "bash infrastructure/scripts/compose.sh logs -f",
     "docker:tools": "bash infrastructure/scripts/compose.sh --profile tools up -d",
-    "docker:wait": "bash infrastructure/scripts/wait-for-mongo.sh"
+    "docker:wait": "bash infrastructure/scripts/wait-for-mongo.sh",
+    "docker:wait:all": "bash infrastructure/scripts/wait-for-services.sh"
   },
   "devDependencies": {
     "prettier": "3.9.6",

@@ -4,7 +4,10 @@
     "outDir": "dist",
     "rootDir": "./",
     "baseUrl": "./",
-    "tsBuildInfoFile": "dist/.tsbuildinfo"
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    // multer augments the global Express namespace; without an explicit
+    // reference the augmentation is not loaded and Express.Multer is unknown.
+    "types": ["node", "jest", "multer"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "jest.config.ts", "jest.e2e.config.ts"],
   "exclude": ["node_modules", "dist"]

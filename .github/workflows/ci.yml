@@ -34,6 +34,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The unit suite exercises the real OCR adapter rather than a stub. Without
+      # the engine those tests would skip, which is a silent loss of coverage —
+      # exactly what a CI gate is supposed to prevent.
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
+
       # Ordered cheapest-first so an obvious failure reports in seconds rather
       # than after a full build.
       - name: Check formatting
@@ -75,6 +81,11 @@ jobs:
       MONGODB_HOST_PORT: '27018'
       MONGODB_URI: mongodb://127.0.0.1:27018/wdrg_ci
       LOG_LEVEL: warn
+      # A scratch directory inside the workspace, removed with the runner.
+      UPLOAD_STORAGE_ROOT: ${{ github.workspace }}/.ci-storage
+      # Driven explicitly by the tests, so extraction is deterministic rather
+      # than something that happens at some point after an upload.
+      EXTRACTION_WORKER_ENABLED: 'false'
 
     steps:
       - uses: actions/checkout@v5
@@ -89,6 +100,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
+
       - name: Build workspace packages
         run: pnpm build --filter='./packages/*'
 
@@ -97,6 +111,133 @@ jobs:
 
       - name: Run API integration tests
         run: pnpm --filter @wdrg/api test:e2e
+
+  # Self-hosted infrastructure, verified against the real thing.
+  #
+  # No cloud account, no vendor credentials, no metered API. MinIO and ClamAV
+  # are the same open-source images the compose stack runs, and the tests below
+  # would not pass against a mock — a mocked object store cannot tell you a
+  # bucket is private, and a mocked antivirus cannot tell you it detects
+  # anything.
+  infrastructure:
+    name: Self-hosted storage and scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      mongodb:
+        image: mongo:8.0
+        ports:
+          - 27020:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand({ping:1}).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      clamav:
+        # The tagged image ships a signature database, so a first start does not
+        # download several hundred megabytes before it can answer.
+        image: clamav/clamav:1.4
+        ports:
+          - 3310:3310
+        options: >-
+          --health-cmd "clamdcheck.sh"
+          --health-interval 15s
+          --health-timeout 10s
+          --health-retries 30
+          --health-start-period 120s
+
+    env:
+      NODE_ENV: test
+      MONGODB_HOST_PORT: '27020'
+      MONGODB_URI: mongodb://127.0.0.1:27020/wdrg_ci_infra
+      LOG_LEVEL: warn
+      UPLOAD_STORAGE_ROOT: ${{ github.workspace }}/.ci-storage
+      EXTRACTION_WORKER_ENABLED: 'false'
+      # Local, throwaway credentials for a container that lives for one job.
+      # Nothing here is a real secret, and nothing here costs anything.
+      S3_ENDPOINT: 127.0.0.1
+      S3_PORT: '9000'
+      S3_USE_SSL: 'false'
+      S3_BUCKET: wdrg-ci
+      S3_ACCESS_KEY: ci-access-key
+      S3_SECRET_KEY: ci-secret-key
+      MALWARE_SCANNER: clamav
+      CLAMAV_HOST: 127.0.0.1
+      CLAMAV_PORT: '3310'
+      MINIO_HOST_PORT: '9000'
+      CLAMAV_HOST_PORT: '3310'
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The upload path scans before it stores, and the requirement suite
+      # exercises real extraction, so both engines have to be present.
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
+
+      - name: Build workspace packages
+        run: pnpm build --filter='./packages/*'
+
+      # MinIO runs as an explicit step rather than a service container: a
+      # service container cannot supply a command, and this image needs
+      # `server /data` — without it MinIO prints its usage and exits. The
+      # compose stack has no such limitation, which is why it can declare it
+      # normally.
+      - name: Start self-hosted object storage
+        run: |
+          docker run -d --name minio --network host \
+            -e MINIO_ROOT_USER=ci-access-key \
+            -e MINIO_ROOT_PASSWORD=ci-secret-key \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z \
+            server /data --console-address ":9001"
+
+      - name: Wait for every service
+        run: bash infrastructure/scripts/wait-for-services.sh
+
+      # The same client image the compose stack uses, creating the same private
+      # bucket. `anonymous set none` is explicit: a readable bucket would make
+      # every other access control in the application pointless.
+      - name: Create the private bucket
+        run: |
+          # --entrypoint: the mc image's entrypoint is `mc` itself, so a bare
+          # `/bin/sh -c ...` would be read as arguments to mc.
+          docker run --rm --network host --entrypoint /bin/sh \
+            minio/mc:RELEASE.2025-04-16T18-13-26Z \
+            -c '
+              mc alias set ci http://127.0.0.1:9000 ci-access-key ci-secret-key &&
+              mc mb --ignore-existing ci/wdrg-ci &&
+              mc anonymous set none ci/wdrg-ci
+            '
+
+      - name: Verify the object store adapter
+        run: pnpm --filter @wdrg/api exec node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.e2e.config.ts --runInBand test/s3-storage
+
+      - name: Verify the malware scanner
+        run: pnpm --filter @wdrg/api exec node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.e2e.config.ts --runInBand test/clamav-scanner
+
+      # The end-to-end path: a clean upload is accepted and scanned, an infected
+      # one is rejected before anything is stored, and one project cannot reach
+      # another's objects.
+      - name: Verify ingestion against real storage and scanning
+        env:
+          STORAGE_ADAPTER: s3
+        run: pnpm --filter @wdrg/api exec node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.e2e.config.ts --runInBand test/requirement-sources
+
+      - name: Stop object storage
+        if: always()
+        run: docker rm -f minio || true
 
   browser:
     name: Browser end-to-end tests
@@ -140,6 +281,11 @@ jobs:
       # scripts by policy, so the browser download is an explicit step rather
       # than a postinstall side effect — which also keeps it out of every other
       # job's install.
+      # Tesseract as well as a browser: the worker runs in the browser suite, so
+      # an image upload genuinely goes through recognition.
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
+
       - name: Install Playwright browsers
         run: pnpm --filter @wdrg/e2e exec playwright install --with-deps chromium
 

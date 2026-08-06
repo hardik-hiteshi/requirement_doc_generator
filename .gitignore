@@ -73,8 +73,14 @@ mongodb-data/
 *.tar.gz.docker
 
 # --- Local runtime data ------------------------------------------------------
-storage/
-uploads/
+# Anchored with a leading slash, and named per application. An unanchored
+# `storage/` matches a directory of that name at ANY depth — which silently
+# excluded apps/api/src/requirements/storage/ and shipped a branch missing its
+# storage adapter. A runtime-data rule must never be able to swallow source.
+/storage/
+apps/api/storage/
+apps/*/uploads/
+/uploads/
 tmp/
 temp/
 logs/

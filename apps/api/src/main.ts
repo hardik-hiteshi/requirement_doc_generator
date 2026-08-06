@@ -8,6 +8,7 @@ import { Logger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
 import { AppConfigService } from './config';
+import { checkProductionPolicy, describeViolations } from './config/production-policy';
 import { setupOpenApi } from './openapi';
 import { configureSecurity } from './security';
 
@@ -20,6 +21,23 @@ async function bootstrap(): Promise<void> {
 
   app.useLogger(app.get(Logger));
   const config = app.get(AppConfigService);
+
+  /*
+   * Refuse to start a production deployment that is configured unsafely.
+   *
+   * Checked here, before anything listens, because the alternative is a process
+   * that boots cleanly and accepts unscanned uploads. Every problem is reported
+   * together — a deployment fixing three should learn about all three at once.
+   */
+  const violations = checkProductionPolicy(config);
+
+  if (violations.length > 0) {
+    const logger = app.get(Logger);
+    logger.error(describeViolations(violations));
+    await app.close();
+    process.exitCode = 1;
+    return;
+  }
 
   // Transport hardening: helmet, body limits and CORS. Defined in ./security so
   // the same configuration the process runs is the configuration the header

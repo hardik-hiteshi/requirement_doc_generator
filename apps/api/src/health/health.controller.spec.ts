@@ -8,6 +8,8 @@ import type {
 import { livenessResponseSchema, readinessResponseSchema } from '@wdrg/contracts';
 import type { Response } from 'express';
 
+import type { AppConfigService } from '../config/app-config.service';
+import type { MalwareScannerPort } from '../ports';
 import { HealthController } from './health.controller';
 
 const healthyResult: HealthCheckResult = {
@@ -27,12 +29,17 @@ const unhealthyResult: HealthCheckResult = {
   },
 };
 
-function createController(check: jest.Mock) {
+function createController(check: jest.Mock, scanner: 'clamav' | 'none' = 'none') {
   const health = { check } as unknown as HealthCheckService;
   const mongoose = { pingCheck: jest.fn() } as unknown as MongooseHealthIndicator;
   const memory = { checkHeap: jest.fn() } as unknown as MemoryHealthIndicator;
+  const config = { malware: { scanner } } as unknown as AppConfigService;
+  const malware = {
+    scan: jest.fn(),
+    health: jest.fn().mockResolvedValue({ available: true, engine: 'clamav' }),
+  } as unknown as MalwareScannerPort;
 
-  return new HealthController(health, mongoose, memory);
+  return new HealthController(health, mongoose, memory, config, malware);
 }
 
 function createResponse() {
@@ -77,12 +84,14 @@ describe('HealthController', () => {
       expect(status).not.toHaveBeenCalled();
     });
 
-    it('checks both mongodb and heap usage', async () => {
+    it('checks mongodb, heap usage and the malware scanner', async () => {
       const check = jest.fn().mockResolvedValue(healthyResult);
       await createController(check).readiness(createResponse().response);
 
       expect(check).toHaveBeenCalledTimes(1);
-      expect(check.mock.calls[0]?.[0]).toHaveLength(2);
+      // MongoDB, heap, and the scanner — a control that is silently broken is
+      // worse than one that is absent, so readiness has to see it.
+      expect(check.mock.calls[0]?.[0]).toHaveLength(3);
     });
 
     it('answers 503 with the failing indicator when a dependency is down', async () => {

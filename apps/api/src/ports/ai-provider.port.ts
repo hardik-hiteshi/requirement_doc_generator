@@ -1,12 +1,21 @@
 /**
  * Outbound boundary for AI model calls.
  *
- * First adapter: Phase 4 (Anthropic Claude via the official SDK).
+ * First adapter: Phase 4, against **inference the operator runs themselves** —
+ * Ollama in development, an OpenAI-protocol-compatible server such as vLLM in
+ * production. Never a hosted model vendor. See ADR-0017.
  *
- * The application never sends a free-form prompt and hopes for the best. Every
- * call names a versioned task, supplies evidence separately from instructions,
- * and declares the JSON schema the response must satisfy. That is what makes
- * responses validatable, prompts auditable, and providers replaceable.
+ * Two properties this contract exists to guarantee:
+ *
+ * **No requirement content leaves the operator's infrastructure.** The evidence
+ * these calls carry is a client's scope, commercial terms and sometimes their
+ * contract. Where that goes is a disclosure decision, and it is not one this
+ * codebase makes on a deployment's behalf.
+ *
+ * **The application never sends a free-form prompt and hopes.** Every call names
+ * a versioned task, supplies evidence *separately* from instructions, and
+ * declares the JSON schema the response must satisfy — which is what makes
+ * responses validatable, prompts auditable, and the provider replaceable.
  */
 
 /** Identifies a versioned prompt in the registry. */
@@ -43,19 +52,32 @@ export interface AiTaskRequest<TSchema = unknown> {
   readonly maxOutputTokens?: number;
 }
 
+/**
+ * What a call consumed.
+ *
+ * Token counts are about context-window pressure and the compute the operator is
+ * paying for in electricity and hardware — not about a vendor invoice. There is
+ * no per-token charge to report, because there is no vendor.
+ */
 export interface AiUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
+  /** Reused from a prefix cache, where the inference server implements one. */
   readonly cachedInputTokens: number;
-  /** Estimated cost in the configured billing currency's minor units. */
-  readonly estimatedCostMinorUnits: number;
+  /** Wall-clock time on the operator's own hardware. */
+  readonly durationMs: number;
 }
 
 export interface AiTaskResult<TOutput> {
   /** Response parsed and validated against `responseSchema`. */
   readonly output: TOutput;
   readonly usage: AiUsage;
-  /** Provider and model that produced the output, for audit. */
+  /**
+   * Model and provider that produced the output, for audit.
+   *
+   * Recorded because output attribution matters when a document is signed: which
+   * model, running where, produced this estimate.
+   */
   readonly model: string;
   readonly provider: string;
   readonly promptVersion: string;
@@ -69,9 +91,9 @@ export type AiFailureReason =
   | 'context_overflow' // Input exceeded the model's context window.
   | 'rate_limited'
   | 'timeout'
-  | 'provider_unavailable'
-  | 'budget_exceeded' // Would breach the configured cost or token limit.
-  | 'content_refused'; // Provider declined the request.
+  | 'provider_unavailable' // The self-hosted inference server is not reachable.
+  | 'budget_exceeded' // Would breach the configured token or context limit.
+  | 'content_refused'; // The model declined the request.
 
 export class AiProviderError extends Error {
   constructor(

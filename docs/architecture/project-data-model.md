@@ -1,6 +1,11 @@
 # Project data model
 
-> Phase 2. Two collections: `projects` and `audit_events`.
+> Phase 2–3. Five collections: `projects`, `audit_events`,
+> `requirement_sources`, `extracted_content` and `extraction_jobs`.
+>
+> The last three are described in
+> [requirement ingestion](requirement-ingestion.md), which is where their
+> relationships and indexes belong.
 
 ## `projects`
 

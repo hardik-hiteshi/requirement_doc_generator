@@ -36,6 +36,73 @@ export interface ProjectConfig {
   readonly webPublicUrl: string;
 }
 
+export type StorageAdapterName = 'filesystem' | 's3';
+export type MalwareScannerName = 'clamav' | 'none' | 'reject';
+export type AiProviderName = 'disabled' | 'ollama' | 'local-openai-compatible';
+
+export interface S3Config {
+  readonly endpoint: string;
+  readonly port: number;
+  readonly useSsl: boolean;
+  readonly bucket: string;
+  readonly accessKey: string;
+  readonly secretKey: string;
+  readonly region: string;
+  readonly signedUrlTtlSeconds: number;
+}
+
+export interface MalwareConfig {
+  readonly scanner: MalwareScannerName;
+  readonly host: string;
+  readonly port: number;
+  readonly timeoutMs: number;
+  /** Production is always fail-closed, whatever this says. */
+  readonly failClosed: boolean;
+}
+
+export interface AiConfig {
+  readonly provider: AiProviderName;
+  readonly baseUrl: string;
+  readonly model: string;
+}
+
+export interface UploadConfig {
+  readonly adapter: StorageAdapterName;
+  readonly storageRoot: string;
+  readonly maxFileBytes: number;
+  readonly maxProjectBytes: number;
+  readonly maxFilesPerProject: number;
+  readonly maxFilesPerRequest: number;
+  readonly maxFilenameLength: number;
+}
+
+export interface ExtractionConfig {
+  readonly timeoutMs: number;
+  readonly maxAttempts: number;
+  readonly retryBackoffMs: number;
+  readonly pollIntervalMs: number;
+  readonly claimTimeoutMs: number;
+  readonly workerEnabled: boolean;
+  readonly maxBlocks: number;
+  readonly maxRows: number;
+  readonly maxPages: number;
+  readonly maxUncompressedBytes: number;
+}
+
+export interface OcrConfig {
+  readonly enabled: boolean;
+  readonly binary: string;
+  readonly languages: string;
+  readonly timeoutMs: number;
+  readonly minConfidence: number;
+}
+
+export interface LegacyConversionConfig {
+  readonly enabled: boolean;
+  readonly binary: string;
+  readonly timeoutMs: number;
+}
+
 /**
  * Typed, grouped access to validated configuration.
  *
@@ -106,6 +173,84 @@ export class AppConfigService {
     return {
       expiryDays: this.config.get('PROJECT_EXPIRY_DAYS', { infer: true }),
       webPublicUrl: this.config.get('WEB_PUBLIC_URL', { infer: true }),
+    };
+  }
+
+  get upload(): UploadConfig {
+    return {
+      adapter: this.config.get('STORAGE_ADAPTER', { infer: true }),
+      storageRoot: this.config.get('UPLOAD_STORAGE_ROOT', { infer: true }),
+      maxFileBytes: this.config.get('UPLOAD_MAX_FILE_BYTES', { infer: true }),
+      maxProjectBytes: this.config.get('UPLOAD_MAX_PROJECT_BYTES', { infer: true }),
+      maxFilesPerProject: this.config.get('UPLOAD_MAX_FILES_PER_PROJECT', { infer: true }),
+      maxFilesPerRequest: this.config.get('UPLOAD_MAX_FILES_PER_REQUEST', { infer: true }),
+      maxFilenameLength: this.config.get('UPLOAD_MAX_FILENAME_LENGTH', { infer: true }),
+    };
+  }
+
+  get extraction(): ExtractionConfig {
+    return {
+      timeoutMs: this.config.get('EXTRACTION_TIMEOUT_MS', { infer: true }),
+      maxAttempts: this.config.get('EXTRACTION_MAX_ATTEMPTS', { infer: true }),
+      retryBackoffMs: this.config.get('EXTRACTION_RETRY_BACKOFF_MS', { infer: true }),
+      pollIntervalMs: this.config.get('EXTRACTION_POLL_INTERVAL_MS', { infer: true }),
+      claimTimeoutMs: this.config.get('EXTRACTION_CLAIM_TIMEOUT_MS', { infer: true }),
+      workerEnabled: this.config.get('EXTRACTION_WORKER_ENABLED', { infer: true }),
+      maxBlocks: this.config.get('EXTRACTION_MAX_BLOCKS', { infer: true }),
+      maxRows: this.config.get('EXTRACTION_MAX_ROWS', { infer: true }),
+      maxPages: this.config.get('EXTRACTION_MAX_PAGES', { infer: true }),
+      maxUncompressedBytes: this.config.get('EXTRACTION_MAX_UNCOMPRESSED_BYTES', { infer: true }),
+    };
+  }
+
+  get ocr(): OcrConfig {
+    return {
+      enabled: this.config.get('OCR_ENABLED', { infer: true }),
+      binary: this.config.get('OCR_TESSERACT_BINARY', { infer: true }),
+      languages: this.config.get('OCR_LANGUAGES', { infer: true }),
+      timeoutMs: this.config.get('OCR_TIMEOUT_MS', { infer: true }),
+      minConfidence: this.config.get('OCR_MIN_CONFIDENCE', { infer: true }),
+    };
+  }
+
+  get legacyConversion(): LegacyConversionConfig {
+    return {
+      enabled: this.config.get('LEGACY_CONVERSION_ENABLED', { infer: true }),
+      binary: this.config.get('LEGACY_CONVERSION_BINARY', { infer: true }),
+      timeoutMs: this.config.get('LEGACY_CONVERSION_TIMEOUT_MS', { infer: true }),
+    };
+  }
+
+  get s3(): S3Config {
+    return {
+      endpoint: this.config.get('S3_ENDPOINT', { infer: true }),
+      port: this.config.get('S3_PORT', { infer: true }),
+      useSsl: this.config.get('S3_USE_SSL', { infer: true }),
+      bucket: this.config.get('S3_BUCKET', { infer: true }),
+      accessKey: this.config.get('S3_ACCESS_KEY', { infer: true }),
+      secretKey: this.config.get('S3_SECRET_KEY', { infer: true }),
+      region: this.config.get('S3_REGION', { infer: true }),
+      signedUrlTtlSeconds: this.config.get('S3_SIGNED_URL_TTL_SECONDS', { infer: true }),
+    };
+  }
+
+  get malware(): MalwareConfig {
+    return {
+      scanner: this.config.get('MALWARE_SCANNER', { infer: true }),
+      host: this.config.get('CLAMAV_HOST', { infer: true }),
+      port: this.config.get('CLAMAV_PORT', { infer: true }),
+      timeoutMs: this.config.get('CLAMAV_TIMEOUT_MS', { infer: true }),
+      // Production ignores the flag: an unreachable scanner must never become a
+      // silent bypass on the one deployment where it matters.
+      failClosed: this.isProduction || this.config.get('MALWARE_FAIL_CLOSED', { infer: true }),
+    };
+  }
+
+  get ai(): AiConfig {
+    return {
+      provider: this.config.get('AI_PROVIDER', { infer: true }),
+      baseUrl: this.config.get('AI_BASE_URL', { infer: true }),
+      model: this.config.get('AI_MODEL', { infer: true }),
     };
   }
 

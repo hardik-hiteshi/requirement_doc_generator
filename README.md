@@ -48,7 +48,8 @@ Full setup notes and troubleshooting:
 | `pnpm typecheck`                 | `tsc --noEmit` across every package                 |
 | `pnpm format` / `format:check`   | Prettier                                            |
 | `pnpm verify`                    | Every gate, in CI order                             |
-| `pnpm docker:up` / `docker:down` | Local MongoDB                                       |
+| `pnpm docker:up` / `docker:down` | MongoDB, MinIO and ClamAV                           |
+| `pnpm docker:wait:all`           | Block until every service answers                   |
 
 Scope any command to one package with
 `pnpm --filter @wdrg/api <command>`.
@@ -88,6 +89,9 @@ Detail: [architecture overview](docs/architecture/overview.md) ·
 [repository structure](docs/architecture/repository-structure.md) ·
 [API conventions](docs/api/README.md) ·
 [project data model](docs/architecture/project-data-model.md) ·
+[requirement ingestion](docs/architecture/requirement-ingestion.md) ·
+[dependency inventory](docs/architecture/dependency-and-service-inventory.md) ·
+[self-hosting](docs/operations/self-hosting.md) ·
 [anonymous-access threat model](docs/architecture/anonymous-access-threat-model.md)
 
 ## How project access works
@@ -127,6 +131,49 @@ still-live credential as spent:
 requires an acknowledgement before you leave the creation screen. Rationale and
 rejected alternatives: [ADR-0010](docs/adr/0010-anonymous-project-access.md).
 
+## Self-hosted by design
+
+> The core application is designed to operate using self-hosted open-source
+> components. No paid third-party API or managed SaaS service is required for
+> requirement ingestion, OCR, storage, malware scanning, AI processing,
+> estimation, document generation, or export.
+
+MongoDB, MinIO, ClamAV, Tesseract and — from Phase 4 — Ollama or vLLM. All
+open-source, all running on hardware you control, and **no client requirement
+document ever leaves your network**.
+
+That is a statement about vendor dependency, not about cost: servers, storage,
+GPUs, backups and patching are still yours, and this is more operational work
+than a managed stack, not less. See [self-hosting](docs/operations/self-hosting.md)
+and the [dependency and service inventory](docs/architecture/dependency-and-service-inventory.md).
+
+## Requirement ingestion
+
+Paste text or upload files; the pipeline validates, stores, reads and — where
+there is no text layer — recognises them, then hands you the result to review.
+
+**Supported:** PDF, DOCX, TXT, CSV, XLSX, PNG, JPG, JPEG, WEBP.
+`.doc` and `.xls` need a converter that is **off by default** — they are refused
+with a message naming the fix rather than silently accepted.
+
+Every extracted block keeps a reference to where it came from — a page, a sheet
+and cell, a row, a line — and **nothing is invented**: a block the extractor
+could not locate says so rather than citing page 1.
+
+Anything read by text recognition is marked as recognised, carries a confidence
+score, and lands in _needs review_ rather than _ready_. Corrections are saved as
+new revisions and the original extraction is never overwritten, so restoring it
+is a read rather than an undo.
+
+**Uploaded content is evidence, never instruction.** A document containing
+"ignore all previous instructions" is stored verbatim, flagged for the user, and
+cannot change how the application behaves — see the
+[ingestion architecture](docs/architecture/requirement-ingestion.md).
+
+Requires **Tesseract** for text recognition (`OCR_ENABLED=false` to run without
+it). Files are stored on local disk, outside every static directory, and reached
+only through an authorized API route.
+
 ## Key decisions
 
 Recorded as [ADRs](docs/adr/), with the reasoning and the rejected alternatives:
@@ -141,6 +188,13 @@ Recorded as [ADRs](docs/adr/), with the reasoning and the rejected alternatives:
 | [0006](docs/adr/0006-api-error-model-and-correlation-ids.md) | One error envelope, correlation ids end to end                                        |
 | [0007](docs/adr/0007-zod-as-single-schema-language.md)       | Zod as the single schema language                                                     |
 | [0008](docs/adr/0008-test-strategy-and-runners.md)           | Layered tests; unit suite never needs infrastructure                                  |
+| [0011](docs/adr/0011-file-storage-provider.md)               | Filesystem storage now, S3 behind the same port                                       |
+| [0012](docs/adr/0012-job-queue-provider.md)                  | A MongoDB job queue rather than Redis — one fewer stateful service                    |
+| [0013](docs/adr/0013-extraction-libraries.md)                | One extractor per format, behind a registry                                           |
+| [0014](docs/adr/0014-ocr-provider.md)                        | Tesseract as a local binary, behind an OCR port                                       |
+| [0015](docs/adr/0015-legacy-file-strategy.md)                | A conversion boundary for .doc and .xls, off by default                               |
+| [0016](docs/adr/0016-source-revision-model.md)               | Append-only content revisions with an explicit effective pointer                      |
+| [0017](docs/adr/0017-self-hosted-ai-inference.md)            | Self-hosted inference, never a hosted model vendor                                    |
 | [0009](docs/adr/0009-request-validation-and-mapping.md)      | Reject undeclared properties; map explicitly to domain types                          |
 | [0010](docs/adr/0010-anonymous-project-access.md)            | Anonymous access: split identifier, secret in the URL fragment, stateless session     |
 

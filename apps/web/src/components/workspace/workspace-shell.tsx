@@ -19,6 +19,7 @@ import { CreateProjectPanel } from '@/components/project/create-project-panel';
 import { DeleteProjectDialog } from '@/components/project/delete-project-dialog';
 import { DetailsSection } from '@/components/project/details-section';
 import { RecoveryLinkPanel } from '@/components/project/recovery-link-panel';
+import { RequirementInputStep } from '@/components/requirements/requirement-input-step';
 import { OutputPreferencesSection } from '@/components/project/output-preferences-section';
 import { StartDateSection } from '@/components/project/start-date-section';
 import { TeamCapacitySection } from '@/components/project/team-capacity-section';
@@ -40,10 +41,14 @@ function stepStates(
     return { 'project-details': 'available' };
   }
 
+  // The timeline is the one mandatory planning input, so it is what unlocks
+  // requirement input. Everything past that stays locked until its phase ships —
+  // a step that looks available and does nothing is worse than one marked locked.
   const detailsComplete = Boolean(project.timeline);
 
   return {
     'project-details': detailsComplete ? 'complete' : 'in_progress',
+    'requirement-input': detailsComplete ? 'available' : 'locked',
   };
 }
 
@@ -72,7 +77,14 @@ export function WorkspaceShell() {
     );
   }
 
-  const currentStepId: WorkflowStepId = 'project-details';
+  const [activeStepId, setActiveStepId] = useState<WorkflowStepId>('project-details');
+  const requirementsUnlocked = Boolean(project?.timeline);
+  // Falls back rather than showing a step the project has not earned: clearing
+  // the timeline while requirement input is open must not leave it stranded there.
+  const currentStepId: WorkflowStepId =
+    activeStepId === 'requirement-input' && !requirementsUnlocked
+      ? 'project-details'
+      : activeStepId;
   const currentStep = WORKFLOW_STEPS.find((step) => step.id === currentStepId);
 
   return (
@@ -172,11 +184,39 @@ export function WorkspaceShell() {
                 </CardContent>
               </Card>
 
-              <DetailsSection project={project} />
-              <TimelineSection project={project} />
-              <StartDateSection project={project} />
-              <TeamCapacitySection project={project} />
-              <OutputPreferencesSection project={project} />
+              {currentStepId === 'project-details' ? (
+                <>
+                  <DetailsSection project={project} />
+                  <TimelineSection project={project} />
+                  <StartDateSection project={project} />
+                  <TeamCapacitySection project={project} />
+                  <OutputPreferencesSection project={project} />
+
+                  {requirementsUnlocked ? (
+                    <Button
+                      className="self-start"
+                      onClick={() => setActiveStepId('requirement-input')}
+                    >
+                      Continue to requirement input
+                    </Button>
+                  ) : (
+                    <p className="text-sm text-muted">
+                      Save a delivery timeline to unlock requirement input.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="secondary"
+                    className="self-start"
+                    onClick={() => setActiveStepId('project-details')}
+                  >
+                    Back to project details
+                  </Button>
+                  <RequirementInputStep />
+                </>
+              )}
 
               <DeleteProjectDialog
                 project={project}

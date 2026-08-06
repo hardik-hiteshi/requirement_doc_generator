@@ -19,13 +19,13 @@ owns the interface, the adapter conforms to it.
 
 ## The ports
 
-| Port                 | Owns                                                           | First adapter                          |
-| -------------------- | -------------------------------------------------------------- | -------------------------------------- |
-| `AiProviderPort`     | Structured, schema-validated model calls with usage accounting | Phase 4 (Anthropic Claude)             |
-| `FileStoragePort`    | Private object storage with authorized reads                   | Phase 3 (local FS, then S3-compatible) |
-| `JobQueuePort`       | Asynchronous, resumable, idempotent work                       | Phase 3                                |
-| `FileExtractionPort` | Text/table/OCR extraction with source traceability             | Phase 3                                |
-| `DocumentExportPort` | Validated structured content to DOCX/PDF/CSV/XLSX              | Phase 11                               |
+| Port                 | Owns                                                                       | First adapter                          |
+| -------------------- | -------------------------------------------------------------------------- | -------------------------------------- |
+| `AiProviderPort`     | Structured, schema-validated model calls against **self-hosted** inference | Phase 4 (Ollama / vLLM — ADR-0017)     |
+| `FileStoragePort`    | Private object storage with authorized reads                               | Phase 3 (local FS, then S3-compatible) |
+| `JobQueuePort`       | Asynchronous, resumable, idempotent work                                   | Phase 3                                |
+| `FileExtractionPort` | Text/table/OCR extraction with source traceability                         | Phase 3                                |
+| `DocumentExportPort` | Validated structured content to DOCX/PDF/CSV/XLSX                          | Phase 11                               |
 
 ## Rules
 

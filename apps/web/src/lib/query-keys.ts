@@ -8,4 +8,8 @@
 export const queryKeys = {
   health: ['health'] as const,
   currentProject: ['project', 'current'] as const,
+
+  /* Phase 3 — requirement ingestion. */
+  sources: ['sources'] as const,
+  source: (sourceId: string) => ['sources', sourceId] as const,
 } as const;
