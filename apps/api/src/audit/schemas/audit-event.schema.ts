@@ -19,8 +19,10 @@ export type AuditEventDocument = HydratedDocument<AuditEvent>;
   versionKey: false,
 })
 export class AuditEvent {
-  // `type: String` is required: AuditEventType is a union of string literals,
-  // which leaves no runtime type for Mongoose to reflect from.
+  // Every `@Prop` states its type explicitly rather than relying on emitted
+  // decorator metadata. A union of string literals has no runtime type to
+  // reflect from at all, and an optional property reflects differently
+  // depending on which compiler builds the file. Stating it removes both.
   @Prop({ type: String, required: true, enum: AUDIT_EVENT_TYPES, index: true })
   type!: AuditEventType;
 
@@ -28,15 +30,15 @@ export class AuditEvent {
    * Public project id, not the Mongo `_id`. Nullable because a failed recovery
    * may reference a project that does not exist.
    */
-  @Prop({ index: true })
+  @Prop({ type: String, index: true })
   projectId?: string;
 
   /** Ties the event to the request's structured log lines. */
-  @Prop({ index: true })
+  @Prop({ type: String, index: true })
   correlationId?: string;
 
   /** Internal reason code. Never mirrored into an API response. */
-  @Prop()
+  @Prop({ type: String })
   reason?: string;
 
   @Prop({ type: Object })

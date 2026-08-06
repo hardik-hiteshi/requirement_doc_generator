@@ -21,10 +21,10 @@ import { HydratedDocument } from 'mongoose';
 
 @Schema({ _id: false })
 export class SecretHash {
-  @Prop({ required: true }) algorithm!: string;
-  @Prop({ required: true }) version!: number;
-  @Prop({ required: true }) salt!: string;
-  @Prop({ required: true }) hash!: string;
+  @Prop({ type: String, required: true }) algorithm!: string;
+  @Prop({ type: Number, required: true }) version!: number;
+  @Prop({ type: String, required: true }) salt!: string;
+  @Prop({ type: String, required: true }) hash!: string;
 }
 
 export const SecretHashSchema = SchemaFactory.createForClass(SecretHash);
@@ -49,29 +49,30 @@ export class Project {
   @Prop({ type: SecretHashSchema, required: true, select: false })
   secretHash!: SecretHash;
 
-  // `type: String` for the same reason as the audit schema: ProjectStatus is a
-  // union of string literals with no reflectable runtime type.
+  // Every `@Prop` states its type explicitly rather than relying on emitted
+  // decorator metadata, which differs between compilers for optional
+  // properties and does not exist at all for a union of string literals.
   @Prop({ type: String, required: true, enum: PROJECT_STATUSES, index: true })
   status!: ProjectStatus;
 
-  @Prop({ required: true, default: 0 })
+  @Prop({ type: Number, required: true, default: 0 })
   version!: number;
 
-  @Prop({ required: true, default: PROJECT_SCHEMA_VERSION })
+  @Prop({ type: Number, required: true, default: PROJECT_SCHEMA_VERSION })
   schemaVersion!: number;
 
   /* --------------------------------------------------------------- details */
 
-  @Prop({ required: true, trim: true })
+  @Prop({ type: String, required: true, trim: true })
   name!: string;
 
-  @Prop({ trim: true })
+  @Prop({ type: String, trim: true })
   clientName?: string;
 
-  @Prop({ trim: true })
+  @Prop({ type: String, trim: true })
   internalReference?: string;
 
-  @Prop({ trim: true })
+  @Prop({ type: String, trim: true })
   description?: string;
 
   @Prop({ type: [String], default: undefined })
@@ -99,16 +100,16 @@ export class Project {
 
   /* ------------------------------------------------------------- lifecycle */
 
-  @Prop({ required: true, index: true })
+  @Prop({ type: Date, required: true, index: true })
   lastAccessedAt!: Date;
 
-  @Prop({ required: true, index: true })
+  @Prop({ type: Date, required: true, index: true })
   expiresAt!: Date;
 
-  @Prop()
+  @Prop({ type: Date })
   deletionRequestedAt?: Date;
 
-  @Prop()
+  @Prop({ type: Date })
   deletedAt?: Date;
 
   /** Set by Mongoose via `timestamps`. */
