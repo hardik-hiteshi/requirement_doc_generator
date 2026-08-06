@@ -119,6 +119,56 @@ Every response carries `x-correlation-id`.
   unvalidated header is a log-injection vector.
 - If none is supplied, or the supplied one is rejected, the API generates a UUID.
 
+## Phase 2 endpoints
+
+All project routes are under `/api/v1/projects`. The three access routes need no
+session; everything under `/current` requires one.
+
+| Method | Path                                          | Session | Purpose                                                            |
+| ------ | --------------------------------------------- | ------- | ------------------------------------------------------------------ |
+| POST   | `/api/v1/projects`                            | no      | Create an anonymous project. Returns the recovery secret **once**. |
+| POST   | `/api/v1/projects/session`                    | no      | Exchange a recovery secret for a session cookie.                   |
+| DELETE | `/api/v1/projects/session`                    | no      | End the session. The project is untouched.                         |
+| GET    | `/api/v1/projects/current`                    | yes     | Read the project the session is bound to.                          |
+| PUT    | `/api/v1/projects/current/details`            | yes     | Name, client, reference, description, project types.               |
+| PUT    | `/api/v1/projects/current/timeline`           | yes     | The mandatory delivery timeline.                                   |
+| PUT    | `/api/v1/projects/current/start-date`         | yes     | Start-date mode, with a date only where the mode has one.          |
+| PUT    | `/api/v1/projects/current/team-capacity`      | yes     | Optional team and capacity inputs.                                 |
+| PUT    | `/api/v1/projects/current/output-preferences` | yes     | Export formats per document.                                       |
+| DELETE | `/api/v1/projects/current`                    | yes     | Delete, confirmed by typed project name.                           |
+
+**The project is always taken from the session**, never from a path or body
+parameter. There is no request in which a caller can name a project it has not
+authenticated for, so the "forgot the ownership check" class of bug cannot occur.
+
+### Cookies
+
+| Cookie                 | Flags                                                      | Purpose                                                               |
+| ---------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------- |
+| `wdrg_project_session` | `HttpOnly`, `SameSite=Lax`, `Secure` in production         | Signed session. Script must never read it.                            |
+| `wdrg_csrf`            | `SameSite=Lax`, `Secure` in production, **not** `HttpOnly` | Double-submit CSRF token. Readable by design — that is the mechanism. |
+
+`SameSite=Lax` rather than `Strict`: a recovery link is a top-level navigation
+from wherever the user saved it, and `Strict` would drop the cookie on that first
+navigation.
+
+### CSRF
+
+Every `POST`, `PUT`, `PATCH` and `DELETE` requires the `x-csrf-token` header to
+match the `wdrg_csrf` cookie, and any `Origin` header present must be in the
+allow-list. Reads require neither.
+
+### Optimistic concurrency
+
+Every update carries the `version` last read. A mismatch returns `409 CONFLICT`
+with `error.details[0].rule = "version_conflict"`; reload before saving again.
+
+### Access failures are uniform
+
+Unknown project, wrong secret, expired and deleted all return the same `401` with
+the same message. Distinguishing them would let a caller confirm which project
+ids exist. The real reason is in the audit trail.
+
 ## Request conventions
 
 |                |                                                                                      |

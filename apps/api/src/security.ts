@@ -1,6 +1,7 @@
 import type { INestApplication } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { CORRELATION_ID_HEADER } from '@wdrg/contracts';
+import cookieParser from 'cookie-parser';
 import helmet, { type HelmetOptions } from 'helmet';
 
 import type { AppConfigService } from './config';
@@ -45,6 +46,12 @@ export function buildHelmetOptions(config: AppConfigService): HelmetOptions {
  */
 export function configureSecurity(app: NestExpressApplication, config: AppConfigService): void {
   app.use(helmet(buildHelmetOptions(config)));
+
+  // Parses the project session and CSRF cookies. Unsigned deliberately: the
+  // session cookie carries its own HMAC (see ProjectSessionService), so
+  // cookie-parser's signing would be a second, weaker mechanism doing the same
+  // job with a different secret.
+  app.use(cookieParser());
 
   app.useBodyParser('json', { limit: config.security.bodyLimitBytes });
   app.useBodyParser('urlencoded', {

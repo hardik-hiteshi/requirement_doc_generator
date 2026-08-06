@@ -7,4 +7,5 @@
  */
 export const queryKeys = {
   health: ['health'] as const,
+  currentProject: ['project', 'current'] as const,
 } as const;

@@ -7,12 +7,12 @@ documents.
 The public workspace needs no account: a project is reached through a private
 recovery link.
 
-> **Current state: Phase 1 — repository foundation and architecture.**
-> The monorepo, both applications, the shared contracts, configuration
-> validation, structured logging, health probes, the API error model, CI and the
-> workspace shell are implemented and verified. The product workflow itself
-> (project creation, uploads, analysis, estimation, document generation, export)
-> is **not** implemented — see [Roadmap](#roadmap).
+> **Current state: Phase 2 — public workspace and anonymous project lifecycle.**
+> You can create a project without an account, receive a private recovery link,
+> return to it later, and configure project details, delivery timeline, optional
+> start date, team capacity and export-format preferences. Requirement upload,
+> extraction, AI analysis, estimation and document generation are **not**
+> implemented — see [Roadmap](#roadmap).
 
 ---
 
@@ -84,7 +84,30 @@ infrastructure/
 
 Detail: [architecture overview](docs/architecture/overview.md) ·
 [repository structure](docs/architecture/repository-structure.md) ·
-[API conventions](docs/api/README.md)
+[API conventions](docs/api/README.md) ·
+[project data model](docs/architecture/project-data-model.md) ·
+[anonymous-access threat model](docs/architecture/anonymous-access-threat-model.md)
+
+## How project access works
+
+There are no accounts. Creating a project returns a **private recovery link**,
+and that link is the only way back in:
+
+```
+https://your-app/recover#p=prj_XXXXXXXXXXXXXXXXXXXXXXXXXX&s=<recovery secret>
+                        ↑ fragment — never sent to the server, never logged
+```
+
+- The **project id** names the project and is safe to log or quote.
+- The **recovery secret** authorises access. Only a salted scrypt hash is stored,
+  so the server cannot re-derive it — and a database leak yields nothing usable.
+- Redeeming the link exchanges the secret for an `HttpOnly` session cookie, then
+  clears the secret from the address bar.
+
+**Anyone holding the link has full access, and a lost link is an unrecoverable
+project.** The UI states this and requires an acknowledgement before you leave
+the creation screen. Rationale and rejected alternatives:
+[ADR-0010](docs/adr/0010-anonymous-project-access.md).
 
 ## Key decisions
 
@@ -101,6 +124,7 @@ Recorded as [ADRs](docs/adr/), with the reasoning and the rejected alternatives:
 | [0007](docs/adr/0007-zod-as-single-schema-language.md)       | Zod as the single schema language                                                     |
 | [0008](docs/adr/0008-test-strategy-and-runners.md)           | Layered tests; unit suite never needs infrastructure                                  |
 | [0009](docs/adr/0009-request-validation-and-mapping.md)      | Reject undeclared properties; map explicitly to domain types                          |
+| [0010](docs/adr/0010-anonymous-project-access.md)            | Anonymous access: split identifier, secret in the URL fragment, stateless session     |
 
 ## Technology
 

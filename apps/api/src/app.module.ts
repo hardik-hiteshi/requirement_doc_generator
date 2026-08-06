@@ -1,11 +1,14 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 
+import { AuditModule } from './audit/audit.module';
 import { AllExceptionsFilter } from './common/errors';
 import { LoggingModule } from './common/logging';
 import { AppConfigModule } from './config';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
+import { ProjectAccessModule } from './project-access/project-access.module';
+import { ProjectsModule } from './projects/projects.module';
 
 /**
  * Application root.
@@ -14,12 +17,21 @@ import { HealthModule } from './health/health.module';
  * boundaries inside one deployable. Splitting into services before there is a
  * scaling reason would buy distributed-system problems and no benefit.
  *
- * Phase 1 wires only the cross-cutting infrastructure — configuration, logging,
- * persistence and health. Feature modules (projects, uploads, analysis,
- * documents, exports) are added by the phases that own them.
+ * Phase 1 wired the cross-cutting infrastructure. Phase 2 adds the public
+ * project surface: anonymous access, the project itself, and the audit trail
+ * behind both. Later phases (extraction, analysis, documents, exports) are not
+ * present.
  */
 @Module({
-  imports: [AppConfigModule, LoggingModule, DatabaseModule, HealthModule],
+  imports: [
+    AppConfigModule,
+    LoggingModule,
+    DatabaseModule,
+    HealthModule,
+    AuditModule,
+    ProjectAccessModule,
+    ProjectsModule,
+  ],
   providers: [
     {
       // Registered globally so no thrown value can escape without being mapped

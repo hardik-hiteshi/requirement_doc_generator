@@ -1,29 +1,64 @@
-import { WORKFLOW_STEPS, type WorkflowStepId, type WorkflowStepState } from '@wdrg/contracts';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@wdrg/ui';
+'use client';
 
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  WORKFLOW_STEPS,
+  hasProjectType,
+  type ProjectResponse,
+  type WorkflowStepId,
+  type WorkflowStepState,
+} from '@wdrg/contracts';
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@wdrg/ui';
+import { useState } from 'react';
+
+import { useCurrentProject } from '@/hooks/use-project';
+import { endProjectSession } from '@/lib/project-api';
+import { queryKeys } from '@/lib/query-keys';
+import { CreateProjectPanel } from '@/components/project/create-project-panel';
+import { DeleteProjectDialog } from '@/components/project/delete-project-dialog';
+import { DetailsSection } from '@/components/project/details-section';
+import { OutputPreferencesSection } from '@/components/project/output-preferences-section';
+import { StartDateSection } from '@/components/project/start-date-section';
+import { TeamCapacitySection } from '@/components/project/team-capacity-section';
+import { TimelineSection } from '@/components/project/timeline-section';
 import { ApiStatus } from './api-status';
 import { WorkflowStepper } from './workflow-stepper';
 
 /**
- * Phase 1 state of the workflow: nothing has been created yet, so the first step
- * is available and the rest are locked. Real per-project state replaces this in
- * Phase 2, when projects exist to have state.
- */
-const INITIAL_STEP_STATES: Partial<Record<WorkflowStepId, WorkflowStepState>> = {
-  'project-details': 'available',
-};
-
-const CURRENT_STEP_ID: WorkflowStepId = 'project-details';
-
-/**
- * The single workspace surface.
+ * Derives which workflow steps are open.
  *
- * Deliberately one page with panels rather than a multi-page site: the product
- * is one continuous workflow, and a route change between steps would lose
- * in-progress state and break the sense of a single session.
+ * Only the steps this phase implements can be anything but locked. A step whose
+ * feature does not exist is shown as locked with a reason, rather than as a
+ * button that appears to work and does nothing.
  */
+function stepStates(
+  project: ProjectResponse | undefined,
+): Partial<Record<WorkflowStepId, WorkflowStepState>> {
+  if (!project) {
+    return { 'project-details': 'available' };
+  }
+
+  const detailsComplete = Boolean(project.timeline);
+
+  return {
+    'project-details': detailsComplete ? 'complete' : 'in_progress',
+  };
+}
+
 export function WorkspaceShell() {
-  const currentStep = WORKFLOW_STEPS.find((step) => step.id === CURRENT_STEP_ID);
+  const queryClient = useQueryClient();
+  const { data: project, isPending, isError } = useCurrentProject();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [notice, setNotice] = useState<string | undefined>();
+
+  async function endSession() {
+    await endProjectSession();
+    queryClient.removeQueries({ queryKey: queryKeys.currentProject });
+    setNotice('Your project session has ended. Use your recovery link to open it again.');
+  }
+
+  const currentStepId: WorkflowStepId = 'project-details';
+  const currentStep = WORKFLOW_STEPS.find((step) => step.id === currentStepId);
 
   return (
     <div className="min-h-dvh">
@@ -35,7 +70,14 @@ export function WorkspaceShell() {
               From client requirements to an approved, exportable project baseline.
             </p>
           </div>
-          <ApiStatus />
+          <div className="flex flex-wrap items-center gap-3">
+            <ApiStatus />
+            {project ? (
+              <Button variant="secondary" onClick={() => void endSession()}>
+                End session
+              </Button>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -48,55 +90,119 @@ export function WorkspaceShell() {
                 Each step unlocks once the previous one is approved.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <WorkflowStepper states={INITIAL_STEP_STATES} currentStepId={CURRENT_STEP_ID} />
-            </CardContent>
-          </Card>
-        </aside>
-
-        <main id="main-content" tabIndex={-1} className="flex flex-col gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>{currentStep?.title ?? 'Project details'}</CardTitle>
-              <CardDescription>{currentStep?.summary}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted">
-                The project workspace is not available yet. This release establishes the repository,
-                the API and this shell; project creation and the requirement intake form arrive in
-                the next phase.
+            <CardContent className="flex flex-col gap-4">
+              <WorkflowStepper states={stepStates(project)} currentStepId={currentStepId} />
+              <p className="rounded-md border border-border bg-surface-hover p-3 text-xs text-muted">
+                Steps beyond project setup are not built yet. They unlock as later phases ship —
+                requirement upload and extraction come next.
               </p>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>What this application produces</CardTitle>
-              <CardDescription>
-                Seven documents, generated in order, each locked until the previous one is approved.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ol className="grid gap-2 text-sm sm:grid-cols-2">
-                {[
-                  'Our Understanding',
-                  'Feature Listing',
-                  'Acceptance Criteria',
-                  'Assumptions',
-                  'Statement of Work',
-                  'Work Breakdown Structure',
-                  'Client Dependency Sheet',
-                ].map((document, index) => (
-                  <li key={document} className="flex items-baseline gap-2">
-                    <span className="text-xs text-muted tabular-nums">{index + 1}.</span>
-                    <span>{document}</span>
-                  </li>
-                ))}
-              </ol>
-            </CardContent>
-          </Card>
+          {project ? (
+            <ProjectSidePanel project={project} onDelete={() => setDeleteOpen(true)} />
+          ) : null}
+        </aside>
+
+        <main id="main-content" tabIndex={-1} className="flex flex-col gap-6">
+          {notice ? (
+            <Card className="border-accent/40 bg-accent-soft">
+              <CardContent className="p-5">
+                <p role="status" className="text-sm">
+                  {notice}
+                </p>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {isPending ? (
+            <Card>
+              <CardContent className="p-5">
+                <p className="text-sm text-muted">Loading your project…</p>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {!isPending && (isError || !project) ? <CreateProjectPanel /> : null}
+
+          {project ? (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>{currentStep?.title}</CardTitle>
+                  <CardDescription>{currentStep?.summary}</CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-wrap items-center gap-3 text-sm">
+                  <Badge tone={project.status === 'ACTIVE' ? 'success' : 'info'}>
+                    {project.status}
+                  </Badge>
+                  {!hasProjectType(project.projectTypes) ? (
+                    <span className="text-muted">
+                      Set a project type below — the technology-stack and estimation steps need it.
+                    </span>
+                  ) : null}
+                </CardContent>
+              </Card>
+
+              <DetailsSection project={project} />
+              <TimelineSection project={project} />
+              <StartDateSection project={project} />
+              <TeamCapacitySection project={project} />
+              <OutputPreferencesSection project={project} />
+
+              <DeleteProjectDialog
+                project={project}
+                open={deleteOpen}
+                onClose={() => setDeleteOpen(false)}
+                onDeleted={() => {
+                  setDeleteOpen(false);
+                  setNotice('The project has been deleted. Its recovery link no longer works.');
+                }}
+              />
+            </>
+          ) : null}
         </main>
       </div>
     </div>
+  );
+}
+
+function ProjectSidePanel({
+  project,
+  onDelete,
+}: {
+  project: ProjectResponse;
+  onDelete: () => void;
+}) {
+  // The absolute date only. A "days remaining" countdown would mean reading the
+  // clock during render, which is non-deterministic and produces a server/client
+  // hydration mismatch — for a date a month away it buys nothing.
+  const expires = new Date(project.expiresAt);
+
+  return (
+    <Card className="mt-4">
+      <CardHeader>
+        <CardTitle>This project</CardTitle>
+        <CardDescription>Reference and lifecycle.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3 text-sm">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs text-muted">Project ID</span>
+          <code className="font-mono text-xs break-all">{project.projectId}</code>
+        </div>
+
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs text-muted">Expires</span>
+          <time dateTime={project.expiresAt}>{expires.toISOString().slice(0, 10)}</time>
+          <span className="text-xs text-muted">
+            Opening the project extends this. An expired project can still be read, but not edited.
+          </span>
+        </div>
+
+        <Button variant="danger" onClick={onDelete} className="self-start">
+          Delete project
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

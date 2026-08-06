@@ -7,6 +7,7 @@ import {
   mongoUriSchema,
   nodeEnvSchema,
   portSchema,
+  secretSchema,
 } from '@wdrg/config';
 import { z } from 'zod';
 
@@ -41,6 +42,21 @@ export const apiEnvSchema = z.object({
   CORS_ALLOWED_ORIGINS: csvSchema(['http://localhost:3000']),
   /** Maximum accepted JSON body size, in bytes. */
   REQUEST_BODY_LIMIT_BYTES: integerSchema({ default: 1_048_576, min: 1_024, max: 52_428_800 }),
+
+  /* ------------------------------------------------------- project access */
+  /** Absolute public URL of the web application; used to build recovery links. */
+  WEB_PUBLIC_URL: httpUrlSchema('http://localhost:3000'),
+
+  /**
+   * Signs project session cookies. Rotating it invalidates every live session,
+   * which is the intended emergency lever. Required in production; a fixed
+   * development value keeps local restarts from logging everyone out.
+   */
+  PROJECT_SESSION_SECRET: secretSchema(32).default('development-only-session-secret-value-000000'),
+  /** How long a project session cookie stays valid. */
+  PROJECT_SESSION_TTL_SECONDS: integerSchema({ default: 604_800, min: 300, max: 2_592_000 }),
+  /** How long an untouched project survives before it expires. */
+  PROJECT_EXPIRY_DAYS: integerSchema({ default: 30, min: 1, max: 365 }),
 
   /* ---------------------------------------------------------------- docs */
   /** Serve the interactive OpenAPI UI. Disabled by default in production. */

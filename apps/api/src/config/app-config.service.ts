@@ -25,6 +25,17 @@ export interface SecurityConfig {
   readonly bodyLimitBytes: number;
 }
 
+export interface SessionConfig {
+  readonly secret: string;
+  readonly ttlSeconds: number;
+}
+
+export interface ProjectConfig {
+  readonly expiryDays: number;
+  /** Absolute origin of the web application, used to build recovery links. */
+  readonly webPublicUrl: string;
+}
+
 /**
  * Typed, grouped access to validated configuration.
  *
@@ -81,6 +92,20 @@ export class AppConfigService {
     return {
       allowedOrigins: this.config.get('CORS_ALLOWED_ORIGINS', { infer: true }),
       bodyLimitBytes: this.config.get('REQUEST_BODY_LIMIT_BYTES', { infer: true }),
+    };
+  }
+
+  get session(): SessionConfig {
+    return {
+      secret: this.config.get('PROJECT_SESSION_SECRET', { infer: true }),
+      ttlSeconds: this.config.get('PROJECT_SESSION_TTL_SECONDS', { infer: true }),
+    };
+  }
+
+  get project(): ProjectConfig {
+    return {
+      expiryDays: this.config.get('PROJECT_EXPIRY_DAYS', { infer: true }),
+      webPublicUrl: this.config.get('WEB_PUBLIC_URL', { infer: true }),
     };
   }
 
