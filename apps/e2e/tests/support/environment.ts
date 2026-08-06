@@ -74,6 +74,14 @@ const baseApiEnv = {
   // verbose output the application can produce.
   LOG_LEVEL: 'debug',
   OPENAPI_ENABLED: 'false',
+
+  /* Phase 3. Uploads go to a scratch directory under this package's artefacts,
+     so a run never touches a developer's own storage root. */
+  UPLOAD_STORAGE_ROOT: resolve(__dirname, '..', '..', '.artifacts', 'storage'),
+  /* The worker runs here, unlike in the API integration suite: the browser tests
+     are about what a user sees, and a user does not call a worker method. */
+  EXTRACTION_WORKER_ENABLED: 'true',
+  EXTRACTION_POLL_INTERVAL_MS: '250',
 } as const;
 
 export const apiEnv: Record<string, string> = {

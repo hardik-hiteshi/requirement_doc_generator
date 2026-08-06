@@ -73,6 +73,7 @@ mongodb-data/
 *.tar.gz.docker
 
 # --- Local runtime data ------------------------------------------------------
+# `storage/` holds uploaded client documents. Never committed, never web-served.
 storage/
 uploads/
 tmp/

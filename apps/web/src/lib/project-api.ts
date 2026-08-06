@@ -41,7 +41,8 @@ export function readCsrfToken(): string | undefined {
   return value && value.length > 0 ? value : undefined;
 }
 
-function mutationHeaders(): Record<string, string> {
+/** Exported so the multipart upload path can attach the same header. */
+export function mutationHeaders(): Record<string, string> {
   const token = readCsrfToken();
   return token ? { [CSRF_HEADER]: token } : {};
 }

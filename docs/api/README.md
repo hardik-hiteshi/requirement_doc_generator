@@ -158,6 +158,71 @@ single-use**:
 Rotating `PROJECT_SESSION_SECRET` invalidates every live **session** but leaves
 the recovery credential intact.
 
+## Phase 3 endpoints
+
+Requirement sources for the session's project. Every route is under
+`/api/v1/projects/current/sources`, so a `sourceId` in a path is scoped by the
+session: an id belonging to another project answers **404**, identically to one
+that never existed.
+
+| Method | Path                                      | Purpose                                            |
+| ------ | ----------------------------------------- | -------------------------------------------------- |
+| GET    | `/sources`                                | Every source, with storage usage against the quota |
+| POST   | `/sources/text`                           | Add a pasted-text source                           |
+| POST   | `/sources/files`                          | Multipart upload; one outcome per file             |
+| GET    | `/sources/{sourceId}`                     | One source, with effective and original content    |
+| PUT    | `/sources/{sourceId}/text`                | Edit a pasted-text source                          |
+| GET    | `/sources/{sourceId}/content`             | Extracted content                                  |
+| PUT    | `/sources/{sourceId}/content/corrections` | Save corrections as a new revision                 |
+| POST   | `/sources/{sourceId}/content/restore`     | Point the effective content back at revision 0     |
+| POST   | `/sources/{sourceId}/review`              | Mark reviewed                                      |
+| POST   | `/sources/{sourceId}/retry`               | Retry a failed source                              |
+| DELETE | `/sources/{sourceId}`                     | Soft-delete, and remove the stored file            |
+| GET    | `/sources/{sourceId}/download`            | Stream the original file                           |
+
+### Uploads
+
+`POST /sources/files` takes `multipart/form-data` with a repeated `files` field
+and returns **one outcome per file**. A rejected file never fails the batch:
+
+```json
+{
+  "outcomes": [
+    {
+      "originalFilename": "brief.pdf",
+      "accepted": true,
+      "source": { "...": "..." }
+    },
+    {
+      "originalFilename": "invoice.pdf",
+      "accepted": false,
+      "errorCode": "SIGNATURE_MISMATCH",
+      "errorMessage": "The file's contents do not match its extension. It may be renamed, damaged, or not the format it claims to be."
+    }
+  ]
+}
+```
+
+Every rejection carries a stable `errorCode` and a message that names the problem
+and, where there is one, the fix. Technical detail — which signature was found,
+which limit was exceeded — goes to the structured log under the request's
+correlation id, never to the caller.
+
+### Downloads
+
+The stored object key is **never** returned by any endpoint. It is an internal
+address, not a credential, and exposing it would create a second way to name a
+file. Downloads stream through the route above, which checks the session first,
+and are sent with `Content-Disposition: attachment` and `X-Content-Type-Options:
+nosniff` so an uploaded file can never render inside this origin.
+
+### Effective versus original content
+
+`effectiveContent` is the latest correction if there is one, otherwise the
+original extraction. `originalContent` is always revision 0. The field is named
+`effectiveContent` rather than `content` on purpose: a caller reaching for "the
+content" must not silently receive the unreviewed original.
+
 ### Cookies
 
 | Cookie                 | Flags                                                      | Purpose                                                               |

@@ -26,3 +26,12 @@ export * from './project/project-access.contract';
 export * from './project/project-routes';
 export * from './project/project-errors';
 export * from './project/audit.contract';
+
+/* Phase 3 — requirement ingestion: upload, storage, extraction and OCR. */
+export * from './requirements/source-status';
+export * from './requirements/source-formats';
+export * from './requirements/extracted-content.contract';
+export * from './requirements/requirement-source.contract';
+export * from './requirements/requirement-errors';
+export * from './requirements/requirement-routes';
+export * from './requirements/evidence-boundary';

@@ -9,6 +9,7 @@ import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
 import { ProjectAccessModule } from './project-access/project-access.module';
 import { ProjectsModule } from './projects/projects.module';
+import { RequirementsModule } from './requirements/requirements.module';
 
 /**
  * Application root.
@@ -31,6 +32,7 @@ import { ProjectsModule } from './projects/projects.module';
     AuditModule,
     ProjectAccessModule,
     ProjectsModule,
+    RequirementsModule,
   ],
   providers: [
     {

@@ -44,3 +44,9 @@ think is part of the value.
 | [0008](0008-test-strategy-and-runners.md)           | Layered test strategy with two runners         | Accepted |
 | [0009](0009-request-validation-and-mapping.md)      | Request validation and explicit mapping        | Accepted |
 | [0010](0010-anonymous-project-access.md)            | Anonymous project access and stateless session | Accepted |
+| [0011](0011-file-storage-provider.md)               | Filesystem storage now, S3 behind the port     | Accepted |
+| [0012](0012-job-queue-provider.md)                  | A MongoDB job queue rather than Redis          | Accepted |
+| [0013](0013-extraction-libraries.md)                | One extractor per format, behind a registry    | Accepted |
+| [0014](0014-ocr-provider.md)                        | Tesseract as a local binary, behind a port     | Accepted |
+| [0015](0015-legacy-file-strategy.md)                | A conversion boundary for .doc and .xls        | Accepted |
+| [0016](0016-source-revision-model.md)               | Append-only content revisions                  | Accepted |

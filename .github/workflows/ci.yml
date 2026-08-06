@@ -34,6 +34,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The unit suite exercises the real OCR adapter rather than a stub. Without
+      # the engine those tests would skip, which is a silent loss of coverage —
+      # exactly what a CI gate is supposed to prevent.
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
+
       # Ordered cheapest-first so an obvious failure reports in seconds rather
       # than after a full build.
       - name: Check formatting
@@ -75,6 +81,11 @@ jobs:
       MONGODB_HOST_PORT: '27018'
       MONGODB_URI: mongodb://127.0.0.1:27018/wdrg_ci
       LOG_LEVEL: warn
+      # A scratch directory inside the workspace, removed with the runner.
+      UPLOAD_STORAGE_ROOT: ${{ github.workspace }}/.ci-storage
+      # Driven explicitly by the tests, so extraction is deterministic rather
+      # than something that happens at some point after an upload.
+      EXTRACTION_WORKER_ENABLED: 'false'
 
     steps:
       - uses: actions/checkout@v5
@@ -88,6 +99,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
 
       - name: Build workspace packages
         run: pnpm build --filter='./packages/*'
@@ -140,6 +154,11 @@ jobs:
       # scripts by policy, so the browser download is an explicit step rather
       # than a postinstall side effect — which also keeps it out of every other
       # job's install.
+      # Tesseract as well as a browser: the worker runs in the browser suite, so
+      # an image upload genuinely goes through recognition.
+      - name: Install Tesseract
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
+
       - name: Install Playwright browsers
         run: pnpm --filter @wdrg/e2e exec playwright install --with-deps chromium
 

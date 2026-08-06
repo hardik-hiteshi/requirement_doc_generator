@@ -1,3 +1,5 @@
+import type { Readable } from 'node:stream';
+
 /**
  * Outbound boundary for binary storage.
  *
@@ -28,7 +30,7 @@ export interface StoredObjectMetadata {
 
 export interface PutObjectRequest {
   readonly key: StoredObjectKey;
-  readonly content: Buffer | NodeJS.ReadableStream;
+  readonly content: Buffer | Readable;
   readonly contentType: string;
   /** Original filename, stored as metadata only — never used as a path. */
   readonly originalFilename?: string;
@@ -56,10 +58,26 @@ export class FileStorageError extends Error {
 export interface FileStoragePort {
   put(request: PutObjectRequest): Promise<StoredObjectMetadata>;
 
-  /** Streams an object. Authorization is the caller's responsibility. */
-  getStream(key: StoredObjectKey): Promise<NodeJS.ReadableStream>;
+  /**
+   * Streams an object. Authorization is the caller's responsibility.
+   *
+   * `Readable` rather than the structural `NodeJS.ReadableStream`: every real
+   * adapter produces one, and the consumers that matter — Nest's
+   * `StreamableFile`, `pipeline` — need the class rather than the interface.
+   */
+  getStream(key: StoredObjectKey): Promise<Readable>;
 
   head(key: StoredObjectKey): Promise<StoredObjectMetadata>;
+
+  /**
+   * Whether an object is present.
+   *
+   * Separate from `head` because the answer "no" is ordinary — a cleanup job
+   * asking whether there is anything to remove is not an error — and forcing
+   * every caller to catch a `not_found` to find out would make the exceptional
+   * path the normal one.
+   */
+  exists(key: StoredObjectKey): Promise<boolean>;
 
   /**
    * Issues a short-lived, authorized download URL.
