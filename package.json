@@ -1,0 +1,34 @@
+{
+  "name": "website-doc-requirement-generator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Enterprise AI requirement analysis, estimation, and documentation generator",
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=22.12.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "clean": "turbo run clean",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "docker:up": "bash infrastructure/scripts/compose.sh up -d",
+    "docker:down": "bash infrastructure/scripts/compose.sh down",
+    "docker:logs": "bash infrastructure/scripts/compose.sh logs -f",
+    "docker:tools": "bash infrastructure/scripts/compose.sh --profile tools up -d",
+    "docker:wait": "bash infrastructure/scripts/wait-for-mongo.sh"
+  },
+  "devDependencies": {
+    "prettier": "3.9.6",
+    "turbo": "2.10.8",
+    "typescript": "5.9.3"
+  }
+}

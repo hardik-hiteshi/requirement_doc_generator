@@ -1,0 +1,10 @@
+{
+  "extends": "@wdrg/typescript-config/library.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts", "eslint.config.mjs"],
+  "exclude": ["node_modules", "dist"]
+}

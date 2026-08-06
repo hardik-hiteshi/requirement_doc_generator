@@ -1,0 +1,47 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# pnpm blocks dependency lifecycle scripts by default — an install script is
+# arbitrary code execution from a transitive dependency. Each entry below is an
+# explicit decision, not a blanket allow.
+allowBuilds:
+  # Native compiler binaries; the postinstall selects the platform build.
+  '@swc/core': true
+  unrs-resolver: true
+  # Analytics ping only. Nothing depends on it having run.
+  '@scarf/scarf': false
+
+minimumReleaseAgeExclude:
+  - globals@17.9.0
+
+# Resolution settings. pnpm 11 reads these from here rather than .npmrc.
+# The strict, non-flat node_modules layout is what stops a package importing
+# something it never declared.
+nodeLinker: isolated
+shamefullyHoist: false
+autoInstallPeers: true
+strictPeerDependencies: false
+preferWorkspacePackages: true
+linkWorkspacePackages: true
+
+# Optional dependencies that are deliberately not installed.
+#
+# sharp is an OPTIONAL dependency of next, used only to optimise images served
+# through next/image. This application renders no images through it, so sharp is
+# dead weight — and it carries GHSA-f88m-g3jw-g9cj (high) via libvips, with the
+# fix in 0.35.x, outside the `^0.34.5` range next declares. Not installing it
+# removes the exposure entirely rather than pinning a version next does not
+# support. Revisit when the application starts serving optimised images.
+ignoredOptionalDependencies:
+  - sharp
+
+# Security overrides for transitive dependencies we do not control directly.
+# Each entry is a patch-level bump that resolves a published advisory without
+# violating the declaring package's version range. Remove an entry once the
+# parent ships a fixed version on its own.
+overrides:
+  # GHSA: arbitrary file read + path traversal via source maps. Pulled in by next.
+  postcss: '>=8.5.18'
+  # GHSA: exponential parsing time in flow collections. Pulled in by @nestjs/swagger.
+  js-yaml: '>=5.2.2'

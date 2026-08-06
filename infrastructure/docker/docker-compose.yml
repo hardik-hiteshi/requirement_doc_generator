@@ -1,0 +1,53 @@
+name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}
+
+# Local development infrastructure only. Application containers and production
+# images are defined in the deployment phase; running the apps directly with
+# `pnpm dev` keeps the edit-reload loop fast.
+#
+# The MongoDB *host* port is configurable via MONGODB_HOST_PORT so the stack can
+# start on a machine that already runs MongoDB on 27017. The *container* port is
+# always 27017, so nothing inside the compose network has to change.
+# MONGODB_HOST_PORT is validated by infrastructure/scripts/compose.sh before
+# docker compose is invoked.
+
+services:
+  mongodb:
+    image: mongo:8.0
+    container_name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-mongodb
+    restart: unless-stopped
+    ports:
+      # Bound to localhost so the database is never exposed on the network.
+      - '127.0.0.1:${MONGODB_HOST_PORT:-27017}:27017'
+    environment:
+      MONGO_INITDB_DATABASE: wdrg
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test:
+        ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-mongo-express
+    restart: unless-stopped
+    # Optional database browser: `pnpm docker:tools`
+    profiles: ['tools']
+    ports:
+      - '127.0.0.1:${MONGO_EXPRESS_HOST_PORT:-8081}:8081'
+    environment:
+      # Container-to-container, so always the container port.
+      ME_CONFIG_MONGODB_URL: mongodb://mongodb:27017/
+      ME_CONFIG_BASICAUTH: 'false'
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+volumes:
+  mongodb-data:
+    # Namespaced by project so a throwaway verification stack cannot collide
+    # with — or destroy — a developer's working data volume.
+    name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-mongodb-data

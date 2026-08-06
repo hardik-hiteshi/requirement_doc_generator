@@ -1,0 +1,107 @@
+# =============================================================================
+# Nothing generated, local, or secret belongs in version control.
+# Grouped by what produces it, so a new entry has an obvious home.
+# =============================================================================
+
+# --- Dependencies ------------------------------------------------------------
+node_modules/
+.pnpm-store/
+.pnp
+.pnp.js
+
+# --- Build output ------------------------------------------------------------
+dist/
+build/
+out/
+.next/
+*.tsbuildinfo
+
+# --- Caches ------------------------------------------------------------------
+.turbo/
+.swc/
+.eslintcache
+.cache/
+*.tmp
+
+# --- Environment -------------------------------------------------------------
+# Never commit real configuration. Only the documented example is tracked.
+.env
+.env.*
+!.env.example
+
+# --- Credentials -------------------------------------------------------------
+# Defence in depth: these must never exist in the repository, and if one is
+# created by mistake it must not be stageable.
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+id_rsa
+id_ed25519
+*_rsa
+*_ed25519
+credentials.json
+service-account*.json
+gha-creds-*.json
+.npmrc.local
+.netrc
+secrets/
+.secrets/
+
+# --- Test and coverage output ------------------------------------------------
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+blob-report/
+junit.xml
+*.lcov
+
+# --- Docker runtime data -----------------------------------------------------
+# The compose stack uses named volumes, so nothing should land here — but a
+# bind mount added later must not drag database files into a commit.
+.docker/
+docker-data/
+mongo-data/
+mongodb-data/
+*.tar.gz.docker
+
+# --- Local runtime data ------------------------------------------------------
+storage/
+uploads/
+tmp/
+temp/
+logs/
+*.log
+
+# --- Temporary verification artefacts ----------------------------------------
+# Scratch files produced while verifying a phase locally.
+*.local
+*.orig
+*.rej
+*.bak
+scratch/
+.scratch/
+verification/
+act.log
+actionlint
+act
+
+# --- Editors and OS ----------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+*~
+.history/

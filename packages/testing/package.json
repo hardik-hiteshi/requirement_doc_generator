@@ -1,0 +1,33 @@
+{
+  "name": "@wdrg/testing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared test helpers (accessibility assertions, deterministic fixtures)",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo",
+    "lint": "eslint src --max-warnings 0",
+    "lint:fix": "eslint src --fix",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "axe-core": "4.12.1"
+  },
+  "devDependencies": {
+    "@wdrg/eslint-config": "workspace:*",
+    "@wdrg/typescript-config": "workspace:*",
+    "eslint": "10.8.0",
+    "typescript": "5.9.3"
+  }
+}

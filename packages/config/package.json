@@ -1,0 +1,35 @@
+{
+  "name": "@wdrg/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Environment validation primitives shared by the api and web applications",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo",
+    "lint": "eslint src --max-warnings 0",
+    "lint:fix": "eslint src --fix",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@wdrg/eslint-config": "workspace:*",
+    "@wdrg/typescript-config": "workspace:*",
+    "eslint": "10.8.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

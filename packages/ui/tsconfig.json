@@ -1,0 +1,8 @@
+{
+  "extends": "@wdrg/typescript-config/nextjs.json",
+  "compilerOptions": {
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "eslint.config.mjs"],
+  "exclude": ["node_modules"]
+}
