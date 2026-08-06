@@ -15,6 +15,11 @@ accounts**: possession of the recovery link _is_ authorisation.
 | Public project id (`prj_…`) | 128 bits | Names the project | URLs, logs, error envelopes, audit records                      |
 | Recovery secret             | 256 bits | Authorises access | The user's saved link, and a salted scrypt hash in the database |
 
+The recovery secret is **displayed once** and **usable indefinitely**. Those are
+separate properties, and the threat picture depends on both: the first is why a
+lost link is fatal, the second is why a leaked link is permanent. The exact
+semantics are in ADR-0010; the consequences are the accepted risks below.
+
 Splitting them is what allows the identifier to appear in a log or an error
 message without becoming a credential. A design that used one value for both
 would force every log line to be treated as secret.
@@ -46,12 +51,19 @@ in the UI, not just here.
    requires an explicit acknowledgement before continuing.
 2. **A lost link means a lost project.** Nothing can restore it, including
    support, because the server has no way to re-derive the secret.
-3. **A shared link cannot be revoked** in Phase 2. Regenerating a recovery secret
+3. **A leaked link is permanent access.** The credential is reusable and cannot
+   be rotated, so a link that reaches the wrong person keeps working until the
+   project is deleted or expires. Deleting and recreating is the only remedy.
+4. **A shared link cannot be revoked** in Phase 2. Regenerating a recovery secret
    is deliberately not implemented: doing it safely needs a way to prove you are
    the legitimate holder, which an account-less model does not provide. Deleting
    the project and starting again is the honest answer, and is what the UI
    offers.
-4. **No rate limiting yet.** The integration point exists (the session guard is
+5. **Sessions cannot be enumerated or revoked individually.** Several may exist
+   at once — one per exchange — and there is no server-side list of them. What
+   ends them all at once is the project being deleted or expiring, or
+   `PROJECT_SESSION_SECRET` being rotated.
+6. **No rate limiting yet.** The integration point exists (the session guard is
    the single choke point for every project operation) but limits are Phase 12.
    Until then, brute force is bounded only by the 256-bit secret — infeasible,
    but unmetered.

@@ -96,8 +96,8 @@ export function DeleteProjectDialog({
 
         <p id="delete-dialog-description" className="text-sm text-muted">
           This deletes <strong className="text-foreground">{project.name}</strong> and everything in
-          it. The recovery link stops working immediately and nobody — including support — can
-          restore it.
+          it. Every open session ends and the recovery link stops working immediately — nobody,
+          including support, can restore it.
         </p>
 
         <Field

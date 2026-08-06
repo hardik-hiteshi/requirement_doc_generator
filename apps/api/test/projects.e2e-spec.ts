@@ -57,7 +57,7 @@ describe('Projects API (e2e)', () => {
   }
 
   describe('project creation', () => {
-    it('creates a project and returns the recovery secret exactly once', async () => {
+    it('creates a project and shows the recovery secret once', async () => {
       const { body } = await createProject();
 
       expect(projectCreatedResponseSchema.safeParse(body).success).toBe(true);
@@ -87,9 +87,14 @@ describe('Projects API (e2e)', () => {
       });
     });
 
-    it('states plainly what holding the link means', async () => {
+    it('states plainly what holding the link means, and that it keeps working', async () => {
       const { body } = await createProject();
-      expect(body.recoveryWarning.toLowerCase()).toContain('anyone with this link');
+      const warning = body.recoveryWarning.toLowerCase();
+
+      expect(warning).toContain('anyone with this link');
+      // The warning must not imply the link is single-use — it is not, and a
+      // user who believes otherwise will not guard it properly.
+      expect(warning).toContain('keeps working');
     });
 
     it('signs the creator in with an HttpOnly session cookie', async () => {
@@ -181,6 +186,44 @@ describe('Projects API (e2e)', () => {
 
       expect(response.body.project.projectId).toBe(created.body.project.projectId);
       await fresh.get(PROJECT_ROUTES.current).expect(200);
+    });
+
+    it('accepts the same secret repeatedly — the link is reusable, not single-use', async () => {
+      const created = await createProject();
+      const credentials = {
+        projectId: created.body.project.projectId,
+        recoverySecret: created.body.recoverySecret,
+      };
+
+      // Three separate browsers, so each exchange starts from no session at all.
+      for (const _attempt of [1, 2, 3]) {
+        const browser = agent();
+
+        await browser.post(PROJECT_ROUTES.exchange).send(credentials).expect(200);
+        const current = await browser.get(PROJECT_ROUTES.current).expect(200);
+
+        expect(current.body.projectId).toBe(credentials.projectId);
+      }
+    });
+
+    it('leaves earlier sessions working when the secret is exchanged again', async () => {
+      const created = await createProject();
+      const credentials = {
+        projectId: created.body.project.projectId,
+        recoverySecret: created.body.recoverySecret,
+      };
+
+      const first = agent();
+      await first.post(PROJECT_ROUTES.exchange).send(credentials).expect(200);
+
+      const second = agent();
+      await second.post(PROJECT_ROUTES.exchange).send(credentials).expect(200);
+
+      // Sessions are stateless signed cookies with no server-side registry, so a
+      // second exchange adds a session rather than displacing the first. Anyone
+      // reasoning about revocation needs this stated, not assumed.
+      await first.get(PROJECT_ROUTES.current).expect(200);
+      await second.get(PROJECT_ROUTES.current).expect(200);
     });
 
     it('refuses a wrong secret', async () => {

@@ -43,6 +43,7 @@ Full setup notes and troubleshooting:
 | `pnpm build`                     | Production builds                                   |
 | `pnpm test`                      | Unit + component tests — no infrastructure required |
 | `pnpm test:e2e`                  | API integration tests — **requires MongoDB**        |
+| `pnpm test:browser`              | Browser E2E — **requires MongoDB + Playwright**     |
 | `pnpm lint`                      | ESLint, zero warnings tolerated                     |
 | `pnpm typecheck`                 | `tsc --noEmit` across every package                 |
 | `pnpm format` / `format:check`   | Prettier                                            |
@@ -70,6 +71,7 @@ interface the domain owns.
 apps/
   api/        NestJS API
   web/        Next.js App Router workspace
+  e2e/        Playwright browser suite — drives both apps for real
 packages/
   contracts/  Shared API surface — imported by BOTH apps
   config/     Environment validation primitives
@@ -104,10 +106,26 @@ https://your-app/recover#p=prj_XXXXXXXXXXXXXXXXXXXXXXXXXX&s=<recovery secret>
 - Redeeming the link exchanges the secret for an `HttpOnly` session cookie, then
   clears the secret from the address bar.
 
-**Anyone holding the link has full access, and a lost link is an unrecoverable
-project.** The UI states this and requires an acknowledgement before you leave
-the creation screen. Rationale and rejected alternatives:
-[ADR-0010](docs/adr/0010-anonymous-project-access.md).
+### What "shown once" means, exactly
+
+The secret is **displayed once** and the link is **reusable**. Those are separate
+things, and confusing them is the easiest way to mislead someone into treating a
+still-live credential as spent:
+
+- **The secret can be exchanged as often as you like**, from any device or
+  browser. Using it does not consume it.
+- **Several sessions can be open at once.** Each exchange issues an additional
+  session; it does not end the others.
+- **The credential dies when the project does** — on deletion or expiry. There is
+  no rotation, no revocation endpoint, and no way to un-share a link.
+- **Anyone holding the link has full access** — read, edit and delete. Nothing
+  distinguishes you from someone you forwarded it to.
+- **Deleting or expiring the project ends every open session immediately**, and
+  makes further recovery fail.
+
+**A lost link is an unrecoverable project.** The UI states all of this and
+requires an acknowledgement before you leave the creation screen. Rationale and
+rejected alternatives: [ADR-0010](docs/adr/0010-anonymous-project-access.md).
 
 ## Key decisions
 
@@ -162,6 +180,7 @@ CI runs on every push and pull request:
 | Types             | `pnpm typecheck`                            |
 | Unit tests        | `pnpm test`                                 |
 | Integration tests | `pnpm test:e2e` (MongoDB service container) |
+| Browser E2E       | `pnpm test:browser` (MongoDB + Chromium)    |
 | Production build  | `pnpm build`                                |
 | Dependency audit  | `pnpm audit --audit-level high` (gating)    |
 

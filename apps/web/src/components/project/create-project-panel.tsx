@@ -1,7 +1,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import {
   createProjectRequestSchema,
   MAX_PROJECT_TYPES,
@@ -28,8 +28,14 @@ import { useForm } from 'react-hook-form';
 
 import { ApiClientError } from '@/lib/api-client';
 import { createProject } from '@/lib/project-api';
-import { queryKeys } from '@/lib/query-keys';
-import { RecoveryLinkPanel } from './recovery-link-panel';
+
+export interface CreateProjectPanelProps {
+  /**
+   * Hands the created project — and its one-and-only view of the recovery
+   * secret — to the owner of the screen.
+   */
+  readonly onCreated: (response: ProjectCreatedResponse) => void;
+}
 
 /**
  * Project creation.
@@ -37,10 +43,14 @@ import { RecoveryLinkPanel } from './recovery-link-panel';
  * The same schema the API validates against also drives this form, so a rule is
  * enforced in the browser and on the server without being written twice — and
  * cannot drift between them.
+ *
+ * This panel deliberately does **not** put the new project into the query cache.
+ * Doing so would tell the workspace it now has a project, which would unmount
+ * this panel — taking the recovery link with it before the user had a chance to
+ * save it. The recovery link outranks this component's own lifecycle, so it is
+ * owned one level up.
  */
-export function CreateProjectPanel() {
-  const queryClient = useQueryClient();
-  const [created, setCreated] = useState<ProjectCreatedResponse | null>(null);
+export function CreateProjectPanel({ onCreated }: CreateProjectPanelProps) {
   const [submitError, setSubmitError] = useState<string | undefined>();
   const [selectedTypes, setSelectedTypes] = useState<ProjectType[]>([]);
 
@@ -51,10 +61,7 @@ export function CreateProjectPanel() {
 
   const mutation = useMutation({
     mutationFn: createProject,
-    onSuccess: (response) => {
-      queryClient.setQueryData(queryKeys.currentProject, response.project);
-      setCreated(response);
-    },
+    onSuccess: onCreated,
     onError: (error: unknown) => {
       setSubmitError(
         error instanceof ApiClientError
@@ -74,30 +81,13 @@ export function CreateProjectPanel() {
     );
   }
 
-  if (created) {
-    return (
-      <div className="flex flex-col gap-6">
-        <RecoveryLinkPanel
-          recoveryLink={created.recoveryLink}
-          requireAcknowledgement
-          onAcknowledged={() => {
-            // Handing control to the workspace: the cache already holds the
-            // project, so this simply reveals it.
-            queryClient.setQueryData(queryKeys.currentProject, created.project);
-            setCreated(null);
-          }}
-        />
-      </div>
-    );
-  }
-
   return (
-    <Card>
+    <Card role="region" aria-labelledby="create-project-title">
       <CardHeader>
-        <CardTitle>Start a new project</CardTitle>
+        <CardTitle id="create-project-title">Start a new project</CardTitle>
         <CardDescription>
-          No account needed. You will receive a private recovery link — it is the only way back into
-          this project.
+          No account needed. You will receive a reusable private recovery link — it is the only way
+          back into this project, and it is shown to you only once.
         </CardDescription>
       </CardHeader>
       <CardContent>

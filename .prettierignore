@@ -4,8 +4,10 @@ node_modules/
 .pnpm-store/
 dist/
 .next/
+.next-e2e/
 .turbo/
 coverage/
+apps/e2e/.artifacts/
 pnpm-lock.yaml
 *.tsbuildinfo
 

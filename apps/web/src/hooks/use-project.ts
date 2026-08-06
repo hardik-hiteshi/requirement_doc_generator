@@ -29,6 +29,10 @@ export function useCurrentProject() {
   });
 }
 
+function isVersionConflict(error: ApiClientError): boolean {
+  return Boolean(error.details?.some((detail) => detail.rule === 'version_conflict'));
+}
+
 interface SectionMutationOptions<TInput> {
   readonly mutate: (input: TInput & { version: number }) => Promise<ProjectResponse>;
 }
@@ -66,7 +70,16 @@ export function useSectionSave<TInput>({ mutate }: SectionMutationOptions<TInput
       setMessage(undefined);
     },
     onError: (error: unknown) => {
-      if (error instanceof ApiClientError && error.code === 'CONFLICT') {
+      // A version conflict and an unmodifiable project share a status code but
+      // are different situations, and only one of them is fixed by reloading.
+      // The API distinguishes them by attaching a `version` detail, so branch on
+      // that rather than telling a user whose project has expired that somebody
+      // else edited it.
+      if (
+        error instanceof ApiClientError &&
+        error.code === 'CONFLICT' &&
+        isVersionConflict(error)
+      ) {
         setState('conflict');
         setMessage(error.message);
         return;

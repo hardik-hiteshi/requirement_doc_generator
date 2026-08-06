@@ -26,7 +26,8 @@ wants to be secret.
   names the project. It is unguessable, so it cannot be enumerated, but it grants
   nothing on its own. It may appear in logs, URLs and error envelopes.
 - A **recovery secret** (256 bits, base64url) authorises access. Only a salted
-  scrypt hash is stored. The raw value is returned exactly once, at creation.
+  scrypt hash is stored, so the raw value can be **displayed once**, in the
+  creation response, and never again.
 
 **The secret travels in the URL fragment**, not the query string:
 `/recover#p=prj_…&s=…`. A fragment is never sent to the server, so it cannot
@@ -40,6 +41,23 @@ is verified with a timing-safe comparison _before_ the payload is parsed.
 **Every failure to reach a project returns the same code and message** — unknown
 project, wrong secret, expired, deleted. The real reason goes to the audit trail
 and the structured logs.
+
+## Recovery semantics, stated exactly
+
+"Shown once" describes the display, not the lifetime. Conflating the two is the
+easiest way to mislead a user into treating the link as spent, so the four rules
+are written out here and every surface is held to them.
+
+| Question                                          | Answer                                                                                                                                                        |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Can the secret be exchanged more than once?       | **Yes.** Any number of times, from any device or browser. Exchanging does not consume it.                                                                     |
+| Can several project sessions exist at once?       | **Yes.** Sessions are stateless signed cookies with no server-side registry, so a new exchange adds a session rather than displacing an existing one.         |
+| When does the recovery credential stop working?   | When the project is **deleted** or has **expired**. Nothing else revokes it — there is no rotation and no revocation endpoint.                                |
+| Who can use the link?                             | **Anyone holding it**, with full read, edit and delete rights. There is no way to tell the creator from someone they forwarded it to.                         |
+| What does deletion or expiry do to open sessions? | **Ends them all**, immediately. Every request re-loads the project and checks its status, so an outstanding cookie stops working the moment the project does. |
+
+Rotating `PROJECT_SESSION_SECRET` invalidates every live **session**. It does not
+touch the recovery credential, which is verified against a stored hash.
 
 ## Consequences
 
@@ -59,6 +77,9 @@ and the structured logs.
   the design and the UI must state it plainly rather than bury it.
 - **Anyone holding the link has full access.** Also stated in the UI, with an
   explicit acknowledgement required before leaving the creation screen.
+- **A shared link cannot be un-shared.** Because the credential is reusable and
+  cannot be rotated, forwarding the link grants permanent access until the
+  project is deleted. Delete-and-recreate is the only remedy, and the UI says so.
 
 ## Alternatives considered
 

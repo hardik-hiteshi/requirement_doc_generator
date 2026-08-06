@@ -36,7 +36,7 @@ export class ProjectAccessController {
   @ApiOperation({
     summary: 'Create an anonymous project',
     description:
-      'Creates a project and returns its recovery secret. The secret is shown once and is not recoverable — only a hash of it is stored.',
+      'Creates a project and returns its recovery secret. The secret is shown once here and cannot be retrieved again, because only a hash of it is stored. The link it forms stays usable: it can be exchanged repeatedly, from any device, until the project is deleted or expires.',
   })
   @ApiOkResponse({ description: 'Project created; session cookie set.' })
   async create(

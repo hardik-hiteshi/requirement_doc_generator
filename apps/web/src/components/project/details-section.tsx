@@ -56,11 +56,11 @@ export function DetailsSection({ project }: { project: ProjectResponse }) {
       ?.message;
 
   return (
-    <Card>
+    <Card role="region" aria-labelledby="details-section-title">
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex flex-col gap-1">
-            <CardTitle>Project details</CardTitle>
+            <CardTitle id="details-section-title">Project details</CardTitle>
             <CardDescription>Basic information about the project and the client.</CardDescription>
           </div>
           <SaveStatus state={state} message={message} />

@@ -1,6 +1,17 @@
 @import 'tailwindcss';
 
 /*
+ * The design system is a separate package, and Tailwind only scans the project
+ * its stylesheet is imported from — so any utility used *solely* inside
+ * `@wdrg/ui` is never generated, with no error to say so.
+ *
+ * That is not theoretical: `bg-danger` appears only in the button component, so
+ * the destructive buttons were rendering white text on a white card. Registering
+ * the package as a source is what makes the design system's own classes real.
+ */
+@source "../../../../packages/ui/src";
+
+/*
  * Design tokens.
  *
  * Semantic names ("surface", "muted", "danger") rather than literal colours, so
@@ -26,8 +37,13 @@
   --color-success-soft: oklch(96% 0.03 155);
   --color-warning: oklch(52% 0.12 75);
   --color-warning-soft: oklch(96% 0.04 85);
-  --color-danger: oklch(50% 0.19 25);
-  --color-danger-strong: oklch(44% 0.2 25);
+  /*
+   * Dark enough to carry white text at WCAG AA. The obvious red sits around
+   * 50% lightness and lands just under 4.5:1 against white — which matters most
+   * on the one control it is used for, the irreversible delete button.
+   */
+  --color-danger: oklch(44% 0.19 25);
+  --color-danger-strong: oklch(38% 0.17 25);
   --color-danger-soft: oklch(96% 0.03 25);
 
   --font-sans:

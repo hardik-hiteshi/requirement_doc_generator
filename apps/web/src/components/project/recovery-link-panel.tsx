@@ -12,12 +12,16 @@ export interface RecoveryLinkPanelProps {
 }
 
 /**
- * The recovery link, and the warning that goes with it.
+ * The reusable private recovery link, and the warning that goes with it.
  *
- * With no accounts, this link *is* the credential. The panel is deliberately
- * heavy-handed: the warning is stated in full, the link is shown in a read-only
- * field the user can select, and after creation they must tick a box confirming
- * they saved it. A user who loses this cannot be helped by anyone.
+ * With no accounts, this link *is* the project's recovery credential: it works
+ * again from any device, for as long as the project does. What happens only
+ * once is *seeing* it — the server keeps a hash, so it cannot be shown again.
+ *
+ * The panel is deliberately heavy-handed about that distinction: the warning is
+ * stated in full, the link sits in a read-only field the user can select, and
+ * after creation they must tick a box confirming they saved it. A user who
+ * loses this cannot be helped by anyone.
  */
 export function RecoveryLinkPanel({
   recoveryLink,
@@ -44,9 +48,13 @@ export function RecoveryLinkPanel({
   }
 
   return (
-    <Card className="border-warning/40 bg-warning-soft">
+    <Card
+      role="region"
+      aria-labelledby="recovery-link-title"
+      className="border-warning/40 bg-warning-soft"
+    >
       <CardHeader>
-        <CardTitle>Save your private recovery link</CardTitle>
+        <CardTitle id="recovery-link-title">Save your private recovery link</CardTitle>
         <CardDescription>{RECOVERY_WARNING}</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
@@ -88,7 +96,8 @@ export function RecoveryLinkPanel({
                 className="mt-0.5 size-4 shrink-0 rounded border-border"
               />
               <label htmlFor="acknowledge-recovery" className="text-sm">
-                I have saved this recovery link somewhere safe.
+                I have saved this recovery link somewhere safe. I understand it will not be shown
+                again.
               </label>
             </div>
 

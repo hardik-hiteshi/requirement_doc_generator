@@ -62,11 +62,11 @@ export function TeamCapacitySection({ project }: { project: ProjectResponse }) {
     fieldErrors?.find((detail) => detail.path.includes(`customRoles.${index}`))?.message;
 
   return (
-    <Card>
+    <Card role="region" aria-labelledby="team-capacity-section-title">
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex flex-col gap-1">
-            <CardTitle>Team and capacity</CardTitle>
+            <CardTitle id="team-capacity-section-title">Team and capacity</CardTitle>
             <CardDescription>
               All optional. Leave it blank and the estimate will propose the staffing needed to meet
               your timeline; fill it in and the plan is built around the team you have.

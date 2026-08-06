@@ -68,11 +68,11 @@ export function TimelineSection({ project }: { project: ProjectResponse }) {
   }
 
   return (
-    <Card>
+    <Card role="region" aria-labelledby="timeline-section-title">
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex flex-col gap-1">
-            <CardTitle>Delivery timeline</CardTitle>
+            <CardTitle id="timeline-section-title">Delivery timeline</CardTitle>
             <CardDescription>
               Required. Your timeline is authoritative — it is never silently extended. If it is
               tight, later steps show the staffing and risk it implies rather than moving the date.

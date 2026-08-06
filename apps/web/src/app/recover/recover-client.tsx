@@ -29,9 +29,26 @@ type RecoveryState =
 export function RecoverClient() {
   const [state, setState] = useState<RecoveryState>({ status: 'reading' });
   const queryClient = useQueryClient();
-  // React 18+ mounts effects twice in development StrictMode; the exchange is a
-  // one-shot operation against a single-use fragment, so it must not run twice.
+  // React 18+ mounts effects twice in development StrictMode, and one exchange
+  // per fragment is all that should ever be attempted, so this guard makes the
+  // effect idempotent.
   const attempted = useRef(false);
+
+  useEffect(() => {
+    /*
+     * Changing only the fragment is a same-document navigation: the page does
+     * not reload and this component is never remounted. Without this, a user who
+     * lands here with a mistyped link and then pastes the correct one into the
+     * address bar sits looking at the old error while nothing happens.
+     *
+     * `replaceState` — which is how the secret is cleared below — fires no
+     * `hashchange`, so this only ever responds to a real change by the user.
+     */
+    const onHashChange = () => window.location.reload();
+    window.addEventListener('hashchange', onHashChange);
+
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   useEffect(() => {
     if (attempted.current) {

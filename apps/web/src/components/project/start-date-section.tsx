@@ -53,11 +53,11 @@ export function StartDateSection({ project }: { project: ProjectResponse }) {
   }
 
   return (
-    <Card>
+    <Card role="region" aria-labelledby="start-date-section-title">
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex flex-col gap-1">
-            <CardTitle>Project start date</CardTitle>
+            <CardTitle id="start-date-section-title">Project start date</CardTitle>
             <CardDescription>
               Optional. Effort estimates never need a start date — only calendar scheduling does. No
               date is ever assumed on your behalf.

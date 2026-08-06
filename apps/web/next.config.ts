@@ -8,6 +8,12 @@ import { SECURITY_HEADERS } from './src/lib/security-headers';
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
+  // The browser E2E suite builds this app against a different API origin, and
+  // `NEXT_PUBLIC_*` values are inlined at build time — so that build cannot share
+  // an output directory with the development one without silently poisoning it.
+  // Unset everywhere else, which leaves the Next.js default of `.next`.
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
+
   turbopack: {
     // Pinned to the monorepo root. Left to inference, Turbopack walks up looking
     // for a lockfile and can settle on one outside the repository entirely,

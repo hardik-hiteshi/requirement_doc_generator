@@ -1,5 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ALLOWED_FORMATS, type ProjectResponse } from '@wdrg/contracts';
+import {
+  ALLOWED_FORMATS,
+  PROJECT_NOT_MODIFIABLE_MESSAGE,
+  type ProjectResponse,
+} from '@wdrg/contracts';
 import { assertNoAccessibilityViolations } from '@wdrg/testing';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -88,7 +92,9 @@ describe('DetailsSection', () => {
   it('reports a version conflict distinctly from a generic error', async () => {
     const { ApiClientError } = await import('@/lib/api-client');
     mocks.updateDetails.mockRejectedValue(
-      new ApiClientError('CONFLICT', 'Changed elsewhere since you loaded it.', 409),
+      new ApiClientError('CONFLICT', 'Changed elsewhere since you loaded it.', 409, undefined, [
+        { path: 'version', message: 'Expected version 1.', rule: 'version_conflict' },
+      ]),
     );
 
     const user = userEvent.setup();
@@ -96,6 +102,24 @@ describe('DetailsSection', () => {
     await user.click(screen.getByRole('button', { name: /save details/i }));
 
     expect(await screen.findByText('Changed elsewhere')).toBeInTheDocument();
+  });
+
+  it('does not call an unmodifiable project a conflict', async () => {
+    // Expiry and a version conflict share HTTP 409, but only one of them is
+    // fixed by reloading — telling an expired project's owner that somebody
+    // else edited it would send them chasing a change that never happened.
+    const { ApiClientError } = await import('@/lib/api-client');
+    mocks.updateDetails.mockRejectedValue(
+      new ApiClientError('CONFLICT', PROJECT_NOT_MODIFIABLE_MESSAGE, 409),
+    );
+
+    const user = userEvent.setup();
+    renderWithClient(<DetailsSection project={project} />);
+    await user.click(screen.getByRole('button', { name: /save details/i }));
+
+    expect(await screen.findByText('Not saved')).toBeInTheDocument();
+    expect(screen.getByText(PROJECT_NOT_MODIFIABLE_MESSAGE)).toBeInTheDocument();
+    expect(screen.queryByText('Changed elsewhere')).not.toBeInTheDocument();
   });
 
   it('offers every project type', () => {

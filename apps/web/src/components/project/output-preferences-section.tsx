@@ -56,11 +56,11 @@ export function OutputPreferencesSection({ project }: { project: ProjectResponse
   );
 
   return (
-    <Card>
+    <Card role="region" aria-labelledby="output-preferences-section-title">
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="flex flex-col gap-1">
-            <CardTitle>Export formats</CardTitle>
+            <CardTitle id="output-preferences-section-title">Export formats</CardTitle>
             <CardDescription>
               Choose the formats you want for each document. Only formats that suit a
               document&apos;s structure are offered. Nothing is generated yet — these are saved

@@ -124,22 +124,39 @@ Every response carries `x-correlation-id`.
 All project routes are under `/api/v1/projects`. The three access routes need no
 session; everything under `/current` requires one.
 
-| Method | Path                                          | Session | Purpose                                                            |
-| ------ | --------------------------------------------- | ------- | ------------------------------------------------------------------ |
-| POST   | `/api/v1/projects`                            | no      | Create an anonymous project. Returns the recovery secret **once**. |
-| POST   | `/api/v1/projects/session`                    | no      | Exchange a recovery secret for a session cookie.                   |
-| DELETE | `/api/v1/projects/session`                    | no      | End the session. The project is untouched.                         |
-| GET    | `/api/v1/projects/current`                    | yes     | Read the project the session is bound to.                          |
-| PUT    | `/api/v1/projects/current/details`            | yes     | Name, client, reference, description, project types.               |
-| PUT    | `/api/v1/projects/current/timeline`           | yes     | The mandatory delivery timeline.                                   |
-| PUT    | `/api/v1/projects/current/start-date`         | yes     | Start-date mode, with a date only where the mode has one.          |
-| PUT    | `/api/v1/projects/current/team-capacity`      | yes     | Optional team and capacity inputs.                                 |
-| PUT    | `/api/v1/projects/current/output-preferences` | yes     | Export formats per document.                                       |
-| DELETE | `/api/v1/projects/current`                    | yes     | Delete, confirmed by typed project name.                           |
+| Method | Path                                          | Session | Purpose                                                          |
+| ------ | --------------------------------------------- | ------- | ---------------------------------------------------------------- |
+| POST   | `/api/v1/projects`                            | no      | Create an anonymous project. Shows the recovery secret **once**. |
+| POST   | `/api/v1/projects/session`                    | no      | Exchange a recovery secret for a session cookie.                 |
+| DELETE | `/api/v1/projects/session`                    | no      | End the session. The project is untouched.                       |
+| GET    | `/api/v1/projects/current`                    | yes     | Read the project the session is bound to.                        |
+| PUT    | `/api/v1/projects/current/details`            | yes     | Name, client, reference, description, project types.             |
+| PUT    | `/api/v1/projects/current/timeline`           | yes     | The mandatory delivery timeline.                                 |
+| PUT    | `/api/v1/projects/current/start-date`         | yes     | Start-date mode, with a date only where the mode has one.        |
+| PUT    | `/api/v1/projects/current/team-capacity`      | yes     | Optional team and capacity inputs.                               |
+| PUT    | `/api/v1/projects/current/output-preferences` | yes     | Export formats per document.                                     |
+| DELETE | `/api/v1/projects/current`                    | yes     | Delete, confirmed by typed project name.                         |
 
 **The project is always taken from the session**, never from a path or body
 parameter. There is no request in which a caller can name a project it has not
 authenticated for, so the "forgot the ownership check" class of bug cannot occur.
+
+### Recovery-secret semantics
+
+`POST /api/v1/projects` is the only response that ever contains the raw secret —
+the server keeps a salted hash, so it cannot be shown again. The **link is not
+single-use**:
+
+| Behaviour                                     | Answer                                                       |
+| --------------------------------------------- | ------------------------------------------------------------ |
+| Exchange the same secret more than once       | Yes, without limit, from any device                          |
+| Concurrent project sessions                   | Yes — each exchange adds one, none are displaced             |
+| Credential invalidated by                     | Project deletion or expiry, and nothing else                 |
+| Who may use the link                          | Anyone holding it, with full read, edit and delete rights    |
+| Effect of deletion or expiry on open sessions | All fail immediately; every request re-checks project status |
+
+Rotating `PROJECT_SESSION_SECRET` invalidates every live **session** but leaves
+the recovery credential intact.
 
 ### Cookies
 

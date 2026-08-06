@@ -42,11 +42,12 @@ export class ProjectAccessService {
   ) {}
 
   /**
-   * Creates a project and returns the recovery secret exactly once.
+   * Creates a project and shows the recovery secret once.
    *
-   * This is the only moment the raw secret exists outside the user's own
-   * storage. It is not written to the database, not logged, and cannot be
-   * re-derived from the stored hash.
+   * This response is the only moment the raw secret exists outside the user's
+   * own storage: it is not written to the database, not logged, and cannot be
+   * re-derived from the stored hash. The *link* it forms remains usable — see
+   * the recovery semantics in `project-access.contract.ts`.
    */
   async createProject(
     request: CreateProjectRequest,
@@ -83,7 +84,11 @@ export class ProjectAccessService {
   }
 
   /**
-   * Verifies a recovery secret and returns the project it unlocks.
+   * Exchanges a recovery secret for the project it unlocks.
+   *
+   * Repeatable by design: the credential is not consumed, so the same link works
+   * again from another device, and each exchange issues an additional session
+   * rather than displacing an existing one. Only deletion and expiry end it.
    *
    * Every rejection path takes the same shape from the caller's point of view.
    * The specific reason is recorded in the audit trail, where an operator can

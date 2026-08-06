@@ -6,21 +6,38 @@ import { PROJECT_ID_PATTERN, RECOVERY_SECRET_PATTERN } from './project-identifie
 /**
  * Anonymous project access.
  *
- * The recovery secret is returned exactly once, when the project is created. It
- * is never retrievable afterwards, because the server keeps only a hash of it —
- * so a user who loses the recovery link loses the project. The UI has to say
- * that plainly rather than burying it.
+ * ## Recovery semantics
+ *
+ * These four statements are the whole model, and every surface — API, UI, docs,
+ * threat model — must agree with them:
+ *
+ * 1. **The recovery secret is shown once.** It is returned in the creation
+ *    response and never again, because only a salted hash of it is stored. A
+ *    user who loses the link loses the project; nobody can re-derive it.
+ * 2. **The recovery link is reusable.** "Shown once" is about display, not about
+ *    lifetime. The secret may be exchanged any number of times, from any device
+ *    or browser, for as long as the project is usable.
+ * 3. **Multiple project sessions may exist at the same time.** Sessions are
+ *    stateless signed cookies with no server-side registry, so a new exchange
+ *    issues an additional session rather than replacing an existing one.
+ * 4. **Deletion or expiry ends everything.** Both make further exchange fail and
+ *    make every outstanding session useless, because each request re-loads the
+ *    project and checks its status.
+ *
+ * Regenerating or revoking a recovery credential is deliberately not offered —
+ * see ADR-0010 for why an account-less product cannot do it safely.
  */
 
 /**
- * Shown once, at creation. The client is responsible for getting this in front
- * of the user before they navigate away.
+ * The creation response — the only place the raw recovery secret ever appears.
+ * The client is responsible for getting it in front of the user before they
+ * navigate away.
  */
 export const projectCreatedResponseSchema = z.object({
   project: projectResponseSchema,
-  /** Raw recovery secret. Returned once and never again. */
+  /** Raw recovery secret. Shown once here, and never retrievable again. */
   recoverySecret: z.string().regex(RECOVERY_SECRET_PATTERN),
-  /** Ready-to-copy link with the secret in the URL fragment. */
+  /** Ready-to-copy reusable link, with the secret in the URL fragment. */
   recoveryLink: z.string(),
   /** Plain-language statement of what holding the link means. */
   recoveryWarning: z.string(),
@@ -33,7 +50,7 @@ export type ProjectCreatedResponse = z.infer<typeof projectCreatedResponseSchema
  * cannot drift between the creation panel, the recovery panel and the docs.
  */
 export const RECOVERY_WARNING =
-  'Anyone with this link can open, edit and delete this project. It is shown once and cannot be recovered — save it somewhere safe before continuing.' as const;
+  'Anyone with this link can open, edit and delete this project. The link keeps working and can be used again from any device — but it is shown here only once and cannot be sent to you again, so save it somewhere safe before continuing.' as const;
 
 /* --------------------------------------------------------------- exchange */
 

@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   WORKFLOW_STEPS,
   hasProjectType,
+  type ProjectCreatedResponse,
   type ProjectResponse,
   type WorkflowStepId,
   type WorkflowStepState,
@@ -17,6 +18,7 @@ import { queryKeys } from '@/lib/query-keys';
 import { CreateProjectPanel } from '@/components/project/create-project-panel';
 import { DeleteProjectDialog } from '@/components/project/delete-project-dialog';
 import { DetailsSection } from '@/components/project/details-section';
+import { RecoveryLinkPanel } from '@/components/project/recovery-link-panel';
 import { OutputPreferencesSection } from '@/components/project/output-preferences-section';
 import { StartDateSection } from '@/components/project/start-date-section';
 import { TeamCapacitySection } from '@/components/project/team-capacity-section';
@@ -50,11 +52,24 @@ export function WorkspaceShell() {
   const { data: project, isPending, isError } = useCurrentProject();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [notice, setNotice] = useState<string | undefined>();
+  /**
+   * A just-created project, held here until the user confirms they have saved
+   * the recovery link.
+   *
+   * It lives at this level, and takes precedence over everything the query says,
+   * because the recovery link is displayed only once and cannot be re-derived. If
+   * it were owned by the creation panel, anything that made the workspace decide
+   * it had a project — seeding the cache, a refetch on window focus — would
+   * unmount that panel and destroy the only copy of the secret.
+   */
+  const [created, setCreated] = useState<ProjectCreatedResponse | null>(null);
 
   async function endSession() {
     await endProjectSession();
     queryClient.removeQueries({ queryKey: queryKeys.currentProject });
-    setNotice('Your project session has ended. Use your recovery link to open it again.');
+    setNotice(
+      'Your project session has ended. Your recovery link still works — use it to open the project again.',
+    );
   }
 
   const currentStepId: WorkflowStepId = 'project-details';
@@ -115,7 +130,7 @@ export function WorkspaceShell() {
             </Card>
           ) : null}
 
-          {isPending ? (
+          {isPending && !created ? (
             <Card>
               <CardContent className="p-5">
                 <p className="text-sm text-muted">Loading your project…</p>
@@ -123,9 +138,22 @@ export function WorkspaceShell() {
             </Card>
           ) : null}
 
-          {!isPending && (isError || !project) ? <CreateProjectPanel /> : null}
+          {created ? (
+            <RecoveryLinkPanel
+              recoveryLink={created.recoveryLink}
+              requireAcknowledgement
+              onAcknowledged={() => {
+                queryClient.setQueryData(queryKeys.currentProject, created.project);
+                setCreated(null);
+              }}
+            />
+          ) : null}
 
-          {project ? (
+          {!created && !isPending && (isError || !project) ? (
+            <CreateProjectPanel onCreated={setCreated} />
+          ) : null}
+
+          {!created && project ? (
             <>
               <Card>
                 <CardHeader>
@@ -180,9 +208,9 @@ function ProjectSidePanel({
   const expires = new Date(project.expiresAt);
 
   return (
-    <Card className="mt-4">
+    <Card role="region" aria-labelledby="this-project-title" className="mt-4">
       <CardHeader>
-        <CardTitle>This project</CardTitle>
+        <CardTitle id="this-project-title">This project</CardTitle>
         <CardDescription>Reference and lifecycle.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3 text-sm">
