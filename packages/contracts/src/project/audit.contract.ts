@@ -68,6 +68,24 @@ export const AUDIT_EVENT_TYPES = [
   'BASELINE_REVIEW_STARTED',
   'BASELINE_APPROVED',
   'BASELINE_OUTDATED',
+
+  /* Phase 5 — technology stack. A technology *name* is not confidential — it
+     appears in every proposal — so these carry the category and the decision.
+     Requirement text, prompts and the client's notes never do. */
+  'TECH_STACK_MODE_SELECTED',
+  'TECH_COMPONENT_SELECTED',
+  'TECH_COMPONENT_RECOMMENDED',
+  'TECH_RECOMMENDATION_ACCEPTED',
+  'TECH_RECOMMENDATION_REJECTED',
+  'TECH_COMPONENT_REPLACED',
+  'TECH_COMPONENT_LOCKED',
+  'TECH_COMPONENT_UNLOCKED',
+  'TECH_RISK_ACKNOWLEDGED',
+  'TECH_STACK_APPROVED',
+  'TECH_STACK_LOCKED',
+  'TECH_STACK_REOPENED',
+  'TECH_STACK_OUTDATED',
+  'TECH_STACK_SUPERSEDED',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];

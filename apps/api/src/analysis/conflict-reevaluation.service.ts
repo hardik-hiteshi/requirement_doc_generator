@@ -9,7 +9,7 @@ import {
 import { AppConfigService } from '../config/app-config.service';
 import { AI_PROVIDER_PORT } from '../ports';
 import { AnalysisRepository } from './analysis.repository';
-import { resolveModelProfile } from './analysis.module';
+import { resolveModelProfile } from './models/resolve-profile';
 import { conflictReevaluationOutputSchema } from './pipeline/task-schemas';
 import type { InferenceProvider } from './providers/inference.types';
 import { AiTaskRunner } from './task-runner.service';

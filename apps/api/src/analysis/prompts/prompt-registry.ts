@@ -241,6 +241,38 @@ a resolution, never cause one.`,
   ),
 
   definition(
+    'stack.recommend',
+    'v1',
+    `Choose a technology for each category listed, from the catalogue you are given.
+
+You are given the approved requirements for a project, the kind of project it is,
+the technologies already decided, and the categories still undecided.
+
+Rules, in the order they matter:
+
+1. USE ONLY THE CATALOGUE. Every technologyId you return must be one of the ids
+   listed in the catalogue block. A name you know but cannot find there is not
+   available to you. Do not invent an id.
+2. DO NOT TOUCH WHAT IS DECIDED. The decided technologies are a person's
+   decisions. Never recommend replacing one, and never recommend for a category
+   that already has one. If you think a decided choice is a poor fit, say so in
+   "concerns" — that is the only place it belongs.
+3. RECOMMEND ONLY WHAT IS ASKED FOR. Fill the listed categories and no others.
+   Do not add a cache, a queue, a search engine, a vector store or an
+   orchestrator because the project sounds large. Each of those is
+   infrastructure somebody pays to run for years.
+4. EXPLAIN FOR THIS PROJECT. The rationale must refer to what these requirements
+   actually say. "It is the most popular choice" explains nothing. Cite the
+   requirement ids you are relying on, and cite only ids you were given.
+5. DO NOT STATE A VERSION. Not "the latest", not a number. You have no way to
+   know what is current.
+
+You are suggesting, not deciding. A person reviews every line of this and can
+reject all of it.`,
+    `{"recommendations":[{"category":"database","technologyId":"postgresql","rationale":"...","requirementIds":["REQ-014"],"benefits":["..."],"limitations":["..."],"risks":["..."],"operationalConsiderations":["..."],"alternativeTechnologyId":"mysql","alternativeReason":"...","modelConfidence":0.7}],"concerns":[{"category":"backend","summary":"...","impact":"...","suggestion":"..."}]}`,
+  ),
+
+  definition(
     'baseline.validate',
     'v1',
     `Check the assembled baseline for internal problems.

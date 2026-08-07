@@ -51,3 +51,19 @@ export * from './analysis/conflict-reevaluation';
 export * from './analysis/baseline-calculations';
 export * from './analysis/analysis-routes';
 export * from './analysis/analysis-errors';
+
+/* Phase 5 — technology-stack recommendation, review and locking. */
+export * from './stack/technology-category.contract';
+export * from './stack/technology-catalog.contract';
+export * from './stack/technology-catalog.data';
+export * from './stack/project-type-categories';
+export * from './stack/stack-authority.contract';
+export * from './stack/stack-component.contract';
+export * from './stack/stack-evidence';
+export * from './stack/compatibility.contract';
+export * from './stack/stack-blockers';
+export * from './stack/stack-snapshot.contract';
+export * from './stack/downstream-authority.contract';
+export * from './stack/recommendation-run.contract';
+export * from './stack/stack-routes';
+export * from './stack/stack-errors';

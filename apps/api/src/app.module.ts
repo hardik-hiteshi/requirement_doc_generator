@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 
 import { AnalysisModule } from './analysis/analysis.module';
+import { StackModule } from './stack/stack.module';
 import { AuditModule } from './audit/audit.module';
 import { AllExceptionsFilter } from './common/errors';
 import { LoggingModule } from './common/logging';
@@ -35,6 +36,7 @@ import { RequirementsModule } from './requirements/requirements.module';
     ProjectsModule,
     RequirementsModule,
     AnalysisModule,
+    StackModule,
   ],
   providers: [
     {

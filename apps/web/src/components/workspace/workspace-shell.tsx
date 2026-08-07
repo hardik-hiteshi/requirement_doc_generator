@@ -21,6 +21,7 @@ import { DetailsSection } from '@/components/project/details-section';
 import { RecoveryLinkPanel } from '@/components/project/recovery-link-panel';
 import { RequirementInputStep } from '@/components/requirements/requirement-input-step';
 import { AnalysisStep } from '@/components/analysis/analysis-step';
+import { TechnologyStackStep } from '@/components/stack/technology-stack-step';
 import { BaselineStep } from '@/components/analysis/baseline-step';
 import { ClarificationsStep } from '@/components/analysis/clarifications-step';
 import { useSources } from '@/hooks/use-sources';
@@ -64,6 +65,14 @@ function stepStates(
     'requirement-analysis': hasReviewedSources ? 'available' : 'locked',
     clarifications: hasReviewedSources ? 'available' : 'locked',
     'baseline-approval': hasReviewedSources ? 'available' : 'locked',
+    /*
+     * Unlocked alongside the analysis steps rather than gated on an approved
+     * baseline. The step itself refuses to approve anything without one and says
+     * why — which is more useful than a locked tab that explains nothing, and it
+     * lets someone record the technologies a client already mandated while the
+     * requirements are still being settled.
+     */
+    'technology-stack': hasReviewedSources ? 'available' : 'locked',
   };
 }
 
@@ -72,6 +81,7 @@ const ANALYSIS_STEPS: readonly WorkflowStepId[] = [
   'requirement-analysis',
   'clarifications',
   'baseline-approval',
+  'technology-stack',
 ];
 
 export function WorkspaceShell() {
@@ -271,6 +281,7 @@ export function WorkspaceShell() {
                   {currentStepId === 'requirement-analysis' ? <AnalysisStep /> : null}
                   {currentStepId === 'clarifications' ? <ClarificationsStep /> : null}
                   {currentStepId === 'baseline-approval' ? <BaselineStep /> : null}
+                  {currentStepId === 'technology-stack' ? <TechnologyStackStep /> : null}
 
                   <div className="flex flex-wrap gap-2">
                     {ANALYSIS_STEPS.filter((step) => step !== currentStepId).map((step) => (

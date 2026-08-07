@@ -7,11 +7,14 @@ import { ProjectAccessModule } from '../project-access/project-access.module';
 import { AppConfigModule } from '../config/app-config.module';
 import { AppConfigService } from '../config/app-config.service';
 import { AI_PROVIDER_PORT } from '../ports';
-import { findModelProfile } from './models/model-profiles';
+import { resolveModelProfile } from './models/resolve-profile';
+
+// Re-exported for the callers that already import it from here.
+export { resolveModelProfile };
 import { EndpointGuard } from './net/endpoint-guard.service';
 import { SafeHttpClient } from './net/safe-http.client';
 import { DeterministicProvider } from './providers/deterministic.provider';
-import { InferenceError, type InferenceProvider } from './providers/inference.types';
+import { type InferenceProvider } from './providers/inference.types';
 import { OllamaProvider } from './providers/ollama.provider';
 import { OpenAiCompatibleProvider } from './providers/openai-compatible.provider';
 import { AiTaskRunner } from './task-runner.service';
@@ -113,6 +116,9 @@ import {
   exports: [
     AnalysisRepository,
     AnalysisService,
+    // Phase 5 reads the baseline through this rather than through the
+    // repository, so the lazy outdated check runs for it too.
+    BaselineService,
     AI_PROVIDER_PORT,
     AiTaskRunner,
     EndpointGuard,
@@ -123,29 +129,3 @@ import {
   ],
 })
 export class AnalysisModule {}
-
-/**
- * The profile this deployment is configured to use.
- *
- * Exported as a function rather than a provider because it is a pure resolution
- * over configuration, and both the startup policy check and the eventual
- * analysis service need it before any request exists.
- */
-export function resolveModelProfile(config: AppConfigService) {
-  const configured = config.ai.modelProfile.trim();
-
-  if (configured.length === 0) {
-    throw new InferenceError(
-      'model_unavailable',
-      'No model profile is configured. Set AI_MODEL_PROFILE to one of the known profiles.',
-    );
-  }
-
-  const profile = findModelProfile(configured);
-
-  if (!profile) {
-    throw new InferenceError('model_unavailable', `Unknown model profile "${configured}".`);
-  }
-
-  return profile;
-}
