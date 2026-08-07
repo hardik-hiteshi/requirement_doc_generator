@@ -102,6 +102,31 @@ See [ADR-0018](../adr/0018-model-profile-strategy.md).
 Every problem is reported at once, each with a fix, and no setting's _value_ is
 ever printed.
 
+## Where a request is allowed to go
+
+The endpoint policy is a security control, not a setting. Requirement documents
+are a client's confidential material, so the destination of an inference request
+is the most consequential thing this application decides — and it is decided at
+the socket, not in this document.
+
+| Threat                                         | What happens                                                                                    |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Hosted model vendor                            | 33 vendor domains refused outright, in development as well as production                        |
+| Cloud metadata service                         | Refused by address and by hostname, in every notation — including `::ffff:169.254.169.254`      |
+| Wildcard DNS reflectors, tunnels               | `nip.io`, `ngrok`, `trycloudflare.com` and similar refused: the destination is not the hostname |
+| Alternate IP encodings                         | `0177.0.0.1`, `2130706433`, `127.1` refused rather than decoded                                 |
+| A name that resolves somewhere else            | Resolved per request; **every** returned address validated, not the first                       |
+| A name with one private and one public address | Refused outright — which address you would reach depends on the resolver                        |
+| **DNS rebinding**                              | The socket connects to the validated address. No resolution happens at connection time          |
+| A peer that turned out to be somewhere else    | Re-validated after connect, **before the request body is written**                              |
+| A server answering `302`                       | Refused, never followed — following one hands destination choice to the server                  |
+| Credentials in the URL                         | Refused; they end up in logs                                                                    |
+
+Both adapters go through the same client, so the policy cannot apply to one and
+not the other. `AI_REQUIRE_REMOTE_ENDPOINT=true` additionally refuses loopback in
+production, for a deployment whose policy requires inference on a separate
+internal host. See [ADR-0021](../adr/0021-inference-endpoint-hardening.md).
+
 ## Choosing a model
 
 | Consideration         | Why it matters                                                                                                                                                                                                                      |

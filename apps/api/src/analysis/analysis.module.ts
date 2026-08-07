@@ -4,6 +4,8 @@ import { AppConfigModule } from '../config/app-config.module';
 import { AppConfigService } from '../config/app-config.service';
 import { AI_PROVIDER_PORT } from '../ports';
 import { findModelProfile } from './models/model-profiles';
+import { EndpointGuard } from './net/endpoint-guard.service';
+import { SafeHttpClient } from './net/safe-http.client';
 import { DeterministicProvider } from './providers/deterministic.provider';
 import { InferenceError, type InferenceProvider } from './providers/inference.types';
 import { OllamaProvider } from './providers/ollama.provider';
@@ -25,6 +27,8 @@ import { AiTaskRunner } from './task-runner.service';
 @Module({
   imports: [AppConfigModule],
   providers: [
+    EndpointGuard,
+    SafeHttpClient,
     OllamaProvider,
     OpenAiCompatibleProvider,
     DeterministicProvider,
@@ -54,6 +58,8 @@ import { AiTaskRunner } from './task-runner.service';
   exports: [
     AI_PROVIDER_PORT,
     AiTaskRunner,
+    EndpointGuard,
+    SafeHttpClient,
     OllamaProvider,
     OpenAiCompatibleProvider,
     DeterministicProvider,

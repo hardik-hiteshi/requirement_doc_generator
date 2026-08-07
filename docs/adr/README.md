@@ -54,3 +54,4 @@ think is part of the value.
 | [0018](0018-model-profile-strategy.md)              | Model profiles as data, not a hardcoded choice   | Accepted |
 | [0019](0019-prompt-versioning.md)                   | Versioned, registered, checksummed prompts       | Accepted |
 | [0020](0020-structured-output-repair.md)            | Bounded repair; never persist unvalidated output | Accepted |
+| [0021](0021-inference-endpoint-hardening.md)        | Connect to a validated address, not to a name    | Accepted |

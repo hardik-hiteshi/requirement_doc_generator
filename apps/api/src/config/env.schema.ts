@@ -221,6 +221,16 @@ export const apiEnvSchema = z.object({
   AI_MAX_OUTPUT_TOKENS: integerSchema({ default: 0, min: 0, max: 200_000 }),
   /** Retries for a retryable provider failure, beyond the first attempt. */
   AI_MAX_ATTEMPTS: integerSchema({ default: 3, min: 1, max: 10 }),
+  /**
+   * Whether production refuses a loopback inference endpoint.
+   *
+   * Off by default: "the model runs on this box" is the most common — and
+   * entirely legitimate — production shape for a self-hosted deployment of this
+   * size, and refusing it would push operators towards exposing the inference
+   * server on a network instead, which is worse. A deployment whose own policy
+   * requires inference to be a separate internal host turns this on.
+   */
+  AI_REQUIRE_REMOTE_ENDPOINT: booleanFromString(false),
 
   /* ---------------------------------------------------------------- docs */
   /** Serve the interactive OpenAPI UI. Disabled by default in production. */

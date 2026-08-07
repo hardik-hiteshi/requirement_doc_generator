@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { checkInferenceEndpoint, type ModelProfile } from '@wdrg/contracts';
+import type { ModelProfile } from '@wdrg/contracts';
 
 import { AppConfigService } from '../../config/app-config.service';
+import { SafeHttpClient, type SafeResponse } from '../net/safe-http.client';
 import {
   InferenceError,
   type InferenceProvider,
@@ -18,10 +19,12 @@ import {
  * inference servers, so speaking it means a deployment can choose its engine.
  *
  * **The protocol is borrowed. The service is not.** Every request goes to
- * `AI_BASE_URL`, there is no default, and `checkInferenceEndpoint` refuses
- * hosted-vendor domains outright — in production it additionally requires a
- * private address. The name of this class describes a wire format, and the
- * policy is what makes that safe.
+ * `AI_BASE_URL`, there is no default, and every one of them goes through the
+ * same `SafeHttpClient` the Ollama adapter uses — the same vendor denylist, the
+ * same resolved-address validation, the same refusal to follow a redirect. One
+ * enforcement point, so the policy cannot apply to one adapter and not the
+ * other. The name of this class describes a wire format; the policy is what
+ * makes that safe.
  *
  * No API key is sent. A self-hosted server that wants authentication should sit
  * behind something that provides it; putting a vendor-style bearer token in this
@@ -32,10 +35,13 @@ export class OpenAiCompatibleProvider implements InferenceProvider {
   readonly name = 'local-openai-compatible';
   private readonly logger = new Logger(OpenAiCompatibleProvider.name);
 
-  constructor(private readonly config: AppConfigService) {}
+  constructor(
+    private readonly config: AppConfigService,
+    private readonly http: SafeHttpClient,
+  ) {}
 
   async complete(request: InferenceRequest): Promise<InferenceResponse> {
-    const baseUrl = this.assertEndpoint();
+    const baseUrl = this.baseUrl();
     const started = Date.now();
 
     const body = {
@@ -52,13 +58,13 @@ export class OpenAiCompatibleProvider implements InferenceProvider {
       ...(request.jsonMode ? { response_format: { type: 'json_object' } } : {}),
     };
 
-    const response = await this.post(
+    const response = await this.send(
       `${baseUrl}/v1/chat/completions`,
       body,
       request.timeoutMs,
       request,
     );
-    const payload = (await response.json()) as OpenAiChatResponse;
+    const payload = parseJson<OpenAiChatResponse>(response.body);
     const choice = payload.choices?.[0];
     const content = choice?.message?.content ?? '';
 
@@ -81,21 +87,9 @@ export class OpenAiCompatibleProvider implements InferenceProvider {
   }
 
   async health(_profile: ModelProfile, model: string): Promise<ProviderHealth> {
-    let baseUrl: string;
-
     try {
-      baseUrl = this.assertEndpoint();
-    } catch (cause) {
-      return {
-        available: false,
-        provider: this.name,
-        detail: cause instanceof InferenceError ? cause.message : 'The endpoint is not usable.',
-      };
-    }
-
-    try {
-      const response = await this.post(`${baseUrl}/v1/models`, undefined, 10_000);
-      const payload = (await response.json()) as { data?: { id?: string }[] };
+      const response = await this.send(`${this.baseUrl()}/v1/models`, undefined, 10_000);
+      const payload = parseJson<{ data?: { id?: string }[] }>(response.body);
       const models = (payload.data ?? [])
         .map((entry) => entry.id)
         .filter((id): id is string => typeof id === 'string');
@@ -111,59 +105,45 @@ export class OpenAiCompatibleProvider implements InferenceProvider {
         models,
         ...(present ? {} : { detail: `The server does not serve "${model}".` }),
       };
-    } catch {
+    } catch (cause) {
       return {
         available: false,
         provider: this.name,
-        detail: 'The inference server is not reachable.',
+        detail:
+          cause instanceof InferenceError
+            ? cause.message
+            : 'The inference server is not reachable.',
       };
     }
   }
 
-  private assertEndpoint(): string {
-    const verdict = checkInferenceEndpoint(this.config.ai.baseUrl, {
-      requirePrivateAddress: this.config.isProduction,
-    });
-
-    if (!verdict.allowed) {
-      throw new InferenceError(
-        'provider_unavailable',
-        verdict.reason ?? 'The configured inference endpoint is not permitted.',
-      );
-    }
-
+  private baseUrl(): string {
     return this.config.ai.baseUrl.trim().replace(/\/+$/, '');
   }
 
-  private async post(
+  private async send(
     url: string,
     body: unknown,
     timeoutMs: number,
     request?: InferenceRequest,
-  ): Promise<Response> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
+  ): Promise<SafeResponse> {
     try {
-      const response = await fetch(url, {
+      const response = await this.http.send({
+        url,
         method: body === undefined ? 'GET' : 'POST',
-        signal: controller.signal,
-        headers: body === undefined ? {} : { 'content-type': 'application/json' },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        timeoutMs,
+        ...(body === undefined ? {} : { body }),
+        ...(request?.correlationId ? { correlationId: request.correlationId } : {}),
       });
 
-      if (!response.ok) {
-        throw await this.mapHttpFailure(response, request);
+      if (response.status >= 400) {
+        throw this.mapHttpFailure(response, request);
       }
 
       return response;
     } catch (cause) {
       if (cause instanceof InferenceError) {
         throw cause;
-      }
-
-      if (controller.signal.aborted) {
-        throw new InferenceError('timeout', 'The inference request timed out.', { cause });
       }
 
       this.logger.error(
@@ -176,17 +156,11 @@ export class OpenAiCompatibleProvider implements InferenceProvider {
         'The inference server could not be reached.',
         { cause },
       );
-    } finally {
-      clearTimeout(timer);
     }
   }
 
-  private async mapHttpFailure(
-    response: Response,
-    request?: InferenceRequest,
-  ): Promise<InferenceError> {
-    const text = await response.text().catch(() => '');
-    const lower = text.toLowerCase();
+  private mapHttpFailure(response: SafeResponse, request?: InferenceRequest): InferenceError {
+    const lower = response.body.toLowerCase();
 
     if (response.status === 404 || lower.includes('model_not_found')) {
       return new InferenceError(
@@ -215,6 +189,18 @@ export class OpenAiCompatibleProvider implements InferenceProvider {
     return new InferenceError(
       'provider_unavailable',
       `The inference server returned ${response.status}.`,
+    );
+  }
+}
+
+function parseJson<T>(body: string): T {
+  try {
+    return JSON.parse(body) as T;
+  } catch (cause) {
+    throw new InferenceError(
+      'invalid_json',
+      'The inference server returned a response that is not JSON.',
+      { cause },
     );
   }
 }

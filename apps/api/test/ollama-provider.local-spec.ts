@@ -3,6 +3,8 @@ import { checkInferenceEndpoint } from '@wdrg/contracts';
 
 import type { AppConfigService } from '../src/config/app-config.service';
 import { findModelProfile } from '../src/analysis/models/model-profiles';
+import { EndpointGuard } from '../src/analysis/net/endpoint-guard.service';
+import { SafeHttpClient } from '../src/analysis/net/safe-http.client';
 import { OllamaProvider } from '../src/analysis/providers/ollama.provider';
 import { InferenceError } from '../src/analysis/providers/inference.types';
 import { AiTaskRunner } from '../src/analysis/task-runner.service';
@@ -27,8 +29,17 @@ import { AiTaskRunner } from '../src/analysis/task-runner.service';
 const BASE_URL = process.env.AI_BASE_URL ?? 'http://127.0.0.1:11434';
 const MODEL = process.env.AI_MODEL ?? 'qwen2.5:3b-instruct';
 
+/** A provider wired exactly as the module wires it: through the endpoint guard. */
+function ollama(overrides: Record<string, unknown> & { ai?: Record<string, unknown> } = {}) {
+  const settings = config(overrides);
+
+  return new OllamaProvider(settings, new SafeHttpClient(new EndpointGuard(settings)));
+}
+
 /** Overrides merge into `ai`; anything else is set alongside it. */
-function config(overrides: Record<string, unknown> = {}): AppConfigService {
+function config(
+  overrides: Record<string, unknown> & { ai?: Record<string, unknown> } = {},
+): AppConfigService {
   const { ai, ...rest } = overrides;
 
   return {
@@ -44,13 +55,14 @@ function config(overrides: Record<string, unknown> = {}): AppConfigService {
       maxContextTokens: 8_192,
       maxOutputTokens: 1_024,
       maxAttempts: 2,
-      ...(ai as object),
+      requireRemoteEndpoint: false,
+      ...(ai ?? {}),
     },
   } as unknown as AppConfigService;
 }
 
 describe('Ollama, against a real local model', () => {
-  const provider = new OllamaProvider(config());
+  const provider = ollama();
   const profile = findModelProfile('qwen2.5-3b-instruct')!;
   let available = false;
 
@@ -125,7 +137,7 @@ describe('Ollama, against a real local model', () => {
   it('reports a timeout rather than hanging', async () => {
     if (!available) return;
 
-    const impatient = new OllamaProvider(config({ ai: { requestTimeoutMs: 1 } }));
+    const impatient = ollama({ ai: { requestTimeoutMs: 1 } });
 
     await expect(
       impatient.complete({
@@ -153,7 +165,7 @@ describe('Ollama, against a real local model', () => {
   it('refuses to call a hosted endpoint even when configured to', async () => {
     // The policy is enforced per request, not only at startup: configuration can
     // change while the process is running.
-    const misconfigured = new OllamaProvider(config({ ai: { baseUrl: 'https://api.openai.com' } }));
+    const misconfigured = ollama({ ai: { baseUrl: 'https://api.openai.com' } });
 
     await expect(
       misconfigured.complete({

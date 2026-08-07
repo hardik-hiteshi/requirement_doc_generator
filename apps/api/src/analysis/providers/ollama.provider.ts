@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { checkInferenceEndpoint, type ModelProfile } from '@wdrg/contracts';
+import type { ModelProfile } from '@wdrg/contracts';
 
 import { AppConfigService } from '../../config/app-config.service';
+import { SafeHttpClient, type SafeResponse } from '../net/safe-http.client';
 import {
   InferenceError,
   type InferenceProvider,
@@ -23,19 +24,24 @@ import {
  * context window per request so the application's budget and the server's limit
  * cannot disagree.
  *
- * **The endpoint is policy-checked before every request.** Configuration can
- * change at runtime, and a check that only ran at startup would be a check that
- * ran once.
+ * **Every request goes through `SafeHttpClient`**, which re-applies the endpoint
+ * policy, resolves and validates the destination, connects to the validated
+ * address rather than to a name, and refuses redirects. A check that only ran at
+ * startup would be a check that ran once, against a destination that can change
+ * underneath it.
  */
 @Injectable()
 export class OllamaProvider implements InferenceProvider {
   readonly name = 'ollama';
   private readonly logger = new Logger(OllamaProvider.name);
 
-  constructor(private readonly config: AppConfigService) {}
+  constructor(
+    private readonly config: AppConfigService,
+    private readonly http: SafeHttpClient,
+  ) {}
 
   async complete(request: InferenceRequest): Promise<InferenceResponse> {
-    const baseUrl = this.assertEndpoint();
+    const baseUrl = this.baseUrl();
     const started = Date.now();
 
     const body = {
@@ -53,8 +59,8 @@ export class OllamaProvider implements InferenceProvider {
       },
     };
 
-    const response = await this.post(`${baseUrl}/api/chat`, body, request.timeoutMs, request);
-    const payload = (await response.json()) as OllamaChatResponse;
+    const response = await this.send(`${baseUrl}/api/chat`, body, request.timeoutMs, request);
+    const payload = parseJson<OllamaChatResponse>(response.body);
     const content = payload.message?.content ?? '';
 
     if (content.trim().length === 0) {
@@ -78,21 +84,9 @@ export class OllamaProvider implements InferenceProvider {
   }
 
   async health(_profile: ModelProfile, model: string): Promise<ProviderHealth> {
-    let baseUrl: string;
-
     try {
-      baseUrl = this.assertEndpoint();
-    } catch (cause) {
-      return {
-        available: false,
-        provider: this.name,
-        detail: cause instanceof InferenceError ? cause.message : 'The endpoint is not usable.',
-      };
-    }
-
-    try {
-      const response = await this.post(`${baseUrl}/api/tags`, undefined, 10_000);
-      const payload = (await response.json()) as { models?: { name?: string }[] };
+      const response = await this.send(`${this.baseUrl()}/api/tags`, undefined, 10_000);
+      const payload = parseJson<{ models?: { name?: string }[] }>(response.body);
       const models = (payload.models ?? [])
         .map((entry) => entry.name)
         .filter((name): name is string => typeof name === 'string');
@@ -113,33 +107,20 @@ export class OllamaProvider implements InferenceProvider {
             }),
       };
     } catch (cause) {
+      // The endpoint being refused and the server being down are different
+      // problems with different fixes, so they get different messages.
       return {
         available: false,
         provider: this.name,
-        detail: 'The inference server is not reachable.',
-        ...(cause instanceof Error ? {} : {}),
+        detail:
+          cause instanceof InferenceError
+            ? cause.message
+            : 'The inference server is not reachable.',
       };
     }
   }
 
-  /**
-   * Re-checks the configured endpoint and returns it without a trailing slash.
-   *
-   * Throwing rather than returning a verdict: a request to a disallowed endpoint
-   * must not be possible to make by ignoring a return value.
-   */
-  private assertEndpoint(): string {
-    const verdict = checkInferenceEndpoint(this.config.ai.baseUrl, {
-      requirePrivateAddress: this.config.isProduction,
-    });
-
-    if (!verdict.allowed) {
-      throw new InferenceError(
-        'provider_unavailable',
-        verdict.reason ?? 'The configured inference endpoint is not permitted.',
-      );
-    }
-
+  private baseUrl(): string {
     return this.config.ai.baseUrl.trim().replace(/\/+$/, '');
   }
 
@@ -147,35 +128,29 @@ export class OllamaProvider implements InferenceProvider {
     return this.config.ai.maxContextTokens > 0 ? this.config.ai.maxContextTokens : 8_192;
   }
 
-  private async post(
+  private async send(
     url: string,
     body: unknown,
     timeoutMs: number,
     request?: InferenceRequest,
-  ): Promise<Response> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
+  ): Promise<SafeResponse> {
     try {
-      const response = await fetch(url, {
+      const response = await this.http.send({
+        url,
         method: body === undefined ? 'GET' : 'POST',
-        signal: controller.signal,
-        headers: body === undefined ? {} : { 'content-type': 'application/json' },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        timeoutMs,
+        ...(body === undefined ? {} : { body }),
+        ...(request?.correlationId ? { correlationId: request.correlationId } : {}),
       });
 
-      if (!response.ok) {
-        throw await this.mapHttpFailure(response, request);
+      if (response.status >= 400) {
+        throw this.mapHttpFailure(response, request);
       }
 
       return response;
     } catch (cause) {
       if (cause instanceof InferenceError) {
         throw cause;
-      }
-
-      if (controller.signal.aborted) {
-        throw new InferenceError('timeout', 'The inference request timed out.', { cause });
       }
 
       // Endpoint and task only. Never the messages — they are the client's
@@ -190,18 +165,12 @@ export class OllamaProvider implements InferenceProvider {
         'The inference server could not be reached.',
         { cause },
       );
-    } finally {
-      clearTimeout(timer);
     }
   }
 
   /** Maps Ollama's HTTP failures onto the reasons a caller acts on. */
-  private async mapHttpFailure(
-    response: Response,
-    request?: InferenceRequest,
-  ): Promise<InferenceError> {
-    const text = await response.text().catch(() => '');
-    const lower = text.toLowerCase();
+  private mapHttpFailure(response: SafeResponse, request?: InferenceRequest): InferenceError {
+    const lower = response.body.toLowerCase();
 
     if (response.status === 404 || lower.includes('not found')) {
       return new InferenceError(
@@ -221,6 +190,18 @@ export class OllamaProvider implements InferenceProvider {
     return new InferenceError(
       'provider_unavailable',
       `The inference server returned ${response.status}.`,
+    );
+  }
+}
+
+function parseJson<T>(body: string): T {
+  try {
+    return JSON.parse(body) as T;
+  } catch (cause) {
+    throw new InferenceError(
+      'invalid_json',
+      'The inference server returned a response that is not JSON.',
+      { cause },
     );
   }
 }

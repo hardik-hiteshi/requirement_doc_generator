@@ -200,6 +200,7 @@ Recorded as [ADRs](docs/adr/), with the reasoning and the rejected alternatives:
 | [0018](docs/adr/0018-model-profile-strategy.md)              | Model profiles as data, not a hardcoded choice                                        |
 | [0019](docs/adr/0019-prompt-versioning.md)                   | Versioned, registered, checksummed prompts                                            |
 | [0020](docs/adr/0020-structured-output-repair.md)            | Bounded repair; unvalidated model output is never persisted                           |
+| [0021](docs/adr/0021-inference-endpoint-hardening.md)        | Connect to a validated address, not to a name                                         |
 | [0009](docs/adr/0009-request-validation-and-mapping.md)      | Reject undeclared properties; map explicitly to domain types                          |
 | [0010](docs/adr/0010-anonymous-project-access.md)            | Anonymous access: split identifier, secret in the URL fragment, stateless session     |
 

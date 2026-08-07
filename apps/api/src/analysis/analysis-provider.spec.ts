@@ -183,7 +183,12 @@ describe('inference endpoint policy', () => {
     ['172.31.255.255', true],
     ['172.32.0.1', false],
     ['192.168.0.1', true],
-    ['169.254.1.1', true],
+    // Link-local is *not* private. It reaches whatever answers on the local
+    // segment, which in a cloud deployment includes the metadata service.
+    ['169.254.1.1', false],
+    ['169.254.169.254', false],
+    // Carrier-grade NAT is shared with a carrier, so it is not "your network".
+    ['100.64.0.1', false],
     ['8.8.8.8', false],
     ['1.1.1.1', false],
     ['::1', true],

@@ -125,6 +125,7 @@ export function checkProductionPolicy(config: AppConfigService): PolicyViolation
     // has pointed at a vendor should find out before it accepts any work.
     const endpoint = checkInferenceEndpoint(config.ai.baseUrl, {
       requirePrivateAddress: true,
+      rejectLoopback: config.ai.requireRemoteEndpoint,
     });
 
     if (!endpoint.allowed && config.ai.provider !== 'deterministic') {

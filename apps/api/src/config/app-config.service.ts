@@ -73,6 +73,8 @@ export interface AiConfig {
   readonly maxContextTokens: number;
   readonly maxOutputTokens: number;
   readonly maxAttempts: number;
+  /** Whether production refuses a loopback endpoint as well as a public one. */
+  readonly requireRemoteEndpoint: boolean;
 }
 
 export interface UploadConfig {
@@ -266,6 +268,7 @@ export class AppConfigService {
       maxContextTokens: this.config.get('AI_MAX_CONTEXT_TOKENS', { infer: true }),
       maxOutputTokens: this.config.get('AI_MAX_OUTPUT_TOKENS', { infer: true }),
       maxAttempts: this.config.get('AI_MAX_ATTEMPTS', { infer: true }),
+      requireRemoteEndpoint: this.config.get('AI_REQUIRE_REMOTE_ENDPOINT', { infer: true }),
     };
   }
 
