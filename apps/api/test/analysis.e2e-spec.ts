@@ -488,10 +488,11 @@ describe('Requirement analysis (e2e)', () => {
     expect(clarifications[0]?.key).toBe('Q-001');
     expect(clarifications[0]?.category).toBe('conflict');
     expect(clarifications[0]?.blocksApproval).toBe(true);
-    expect(clarifications[0]?.status).toBe('open');
+    expect(clarifications[0]?.status).toBe('UNANSWERED');
+    expect(clarifications[0]?.answers).toEqual([]);
   });
 
-  it('records an assumption as an assumption, and never invents one', async () => {
+  it('records an assumption only when the person says they are assuming', async () => {
     const { session } = await analysedProject();
     const clarifications = (await session.agent.get(ANALYSIS_ROUTES.clarifications))
       .body as Clarification[];
@@ -502,15 +503,30 @@ describe('Requirement analysis (e2e)', () => {
 
     expect(before.some((item) => item.category === 'assumption')).toBe(false);
 
+    const answered = (
+      await session.agent
+        .post(ANALYSIS_ROUTES.answerClarification(clarifications[0]!.id))
+        .set('x-csrf-token', session.csrf)
+        .send({
+          text: 'We are assuming manager approval is required.',
+          isAssumption: true,
+          expectedVersion: clarifications[0]!.version,
+        })
+        .expect(201)
+    ).body as Clarification;
+
+    // Answering alone creates nothing. Confirming is the deliberate act, and
+    // an assumption exists only because a person said they were assuming.
+    expect(
+      ((await session.agent.get(ANALYSIS_ROUTES.requirements)).body as RequirementItem[]).some(
+        (item) => item.category === 'assumption',
+      ),
+    ).toBe(false);
+
     await session.agent
-      .post(ANALYSIS_ROUTES.answerClarification(clarifications[0]!.id))
+      .post(ANALYSIS_ROUTES.confirmClarification(clarifications[0]!.id))
       .set('x-csrf-token', session.csrf)
-      .send({
-        text: 'We are assuming manager approval is required.',
-        isAssumption: true,
-        integrateNow: false,
-        expectedVersion: clarifications[0]!.version,
-      })
+      .send({ acknowledged: true, expectedVersion: answered.version })
       .expect(201);
 
     const after = (await session.agent.get(ANALYSIS_ROUTES.requirements)).body as RequirementItem[];
@@ -522,29 +538,52 @@ describe('Requirement analysis (e2e)', () => {
     expect(assumption?.title).toMatch(/^Assumption:/);
   });
 
-  it('refuses to answer a question twice', async () => {
+  it('answering again creates a new version rather than being refused', async () => {
+    /*
+     * Changed deliberately. An answer that turns out to be wrong has to be
+     * correctable, and refusing the second one would force a reviewer to
+     * either live with it or delete the question.
+     */
     const { session } = await analysedProject();
     const clarifications = (await session.agent.get(ANALYSIS_ROUTES.clarifications))
       .body as Clarification[];
     const question = clarifications[0]!;
 
-    const answer = {
-      text: 'Yes, approval is required.',
-      isAssumption: false,
-      integrateNow: false,
-      expectedVersion: question.version,
-    };
+    const first = (
+      await session.agent
+        .post(ANALYSIS_ROUTES.answerClarification(question.id))
+        .set('x-csrf-token', session.csrf)
+        .send({
+          text: 'Yes, approval is required.',
+          isAssumption: false,
+          expectedVersion: question.version,
+        })
+        .expect(201)
+    ).body as Clarification;
 
+    const second = (
+      await session.agent
+        .post(ANALYSIS_ROUTES.answerClarification(question.id))
+        .set('x-csrf-token', session.csrf)
+        .send({
+          text: 'Actually, no approval is needed.',
+          isAssumption: false,
+          expectedVersion: first.version,
+        })
+        .expect(201)
+    ).body as Clarification;
+
+    expect(second.answers).toHaveLength(2);
+    expect(second.answers[0]?.status).toBe('superseded');
+    // The first answer is still readable. Somebody may have written a
+    // requirement against it.
+    expect(second.answers[0]?.text).toBe('Yes, approval is required.');
+
+    // A stale version is still refused, which is the concurrency guarantee.
     await session.agent
       .post(ANALYSIS_ROUTES.answerClarification(question.id))
       .set('x-csrf-token', session.csrf)
-      .send(answer)
-      .expect(201);
-
-    await session.agent
-      .post(ANALYSIS_ROUTES.answerClarification(question.id))
-      .set('x-csrf-token', session.csrf)
-      .send(answer)
+      .send({ text: 'A third answer.', isAssumption: false, expectedVersion: question.version })
       .expect(409);
   });
 
@@ -727,17 +766,21 @@ describe('Requirement analysis (e2e)', () => {
       .body as Clarification[];
 
     for (const clarification of clarifications) {
-      if (clarification.status !== 'open') {
+      if (clarification.status !== 'UNANSWERED') {
         continue;
       }
 
+      /*
+       * Dismissed rather than answered. Answering is not settling: the answer
+       * still has to be confirmed and integrated, and this helper's job is to
+       * get a baseline to a state where approval is possible without pretending
+       * the question was resolved.
+       */
       await session.agent
-        .post(ANALYSIS_ROUTES.answerClarification(clarification.id))
+        .post(ANALYSIS_ROUTES.dismissClarification(clarification.id))
         .set('x-csrf-token', session.csrf)
         .send({
-          text: 'Approval is required.',
-          isAssumption: false,
-          integrateNow: false,
+          reason: 'Settled with the client on the call.',
           expectedVersion: clarification.version,
         })
         .expect(201);

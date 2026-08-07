@@ -52,6 +52,13 @@ export function toItem(document: RequirementItemDocument): RequirementItem {
     editedByUser: document.editedByUser,
     chunkIds: document.chunkIds,
     ...(document.supersededById ? { supersededById: document.supersededById } : {}),
+    ...(document.proposedRevision
+      ? {
+          proposedRevision:
+            document.proposedRevision as unknown as RequirementItem['proposedRevision'],
+        }
+      : {}),
+    needsRevalidation: document.needsRevalidation ?? false,
     createdAt: timestamp(document, 'createdAt'),
     updatedAt: timestamp(document, 'updatedAt'),
     version: document.version,
@@ -171,7 +178,7 @@ export function toClarification(document: ClarificationDocument): Clarification 
     relatedConflictIds: document.relatedConflictIds,
     relatedFindingIds: document.relatedFindingIds,
     status: document.status as Clarification['status'],
-    ...(document.answer ? { answer: document.answer as unknown as Clarification['answer'] } : {}),
+    answers: (document.answers ?? []) as unknown as Clarification['answers'],
     ...(document.dismissedReason ? { dismissedReason: document.dismissedReason } : {}),
     blocksApproval: document.blocksApproval,
     createdAt: timestamp(document, 'createdAt'),

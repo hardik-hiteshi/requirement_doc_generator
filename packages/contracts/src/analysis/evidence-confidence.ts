@@ -56,8 +56,14 @@ export interface EvidenceFacts {
   readonly usedOcr: boolean;
   /** Whether any cited block was below the extraction confidence threshold. */
   readonly lowExtractionConfidence: boolean;
-  /** Whether an answered clarification supports this requirement. */
-  readonly hasConfirmedClarification: boolean;
+  /**
+   * Confirmed clarifications this requirement is traced to, by key.
+   *
+   * Named rather than counted, because the explanation has to say *which* —
+   * "backed by confirmed clarification Q-004" is checkable and "backed by a
+   * clarification" is not.
+   */
+  readonly clarificationKeys: readonly string[];
   /** Whether a person has accepted or edited it. */
   readonly humanReviewed: boolean;
   /** Whether it is part of an open conflict. */
@@ -132,10 +138,18 @@ const RULES: readonly Rule[] = [
     explanation: () => 'The text was read directly from the file, not guessed from an image.',
   },
   {
+    /*
+     * A confirmed clarification is evidence, and good evidence: somebody asked
+     * the client directly and wrote down what they said. It is weighted like a
+     * second corroborating source rather than like a footnote.
+     */
     signal: 'confirmed_clarification',
-    weight: 0.1,
-    applies: (facts) => facts.hasConfirmedClarification,
-    explanation: () => 'Backed by an answer to a clarification question.',
+    weight: 0.15,
+    applies: (facts) => facts.clarificationKeys.length > 0,
+    explanation: (facts) =>
+      facts.clarificationKeys.length === 1
+        ? `Confirmed clarification ${facts.clarificationKeys[0]}.`
+        : `Confirmed clarifications ${facts.clarificationKeys.join(', ')}.`,
   },
   {
     signal: 'human_accepted',
@@ -211,7 +225,7 @@ export function calculateEvidenceConfidence(
   if (facts.referenceCount === 0) {
     return unsupported(
       'no_source_reference',
-      'Has no link back to any document, so there is nothing to check it against.',
+      'Has no link back to any document or clarification, so there is nothing to check it against.',
       calculatedAt,
     );
   }

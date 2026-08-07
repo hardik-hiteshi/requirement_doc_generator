@@ -44,7 +44,7 @@ async function reachAnalysis(page: Page): Promise<void> {
     .getByRole('textbox', { name: /Requirement text/ })
     .fill(
       [
-        'The system must let a sales user build a quote.',
+        'Users can approve requests.',
         'A manager must approve every quote before it is sent to the customer.',
         'Quotes must be sent within 24 hours.',
       ].join('\n'),
@@ -229,6 +229,183 @@ test.describe('Requirement analysis', () => {
 
     await page.getByRole('button', { name: 'Clarifications' }).click();
     await expect(clarificationsPanel(page)).toBeVisible();
+    await expectNoAccessibilityViolations(page);
+  });
+});
+
+test.describe('Clarification integration', () => {
+  const proposalsPanel = (page: Page) => page.getByRole('region', { name: /Proposed changes/ });
+  /* A settled question leaves the outstanding list for its own panel. */
+  const settledPanel = (page: Page) => page.getByRole('region', { name: 'Settled', exact: true });
+
+  /** Runs the analysis and opens the clarifications step. */
+  async function reachClarifications(page: Page): Promise<void> {
+    await reachAnalysis(page);
+    await page.getByRole('button', { name: 'Analyse my requirements' }).click();
+    await expect(analysisPanel(page).getByText('Complete')).toBeVisible({ timeout: 60_000 });
+    await page.getByRole('button', { name: 'Clarifications' }).click();
+    await expect(clarificationsPanel(page)).toBeVisible();
+  }
+
+  async function answer(page: Page, text: string, asFact = true): Promise<void> {
+    const panel = clarificationsPanel(page);
+
+    await panel
+      .getByRole('textbox', { name: /Answer|Change the answer/ })
+      .first()
+      .fill(text);
+    await panel
+      .getByRole('radio', { name: asFact ? /client confirmed it/i : /we are assuming it/i })
+      .first()
+      .check();
+    await panel
+      .getByRole('button', { name: /Save the (new )?answer/ })
+      .first()
+      .click();
+  }
+
+  test('answering, confirming and integrating a blocking question', async ({ page }) => {
+    await reachClarifications(page);
+
+    /* 1. The analysis raised a blocking question. */
+    const panel = clarificationsPanel(page);
+
+    await expect(panel.getByText('Q-001')).toBeVisible();
+    await expect(panel.getByText('Blocks approval')).toBeVisible();
+
+    /* 2 & 3. Answer it, then confirm it — two separate acts. */
+    await answer(page, 'Only Project Managers.');
+
+    // Answering alone does not apply anything: the question still says so.
+    await expect(panel.getByText('Answered — confirm it to apply')).toBeVisible();
+
+    /* 4. Confirming applies it. */
+    await panel.getByRole('button', { name: 'Confirm this answer' }).click();
+    await expect(settledPanel(page).getByText('Applied')).toBeVisible({ timeout: 30_000 });
+
+    /* 5, 6, 7. The requirement changed, cites the clarification, and its
+       evidence score reflects it.
+
+       Found by key rather than by position: the list is ordered worst-evidence
+       first, and gaining a confirmed clarification is exactly what moves a
+       requirement down it. */
+    await page.getByRole('button', { name: 'Requirement analysis' }).click();
+    await expect(requirementsPanel(page)).toBeVisible();
+
+    const updated = requirementsPanel(page).getByRole('listitem').filter({ hasText: 'REQ-001' });
+
+    await expect(updated.getByText(/Only Project Managers/)).toBeVisible();
+
+    await updated.getByRole('button', { name: /^Source \(/ }).click();
+    await expect(updated.getByText(/Confirmed clarification Q-001/).first()).toBeVisible();
+
+    await updated.getByRole('button', { name: /Why\?/ }).click();
+    await expect(updated.getByText(/Confirmed clarification Q-001/).first()).toBeVisible();
+
+    /* 8. The blocker is gone. */
+    await page.getByRole('button', { name: 'Baseline approval' }).click();
+    await expect(baselinePanel(page)).toBeVisible();
+    await expect(page.getByText(/question the baseline depends on/i)).toHaveCount(0);
+  });
+
+  test('changing a confirmed answer takes an approved baseline out of date', async ({ page }) => {
+    await reachClarifications(page);
+    await answer(page, 'Only Project Managers.');
+    await clarificationsPanel(page).getByRole('button', { name: 'Confirm this answer' }).click();
+    await expect(settledPanel(page).getByText('Applied')).toBeVisible({ timeout: 30_000 });
+
+    /* 9. Approve the baseline. */
+    await page.getByRole('button', { name: 'Baseline approval' }).click();
+    await expect(baselinePanel(page)).toBeVisible();
+
+    const approve = page.getByRole('button', { name: 'Approve this baseline' });
+
+    if (await approve.isEnabled().catch(() => false)) {
+      await page.getByRole('checkbox', { name: /I have read these requirements/ }).check();
+      await approve.click();
+      await expect(baselinePanel(page).getByText('Approved')).toBeVisible({ timeout: 30_000 });
+
+      /* 10 & 11. Change the answer; the approved baseline goes out of date. */
+      await page.getByRole('button', { name: 'Clarifications' }).click();
+      await answer(page, 'Project Managers and Directors.');
+
+      await page.getByRole('button', { name: 'Baseline approval' }).click();
+      await expect(baselinePanel(page).getByText('Out of date')).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText(/clarification answer was changed/i)).toBeVisible();
+    }
+  });
+
+  test('an edited requirement gets a proposal, never a rewrite', async ({ page }) => {
+    await reachAnalysis(page);
+    await page.getByRole('button', { name: 'Analyse my requirements' }).click();
+    await expect(analysisPanel(page).getByText('Complete')).toBeVisible({ timeout: 60_000 });
+
+    /* 13. Edit the requirement by hand first. */
+    const target = requirementsPanel(page).getByRole('listitem').filter({ hasText: 'REQ-001' });
+
+    await target.getByRole('button', { name: 'Edit' }).click();
+    await target
+      .getByRole('textbox', { name: 'Requirement' })
+      .fill('Users can approve requests they did not raise.');
+    await target.getByRole('button', { name: 'Save' }).click();
+    await expect(
+      requirementsPanel(page).getByText('Users can approve requests they did not raise.'),
+    ).toBeVisible();
+
+    await page.getByRole('button', { name: 'Clarifications' }).click();
+    await answer(page, 'Only Project Managers.');
+    await clarificationsPanel(page).getByRole('button', { name: 'Confirm this answer' }).click();
+
+    /* 12. A proposal, with both wordings and the reason, and nothing applied. */
+    await expect(proposalsPanel(page)).toBeVisible({ timeout: 30_000 });
+    await expect(proposalsPanel(page).getByText('Current wording', { exact: true })).toBeVisible();
+    await expect(proposalsPanel(page).getByText('Proposed wording', { exact: true })).toBeVisible();
+    await expect(proposalsPanel(page).getByText(/You edited this requirement/)).toBeVisible();
+
+    await page.getByRole('button', { name: 'Requirement analysis' }).click();
+    await expect(
+      requirementsPanel(page).getByText('Users can approve requests they did not raise.'),
+    ).toBeVisible();
+  });
+
+  test('accepting a proposal applies it and settles the question', async ({ page }) => {
+    await reachAnalysis(page);
+    await page.getByRole('button', { name: 'Analyse my requirements' }).click();
+    await expect(analysisPanel(page).getByText('Complete')).toBeVisible({ timeout: 60_000 });
+
+    const target = requirementsPanel(page).getByRole('listitem').filter({ hasText: 'REQ-001' });
+
+    await target.getByRole('button', { name: 'Edit' }).click();
+    await target
+      .getByRole('textbox', { name: 'Requirement' })
+      .fill('Users can approve requests they did not raise.');
+    await target.getByRole('button', { name: 'Save' }).click();
+    await expect(
+      requirementsPanel(page).getByText('Users can approve requests they did not raise.'),
+    ).toBeVisible();
+
+    await page.getByRole('button', { name: 'Clarifications' }).click();
+    await answer(page, 'Only Project Managers.');
+    await clarificationsPanel(page).getByRole('button', { name: 'Confirm this answer' }).click();
+    await expect(proposalsPanel(page)).toBeVisible({ timeout: 30_000 });
+
+    await proposalsPanel(page)
+      .getByRole('button', { name: 'Accept the proposed update' })
+      .first()
+      .click();
+
+    await expect(proposalsPanel(page)).toHaveCount(0, { timeout: 30_000 });
+    await expect(settledPanel(page).getByText('Applied')).toBeVisible();
+  });
+
+  test('the clarification screens are accessible', async ({ page }) => {
+    await reachClarifications(page);
+    await expectNoAccessibilityViolations(page);
+
+    await answer(page, 'Only Project Managers.');
+    await clarificationsPanel(page).getByRole('button', { name: 'Confirm this answer' }).click();
+    await expect(settledPanel(page).getByText('Applied')).toBeVisible({ timeout: 30_000 });
+
     await expectNoAccessibilityViolations(page);
   });
 });

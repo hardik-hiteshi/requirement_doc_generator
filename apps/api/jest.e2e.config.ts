@@ -20,6 +20,13 @@ const config: Config = {
   },
   moduleFileExtensions: ['js', 'json', 'ts'],
   testTimeout: 30_000,
+  /*
+   * One suite at a time, stated here rather than left to the `--runInBand` flag
+   * in the script. These share a MongoDB and a job queue, so running two at once
+   * would have one suite's worker draining another's jobs — and a config that
+   * only holds when invoked through one particular command is a trap.
+   */
+  maxWorkers: 1,
   clearMocks: true,
 };
 

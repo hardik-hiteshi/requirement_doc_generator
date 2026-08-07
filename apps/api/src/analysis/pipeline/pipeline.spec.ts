@@ -416,7 +416,7 @@ describe('evidence-derived confidence', () => {
       allSourcesReviewed: true,
       usedOcr: false,
       lowExtractionConfidence: false,
-      hasConfirmedClarification: false,
+      clarificationKeys: [],
       humanReviewed: false,
       inOpenConflict: false,
       hasOpenAmbiguity: false,
@@ -630,7 +630,7 @@ describe('coverage', () => {
 
 describe('alignment and blockers', () => {
   function item(overrides: Partial<RequirementItem> = {}): RequirementItem {
-    return {
+    const base: RequirementItem = {
       id: 'req_1',
       projectId: 'p1',
       runId: 'run_1',
@@ -641,6 +641,7 @@ describe('alignment and blockers', () => {
       priority: 'unspecified',
       references: [
         {
+          kind: 'document',
           sourceId: 's1',
           blockId: 'b0',
           excerpt: 'must send a quote',
@@ -659,11 +660,13 @@ describe('alignment and blockers', () => {
       status: 'draft',
       editedByUser: false,
       chunkIds: ['c0'],
+      needsRevalidation: false,
       createdAt: NOW,
       updatedAt: NOW,
       version: 0,
-      ...overrides,
     };
+
+    return { ...base, ...overrides };
   }
 
   const cleanCoverage = calculateCoverage(

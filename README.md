@@ -210,6 +210,7 @@ Recorded as [ADRs](docs/adr/), with the reasoning and the rejected alternatives:
 | [0022](docs/adr/0022-chunking-and-reconciliation.md)         | Chunk, then reconcile across the chunks                                               |
 | [0023](docs/adr/0023-two-confidences.md)                     | Two confidences; only the evidence-derived one governs                                |
 | [0024](docs/adr/0024-baseline-lifecycle.md)                  | The baseline earns its numbers; versions supersede                                    |
+| [0025](docs/adr/0025-clarification-integration.md)           | A confirmed clarification is evidence, not an assumption                              |
 | [0009](docs/adr/0009-request-validation-and-mapping.md)      | Reject undeclared properties; map explicitly to domain types                          |
 | [0010](docs/adr/0010-anonymous-project-access.md)            | Anonymous access: split identifier, secret in the URL fragment, stateless session     |
 

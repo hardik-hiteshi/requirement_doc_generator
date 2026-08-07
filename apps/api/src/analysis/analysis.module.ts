@@ -19,6 +19,7 @@ import { AnalysisController } from './analysis.controller';
 import { AnalysisRepository } from './analysis.repository';
 import { AnalysisService } from './analysis.service';
 import { BaselineService } from './baseline.service';
+import { ClarificationIntegration } from './clarification-integration.service';
 import { AnalysisPipeline } from './pipeline/analysis-pipeline.service';
 import { EvidenceLoader } from './pipeline/evidence-loader.service';
 import { EvidenceService } from './pipeline/evidence.service';
@@ -35,6 +36,8 @@ import {
   ClarificationSchema,
   RequirementItemRecord,
   RequirementItemSchema,
+  RequirementVersionRecord,
+  RequirementVersionSchema,
 } from './schemas/analysis.schema';
 
 /**
@@ -62,6 +65,7 @@ import {
       { name: AnalysisFindingRecord.name, schema: AnalysisFindingSchema },
       { name: ClarificationRecord.name, schema: ClarificationSchema },
       { name: BaselineRecord.name, schema: BaselineSchema },
+      { name: RequirementVersionRecord.name, schema: RequirementVersionSchema },
     ]),
   ],
   controllers: [AnalysisController],
@@ -69,6 +73,7 @@ import {
     AnalysisRepository,
     AnalysisService,
     BaselineService,
+    ClarificationIntegration,
     AnalysisPipeline,
     EvidenceLoader,
     EvidenceService,

@@ -85,10 +85,63 @@ export function echoResponse(request: InferenceRequest): string | null {
       return JSON.stringify({ findings: [] });
     case 'baseline.validate':
       return JSON.stringify({ findings: [] });
-    case 'clarification.generate':
-      return JSON.stringify({ questions: [] });
-    case 'clarification.integrate':
-      return JSON.stringify({ updates: [], newRequirements: [] });
+    /*
+     * One question, derived mechanically.
+     *
+     * A stub inventing a *finding* would put fiction in front of a reviewer.
+     * This is different in kind: it fires only where the evidence literally
+     * contains an unqualified "users", and the question it asks is which ones.
+     * That is a transformation of the input, like the requirement echo above,
+     * and it exists so the browser suite can exercise the whole
+     * answer → confirm → integrate → propose path without a model.
+     */
+    case 'clarification.generate': {
+      const vague = blocks.find((block) => /\busers\b/i.test(block.text));
+
+      return JSON.stringify({
+        questions: vague
+          ? [
+              {
+                id: 'q1',
+                question: 'Which users does this apply to?',
+                reason: 'The wording says "users" without saying which.',
+                category: 'MISSING_DETAIL',
+                impact: 'BLOCKING',
+                itemIds: ['REQ-001'],
+              },
+            ]
+          : [],
+      });
+    }
+
+    /*
+     * The confirmed answer joined onto the requirement it qualifies.
+     *
+     * Deliberately a join rather than a rewrite: a stub that produced fluent
+     * prose would make the browser suite look like it was testing a model's
+     * writing. What it is testing is that the update lands, is traced to the
+     * clarification, and respects the preservation rules.
+     */
+    case 'clarification.integrate': {
+      const question = blocks[0];
+      const requirement = blocks[1];
+      const answer = question?.text.split('Confirmed answer:')[1]?.trim() ?? '';
+      const statement = requirement?.text.split(': ').slice(1).join(': ') ?? '';
+
+      return JSON.stringify({
+        updates:
+          requirement && answer
+            ? [
+                {
+                  itemId: requirement.blockId,
+                  description: `${statement} ${answer}`.trim(),
+                  resolvedFindingIds: [],
+                },
+              ]
+            : [],
+        newRequirements: [],
+      });
+    }
 
     default:
       return null;

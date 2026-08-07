@@ -15,6 +15,7 @@ import {
   MISSING_DIMENSIONS,
   OUTDATED_REASONS,
   REQUIREMENT_CATEGORIES,
+  REQUIREMENT_CHANGE_SOURCES,
   REQUIREMENT_ORIGINS,
   REQUIREMENT_PRIORITIES,
   REQUIREMENT_STATUSES,
@@ -264,6 +265,19 @@ export class RequirementItemRecord {
   @Prop({ type: String })
   supersededById?: string;
 
+  /**
+   * A revision waiting for a person.
+   *
+   * Present only where a clarification's answer touched a requirement that must
+   * not be rewritten automatically — one somebody edited, wrote, or approved.
+   */
+  @Prop({ type: Object })
+  proposedRevision?: Record<string, unknown>;
+
+  /** Something changed that this requirement has not been checked against yet. */
+  @Prop({ type: Boolean, required: true, default: false })
+  needsRevalidation!: boolean;
+
   @Prop({ type: Number, required: true, default: 0 })
   version!: number;
 
@@ -398,8 +412,16 @@ export class ClarificationRecord {
   @Prop({ type: String, required: true, enum: CLARIFICATION_STATUSES, index: true })
   status!: string;
 
-  @Prop({ type: Object })
-  answer?: Record<string, unknown>;
+  /**
+   * Every answer version, oldest first. Never pruned.
+   *
+   * Embedded rather than a collection: they are only ever read with the
+   * clarification, there are a handful at most, and a requirement traced to
+   * "confirmed clarification Q-004" has to be readable against the answer that
+   * was current when it was written.
+   */
+  @Prop({ type: [Object], required: true, default: [] })
+  answers!: Record<string, unknown>[];
 
   @Prop({ type: String })
   dismissedReason?: string;
@@ -503,6 +525,62 @@ export const BaselineSchema = SchemaFactory.createForClass(BaselineRecord);
 
 BaselineSchema.index({ projectId: 1, version: -1 }, { unique: true });
 BaselineSchema.index({ projectId: 1, status: 1 });
+
+/* ------------------------------------------------- requirement history */
+
+/**
+ * One historical version of a requirement.
+ *
+ * Its own collection, unlike the clarification's answers, because a project can
+ * accumulate thousands of these and they are read rarely — embedding them would
+ * make every requirement list carry the whole history of every requirement.
+ */
+@Schema({ collection: 'requirement_versions', timestamps: true, id: false, versionKey: false })
+export class RequirementVersionRecord {
+  @Prop({ type: String, required: true, index: true })
+  itemId!: string;
+
+  @Prop({ type: String, required: true, index: true })
+  projectId!: string;
+
+  @Prop({ type: Number, required: true })
+  version!: number;
+
+  @Prop({ type: String, required: true })
+  title!: string;
+
+  @Prop({ type: String, required: true })
+  statement!: string;
+
+  @Prop({ type: String, required: true })
+  category!: string;
+
+  @Prop({ type: String, required: true })
+  priority!: string;
+
+  @Prop({ type: String, required: true })
+  status!: string;
+
+  @Prop({ type: [Object], required: true, default: [] })
+  references!: Record<string, unknown>[];
+
+  @Prop({ type: String, required: true, enum: REQUIREMENT_CHANGE_SOURCES })
+  changedBy!: string;
+
+  @Prop({ type: String })
+  reason?: string;
+
+  @Prop({ type: String })
+  clarificationKey?: string;
+
+  @Prop({ type: Date, required: true })
+  recordedAt!: Date;
+}
+
+export type RequirementVersionDocument = HydratedDocument<RequirementVersionRecord>;
+export const RequirementVersionSchema = SchemaFactory.createForClass(RequirementVersionRecord);
+
+RequirementVersionSchema.index({ projectId: 1, itemId: 1, version: -1 });
 
 /** Every block disposition, so coverage can be recomputed and audited. */
 export const BLOCK_DISPOSITION_VALUES = BLOCK_DISPOSITIONS;

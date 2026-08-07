@@ -5,7 +5,11 @@ import {
   type BlockerKind,
   type Coverage,
 } from './baseline.contract';
-import { blocksBaselineApproval, type Clarification } from './clarification.contract';
+import {
+  blocksBaselineApproval,
+  SETTLED_CLARIFICATION_STATUSES,
+  type Clarification,
+} from './clarification.contract';
 import type {
   AmbiguityFinding,
   Conflict,
@@ -146,8 +150,8 @@ export function calculateAlignment(input: AlignmentInput): Alignment {
   const settledFindings = findings.filter((status) => status !== 'open').length;
   const findingResolution = findings.length === 0 ? 1 : ratio(settledFindings, findings.length);
 
-  const settledClarifications = input.clarifications.filter(
-    (clarification) => clarification.status !== 'open',
+  const settledClarifications = input.clarifications.filter((clarification) =>
+    SETTLED_CLARIFICATION_STATUSES.includes(clarification.status),
   ).length;
   const clarificationResolution =
     input.clarifications.length === 0

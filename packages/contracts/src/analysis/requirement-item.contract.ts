@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { ANALYSIS_LIMITS } from './analysis-limits';
+import { proposedRevisionSchema } from './clarification.contract';
 import { sourceReferenceSchema } from '../requirements/extracted-content.contract';
 
 /**
@@ -147,6 +148,20 @@ export function isInBaseline(status: RequirementStatus): boolean {
 /* ------------------------------------------------------- traceability */
 
 /**
+ * What kind of thing a requirement is traced to.
+ *
+ * A confirmed clarification answer is evidence in exactly the way a document is
+ * — arguably better evidence, because somebody was asked directly and said yes.
+ * Modelling it as a second kind of link rather than as a pseudo-document keeps
+ * the verification honest: a document excerpt is checked against stored block
+ * text, and a clarification excerpt is the answer this application recorded, so
+ * there is nothing to check it against and nothing to pretend about.
+ */
+export const EVIDENCE_KINDS = ['document', 'clarification'] as const;
+export type EvidenceKind = (typeof EVIDENCE_KINDS)[number];
+export const evidenceKindSchema = z.enum(EVIDENCE_KINDS);
+
+/**
  * One link from a requirement back to the words it came from.
  *
  * `excerpt` is the model's quotation of the source. It is verified against the
@@ -156,8 +171,10 @@ export function isInBaseline(status: RequirementStatus): boolean {
  */
 export const traceabilityLinkSchema = z
   .object({
+    kind: evidenceKindSchema,
+    /** A source id, or a clarification id when `kind` is `clarification`. */
     sourceId: z.string().min(1).max(64),
-    /** Which extracted block, so the citation survives a re-render. */
+    /** An extracted block, or `answer-vN` for a clarification answer. */
     blockId: z.string().min(1).max(64),
     /** Verbatim from the source, as the model quoted it. */
     excerpt: z.string().min(1).max(ANALYSIS_LIMITS.maxExcerptLength),
@@ -166,8 +183,13 @@ export const traceabilityLinkSchema = z
     /**
      * Whether the excerpt was found in the cited block, checked by this
      * application rather than claimed by the model.
+     *
+     * Always true for a clarification link: the text is the answer this
+     * application stored, so there is no third party's claim to check.
      */
     verified: z.boolean(),
+    /** Human-facing citation for a clarification link, e.g. `Q-004`. */
+    label: z.string().max(64).optional(),
   })
   .strict();
 
@@ -298,6 +320,18 @@ export const requirementItemSchema = z
     chunkIds: z.array(z.string().max(80)).max(50),
     /** Set when a duplicate merge replaced this item with another. */
     supersededById: z.string().max(64).optional(),
+    /**
+     * A revision waiting for a person, from a clarification that touched this.
+     *
+     * Present only where the change could not be applied automatically —
+     * a requirement somebody edited, wrote, or already approved.
+     */
+    proposedRevision: proposedRevisionSchema.optional(),
+    /**
+     * Set when something happened that this requirement has not been checked
+     * against yet — a clarification answer changing, most often.
+     */
+    needsRevalidation: z.boolean(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
     /** Optimistic concurrency, as everywhere else in this application. */
@@ -358,6 +392,49 @@ export const manualRequirementSchema = z
   );
 
 export type ManualRequirement = z.infer<typeof manualRequirementSchema>;
+
+/* --------------------------------------------------------- history */
+
+export const REQUIREMENT_CHANGE_SOURCES = [
+  'analysis',
+  'user_edit',
+  'clarification_integration',
+  'proposal_accepted',
+  'conflict_resolution',
+  'duplicate_merge',
+] as const;
+
+export type RequirementChangeSource = (typeof REQUIREMENT_CHANGE_SOURCES)[number];
+
+/**
+ * One historical version of a requirement.
+ *
+ * Written before every change, by anything that changes one. The point is not
+ * archaeology for its own sake — it is that "the AI rewrote my requirement" has
+ * to be answerable with the previous wording in hand, and that an approved
+ * baseline naming an item must remain readable against what that item said.
+ */
+export const requirementVersionSchema = z
+  .object({
+    itemId: z.string().min(1).max(64),
+    projectId: z.string().min(1).max(64),
+    version: z.number().int().nonnegative(),
+    title: z.string().min(1).max(ANALYSIS_LIMITS.maxTitleLength),
+    statement: z.string().min(1).max(ANALYSIS_LIMITS.maxDescriptionLength),
+    category: requirementCategorySchema,
+    priority: requirementPrioritySchema,
+    status: requirementStatusSchema,
+    references: z.array(traceabilityLinkSchema).max(ANALYSIS_LIMITS.maxReferencesPerItem),
+    changedBy: z.enum(REQUIREMENT_CHANGE_SOURCES),
+    /** Plain language. Shown in the history a reviewer can read. */
+    reason: z.string().max(ANALYSIS_LIMITS.maxExplanationLength).optional(),
+    /** The clarification responsible, when one was. */
+    clarificationKey: z.string().max(16).optional(),
+    recordedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export type RequirementVersion = z.infer<typeof requirementVersionSchema>;
 
 /** Formats a sequence number as the key a person sees. */
 export function requirementKey(sequence: number): string {

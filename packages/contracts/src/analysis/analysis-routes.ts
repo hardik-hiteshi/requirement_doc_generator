@@ -46,9 +46,21 @@ export const ANALYSIS_ROUTES = {
   /** POST — answer one. */
   answerClarification: (clarificationId: string) =>
     buildApiPath('projects/current/analysis/clarifications', clarificationId, 'answer'),
+  /** POST — confirm the answer, which folds it into the requirements. */
+  confirmClarification: (clarificationId: string) =>
+    buildApiPath('projects/current/analysis/clarifications', clarificationId, 'confirm'),
   /** POST — dismiss one, with a reason. */
   dismissClarification: (clarificationId: string) =>
     buildApiPath('projects/current/analysis/clarifications', clarificationId, 'dismiss'),
+
+  /** GET — every requirement with a revision waiting for a decision. */
+  proposals: buildApiPath('projects/current/analysis/proposals'),
+  /** POST — accept, reject or rewrite a proposed revision. */
+  proposal: (itemId: string) =>
+    buildApiPath('projects/current/analysis/requirements', itemId, 'proposal'),
+  /** GET — one requirement's version history. */
+  requirementHistory: (itemId: string) =>
+    buildApiPath('projects/current/analysis/requirements', itemId, 'history'),
 
   /** GET — the current baseline, with coverage, alignment and blockers. */
   baseline: buildApiPath('projects/current/analysis/baseline'),
@@ -79,6 +91,10 @@ export const ANALYSIS_ROUTE_TEMPLATES = {
   gap: ANALYSIS_ROUTES.gap(':findingId'),
   clarifications: ANALYSIS_ROUTES.clarifications,
   answerClarification: ANALYSIS_ROUTES.answerClarification(':clarificationId'),
+  confirmClarification: ANALYSIS_ROUTES.confirmClarification(':clarificationId'),
+  proposals: ANALYSIS_ROUTES.proposals,
+  proposal: ANALYSIS_ROUTES.proposal(':itemId'),
+  requirementHistory: ANALYSIS_ROUTES.requirementHistory(':itemId'),
   dismissClarification: ANALYSIS_ROUTES.dismissClarification(':clarificationId'),
   baseline: ANALYSIS_ROUTES.baseline,
   baselineVersions: ANALYSIS_ROUTES.baselineVersions,

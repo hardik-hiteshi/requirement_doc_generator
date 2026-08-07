@@ -24,14 +24,14 @@ another is invisible to each document alone.
 
 This is the part worth reading twice. **Nothing is decided on your behalf.**
 
-| It found                    | It does                                      | It does not                              |
-| --------------------------- | -------------------------------------------- | ---------------------------------------- |
-| Two identical requirements  | Groups them, suggests which to keep          | Merge them                               |
-| Two contradictory ones      | Shows both sides, quoted, with their sources | Pick a winner                            |
-| Vague wording               | Names the phrase and says what is unclear    | Rewrite your client's requirement        |
-| A missing detail            | Says what is missing and why it matters      | Invent a plausible value                 |
-| Nothing in a block          | Records "no requirement here", with a reason | Leave it unaccounted for                 |
-| A question it cannot answer | Writes it for a business reader              | Answer it, or turn it into an assumption |
+| It found                    | It does                                      | It does not                       |
+| --------------------------- | -------------------------------------------- | --------------------------------- |
+| Two identical requirements  | Groups them, suggests which to keep          | Merge them                        |
+| Two contradictory ones      | Shows both sides, quoted, with their sources | Pick a winner                     |
+| Vague wording               | Names the phrase and says what is unclear    | Rewrite your client's requirement |
+| A missing detail            | Says what is missing and why it matters      | Invent a plausible value          |
+| Nothing in a block          | Records "no requirement here", with a reason | Leave it unaccounted for          |
+| A question it cannot answer | Writes it for a business reader              | Answer it, or assume the answer   |
 
 Every one of those "does not" columns is a decision that destroys information
 only you have. An assumption filed as a fact is the most expensive error a
@@ -55,6 +55,43 @@ and the label says so every time it appears.
 The gap between them is often the most useful thing on the screen. A requirement
 marked "AI self-assessment 95%" and "Not evidenced" is one where the model was
 confident about something it made up.
+
+## Answering a question
+
+A clarification answer is the most valuable thing in a requirements process: you
+asked the client something directly and they told you. So it is treated as
+evidence, not as a footnote.
+
+**Answering and confirming are separate.** Answering records what you were told.
+Confirming says _this is the client's answer_ — and that is what applies it. Until
+you confirm, the question still blocks approval, because the requirements do not
+yet reflect anything.
+
+Confirming a fact updates the requirements the question was about, and each of
+them then cites the clarification as a source. Ask _"which users can approve?"_,
+confirm _"only Project Managers"_, and the requirement that said _"Users can
+approve requests"_ comes to say so — traced to **Q-001**, with its evidence
+confidence reflecting that somebody confirmed it.
+
+**It does not become an assumption.** An assumption is something nobody
+confirmed. Recording a confirmed fact as one understates what you know. If you
+_are_ assuming — answering on the client's behalf because the call is next week —
+say so when you answer, and it is recorded as an assumption, labelled, so they
+can see what was taken for granted.
+
+### What it will not overwrite
+
+If the answer would change a requirement **you edited, wrote, or already
+approved**, nothing is applied. You get a proposal instead: the current wording,
+the proposed wording, why, and which question it came from. Accept it, keep what
+you have, or write your own version.
+
+### Changing your mind
+
+Answer again and a new version is recorded. The old answer stays readable, the
+requirements it changed are flagged for another look, and an approved baseline
+goes out of date. Nothing in that baseline changes — it still says what it said
+when it was approved.
 
 ## Coverage and alignment
 

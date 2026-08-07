@@ -39,10 +39,35 @@ export interface EvidenceContext {
 }
 
 export interface ItemEvidenceSignals {
-  readonly hasConfirmedClarification: boolean;
+  /** Keys of confirmed clarifications this requirement is traced to. */
+  readonly clarificationKeys: readonly string[];
   readonly humanReviewed: boolean;
   readonly inOpenConflict: boolean;
   readonly hasOpenAmbiguity: boolean;
+}
+
+/** A confirmed clarification answer, as a citable piece of evidence. */
+export function clarificationLink(input: {
+  clarificationId: string;
+  clarificationKey: string;
+  answerVersion: number;
+  text: string;
+}): TraceabilityLink {
+  return {
+    kind: 'clarification',
+    sourceId: input.clarificationId,
+    blockId: `answer-v${input.answerVersion}`,
+    excerpt: input.text.slice(0, 1_000),
+    reference: {},
+    /*
+     * True, and not as a shortcut. A document excerpt is verified by comparing
+     * it against stored block text, because the model claimed it. This text is
+     * the answer this application recorded — there is no third party's claim to
+     * check, so treating it as unverified would understate what is known.
+     */
+    verified: true,
+    label: input.clarificationKey,
+  };
 }
 
 @Injectable()
@@ -62,10 +87,12 @@ export class EvidenceService {
   ): TraceabilityLink[] {
     return citations.map((citation) => {
       const blockId = baseBlockId(citation.blockId);
+
       const located = this.findBlock(blockId, expectedSourceId, context);
 
       if (!located) {
         return {
+          kind: 'document' as const,
           sourceId: expectedSourceId,
           blockId,
           excerpt: citation.excerpt.slice(0, 1_000),
@@ -77,6 +104,7 @@ export class EvidenceService {
       const support = checkExcerpt(citation.excerpt, located.block.text);
 
       return {
+        kind: 'document' as const,
         sourceId: located.sourceId,
         blockId,
         excerpt: citation.excerpt.slice(0, 1_000),
@@ -99,25 +127,53 @@ export class EvidenceService {
     context: EvidenceContext,
     signals: ItemEvidenceSignals,
   ): EvidenceFacts {
-    const resolved = references.map((reference) => ({
+    /*
+     * Clarification links are held apart from document links throughout.
+     * A clarification has no block to look up, so treating one as a document
+     * citation would make it look like a hallucinated source — the exact
+     * opposite of what it is.
+     */
+    const documentLinks = references.filter((reference) => reference.kind !== 'clarification');
+    const clarificationLinks = references.filter((reference) => reference.kind === 'clarification');
+
+    const resolved = documentLinks.map((reference) => ({
       reference,
       block: this.findBlock(reference.blockId, reference.sourceId, context),
     }));
 
     const known = resolved.filter((entry) => entry.block !== null);
-    const unknown = resolved.length > 0 && known.length === 0;
+    const unknown =
+      documentLinks.length > 0 && known.length === 0 && clarificationLinks.length === 0;
 
     const verified = references.filter((reference) => reference.verified).length;
     const partial = known.filter(
       (entry) =>
         !entry.reference.verified &&
         entry.block !== null &&
-        checkExcerpt(entry.reference.excerpt, entry.block.block.text) === 'partial',
+        checkExcerpt(entry.reference.excerpt ?? '', entry.block.block.text) === 'partial',
     ).length;
 
-    const located = references.filter((reference) => hasLocation(reference.reference)).length;
+    /*
+     * Document links only, and guarded.
+     *
+     * A clarification link has no location to report, and Mongo drops an empty
+     * `reference: {}` on write — so a stored link can legitimately arrive with
+     * the field missing. A missing location is information ("the extractor could
+     * not place this"), not a reason to fail while scoring.
+     */
+    const located = documentLinks.filter(
+      (reference) => reference.reference !== undefined && hasLocation(reference.reference),
+    ).length;
 
-    const sourceIds = new Set(known.map((entry) => entry.block?.sourceId));
+    const sourceIds = new Set<string>(
+      known.flatMap((entry) => (entry.block ? [entry.block.sourceId] : [])),
+    );
+
+    // A confirmed clarification counts as a distinct corroborating source: it is
+    // a different person saying the same thing, which is what that signal means.
+    for (const link of clarificationLinks) {
+      sourceIds.add(link.sourceId);
+    }
 
     return {
       referenceCount: references.length,
@@ -126,13 +182,13 @@ export class EvidenceService {
       locatedReferenceCount: located,
       distinctSourceCount: sourceIds.size,
       allSourcesReviewed:
-        known.length > 0 &&
+        (known.length > 0 || clarificationLinks.length > 0) &&
         known.every((entry) => context.sources.get(entry.block?.sourceId ?? '')?.reviewed === true),
       usedOcr: known.some((entry) => entry.block?.block.viaOcr === true),
       lowExtractionConfidence: known.some(
         (entry) => entry.block !== null && isLowConfidence(entry.block.block),
       ),
-      hasConfirmedClarification: signals.hasConfirmedClarification,
+      clarificationKeys: signals.clarificationKeys,
       humanReviewed: signals.humanReviewed,
       inOpenConflict: signals.inOpenConflict,
       hasOpenAmbiguity: signals.hasOpenAmbiguity,

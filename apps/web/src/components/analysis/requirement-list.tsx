@@ -117,8 +117,10 @@ function RequirementRow({ item }: { readonly item: RequirementItem }) {
             {item.priority !== 'unspecified' ? <Badge tone="info">{item.priority}</Badge> : null}
             {item.origin === 'manual' ? <Badge tone="info">Added by you</Badge> : null}
             {item.origin === 'clarification' ? (
-              <Badge tone="warning">From an assumption</Badge>
+              <Badge tone="warning">Recorded assumption</Badge>
             ) : null}
+            {item.needsRevalidation ? <Badge tone="warning">Check this again</Badge> : null}
+            {item.proposedRevision ? <Badge tone="info">Change proposed</Badge> : null}
             {item.status === 'accepted' ? <Badge tone="success">Accepted</Badge> : null}
             {item.editedByUser && item.origin === 'ai' ? (
               <Badge tone="info">Edited by you</Badge>
@@ -177,7 +179,13 @@ function RequirementRow({ item }: { readonly item: RequirementItem }) {
             item.references.map((reference, index) => (
               <div key={`${reference.blockId}-${index}`} className="flex flex-col gap-1">
                 <p className="text-muted">
-                  {reference.verified ? (
+                  {reference.kind === 'clarification' ? (
+                    /* Evidence in its own right: somebody asked the client and
+                       wrote down what they said. */
+                    <span className="text-success">
+                      Confirmed clarification {reference.label ?? ''}
+                    </span>
+                  ) : reference.verified ? (
                     <span className="text-success">Found in the document</span>
                   ) : (
                     /*

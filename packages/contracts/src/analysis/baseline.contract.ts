@@ -206,6 +206,10 @@ export const OUTDATED_REASONS = [
   'source_content_changed',
   'requirement_edited',
   'newer_analysis',
+  /** A confirmed clarification changed the requirements this was built from. */
+  'clarification_integrated',
+  /** A confirmed answer was replaced by a different one. */
+  'clarification_changed',
 ] as const;
 
 export type OutdatedReason = (typeof OUTDATED_REASONS)[number];
@@ -217,6 +221,10 @@ export const OUTDATED_REASON_MESSAGES: Readonly<Record<OutdatedReason, string>> 
   source_content_changed: 'A document’s reviewed content changed after this baseline was approved.',
   requirement_edited: 'A requirement was edited after this baseline was approved.',
   newer_analysis: 'A newer analysis has been run.',
+  clarification_integrated:
+    'A confirmed clarification changed requirements after this baseline was approved.',
+  clarification_changed:
+    'A confirmed clarification answer was changed after this baseline was approved.',
 };
 
 export const baselineSchema = z

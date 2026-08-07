@@ -15,6 +15,11 @@ import {
 
 import { AuditService } from '../audit/audit.service';
 import { AnalysisRepository } from './analysis.repository';
+import {
+  NEAR_DUPLICATE_THRESHOLD,
+  normalizeForComparison,
+  similarity,
+} from './pipeline/text-similarity';
 import { EvidenceLoader } from './pipeline/evidence-loader.service';
 import { EvidenceService } from './pipeline/evidence.service';
 import {
@@ -66,6 +71,10 @@ export class BaselineService {
       return baseline ? toBaseline(baseline) : null;
     }
 
+    // Findings first, so the alignment and blockers computed below see the
+    // state a reviewer would actually be looking at.
+    await this.recheckFindings(projectId, now);
+
     const state = await this.loadState(projectId);
     const context = await this.loader.buildContext(projectId);
 
@@ -74,11 +83,15 @@ export class BaselineService {
         item,
         context,
         {
-          hasConfirmedClarification: state.clarifications.some(
-            (clarification) =>
-              clarification.relatedItemIds.includes(item.id) &&
-              (clarification.status === 'answered' || clarification.status === 'integrated'),
-          ),
+          /*
+           * Only the clarifications this requirement actually *cites*, and only
+           * where the citation is a real link. Counting a clarification because
+           * it merely mentions the requirement would credit evidence that was
+           * never applied to it.
+           */
+          clarificationKeys: item.references
+            .filter((reference) => reference.kind === 'clarification')
+            .map((reference) => reference.label ?? reference.sourceId),
           humanReviewed: item.status === 'accepted' || item.editedByUser,
           inOpenConflict: state.conflicts.some(
             (conflict) => conflict.status === 'open' && conflict.itemIds.includes(item.id),
@@ -114,7 +127,13 @@ export class BaselineService {
     const blockers = calculateBlockers({
       ...state,
       coverage,
-      knownSourceIds: [...context.sources.keys()],
+      // Clarifications are sources too. Omitting them would make every
+      // requirement traced to a confirmed answer look like a hallucinated
+      // citation, which is the opposite of what it is.
+      knownSourceIds: [
+        ...context.sources.keys(),
+        ...state.clarifications.map((clarification) => clarification.id),
+      ],
     });
 
     const inBaseline = state.items.filter(
@@ -178,6 +197,121 @@ export class BaselineService {
 
     // On the record. An approved document quietly changing status is exactly
     // the kind of event somebody asks about six months later.
+    await this.audit.record({
+      type: 'BASELINE_OUTDATED',
+      projectId,
+      ...(correlationId ? { correlationId } : {}),
+      reason,
+      metadata: { baselineId: baseline.baselineId, version: baseline.version },
+    });
+
+    return true;
+  }
+
+  /**
+   * Re-checks findings against the requirements as they are now.
+   *
+   * Deterministic and targeted: it does not ask the model anything. What it can
+   * settle for itself, it settles —
+   *
+   * - a duplicate group whose members no longer say the same thing is closed,
+   *   because the reason it existed has gone;
+   * - a finding pointing at a requirement that has been rejected, superseded or
+   *   deleted is closed, because there is nothing left to decide about;
+   * - an ambiguity finding whose phrase is no longer in the requirement is
+   *   closed, because a clarification answering it is exactly what should make
+   *   it go away.
+   *
+   * Anything requiring judgement stays open. A conflict is never closed here:
+   * deciding that two statements no longer contradict each other is a decision,
+   * and this method does not make decisions.
+   */
+  async recheckFindings(projectId: string, now: Date): Promise<number> {
+    const [items, findings] = await Promise.all([
+      this.repository.listItems(projectId),
+      this.repository.listFindings(projectId),
+    ]);
+
+    const live = new Map(
+      items
+        .filter((item) => item.status !== 'rejected' && item.status !== 'superseded')
+        .map((item) => [item.itemId, item]),
+    );
+
+    let closed = 0;
+
+    for (const finding of findings) {
+      if (finding.status !== 'open') {
+        continue;
+      }
+
+      const surviving = finding.itemIds.filter((itemId) => live.has(itemId));
+      let reason: string | null = null;
+
+      if (finding.itemIds.length > 0 && surviving.length === 0) {
+        reason = 'Every requirement this was about has been rejected or merged.';
+      } else if (finding.type === 'duplicate' && surviving.length >= 2) {
+        // The wording moved apart — most often because a clarification made one
+        // of them specific. They are no longer the same requirement.
+        const statements = surviving.map((itemId) => live.get(itemId)?.statement ?? '');
+        const stillAlike = statements.every(
+          (statement, index) =>
+            index === 0 ||
+            normalizeForComparison(statement) === normalizeForComparison(statements[0] ?? '') ||
+            similarity(statement, statements[0] ?? '') >= NEAR_DUPLICATE_THRESHOLD,
+        );
+
+        if (!stillAlike) {
+          reason = 'These requirements no longer say the same thing.';
+        }
+      } else if (finding.type === 'duplicate' && surviving.length < 2) {
+        reason = 'Only one of these requirements is left.';
+      } else if (finding.type === 'ambiguity' && surviving.length === 1) {
+        const phrase = (finding.payload as { phrase?: string }).phrase ?? '';
+        const statement = live.get(surviving[0] ?? '')?.statement ?? '';
+
+        if (
+          phrase.length > 0 &&
+          !normalizeForComparison(statement).includes(normalizeForComparison(phrase))
+        ) {
+          reason = 'The wording that was unclear is no longer in this requirement.';
+        }
+      }
+
+      if (reason) {
+        await this.repository.updateFinding(projectId, finding.findingId, finding.version, {
+          status: 'resolved',
+          resolution: { note: reason, decidedAt: now.toISOString() },
+        });
+
+        closed += 1;
+      }
+    }
+
+    return closed;
+  }
+
+  /**
+   * Marks the approved baseline out of date for a reason other than the sources.
+   *
+   * A confirmed clarification changing a requirement is exactly as much a reason
+   * as a document changing: the approved document was signed against facts that
+   * have since moved. Nothing in it is altered — what was signed stays signed.
+   */
+  async markOutdated(
+    projectId: string,
+    reason: 'clarification_integrated' | 'clarification_changed',
+    now: Date,
+    correlationId?: string,
+  ): Promise<boolean> {
+    const baseline = await this.repository.currentBaseline(projectId);
+
+    if (baseline?.status !== 'approved') {
+      return false;
+    }
+
+    await this.repository.markOutdated(projectId, baseline.baselineId, reason, now);
+
     await this.audit.record({
       type: 'BASELINE_OUTDATED',
       projectId,

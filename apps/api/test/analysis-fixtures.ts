@@ -255,6 +255,42 @@ export function registerAnalysisFixtures(
 }
 
 /**
+ * The model's answer to "apply this confirmed clarification".
+ *
+ * Registered separately from the run's script because integration happens long
+ * after the run, driven by a person confirming an answer. Written as an explicit
+ * before/after so the test reads as the scenario it is testing rather than as a
+ * JSON blob.
+ */
+export function registerIntegrationFixture(
+  provider: DeterministicProvider,
+  updates: readonly { itemId: string; description: string; resolvedFindingIds?: string[] }[],
+): void {
+  provider.registerSequence('clarification.integrate', [
+    JSON.stringify({
+      updates: updates.map((update) => ({
+        itemId: update.itemId,
+        description: update.description,
+        resolvedFindingIds: update.resolvedFindingIds ?? [],
+      })),
+      // Always empty. The application ignores new requirements from
+      // integration anyway — one invented here would arrive in a baseline as
+      // though the client had asked for it — and the fixture says so.
+      newRequirements: [],
+    }),
+  ]);
+}
+
+/** Makes the next integration attempt fail, without touching anything else. */
+export function registerIntegrationFailure(provider: DeterministicProvider): void {
+  provider.registerSequence('clarification.integrate', [
+    // Valid JSON, invalid against the schema: the realistic failure, and the
+    // one the repair path exhausts on.
+    JSON.stringify({ updates: [{ itemId: 'nope' }], newRequirements: [] }),
+  ]);
+}
+
+/**
  * Collects each task's responses, then registers them as ordered scripts.
  *
  * Written in pipeline order above so the fixture reads like a transcript of the

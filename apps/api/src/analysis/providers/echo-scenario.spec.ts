@@ -60,7 +60,7 @@ describe('the echo scenario', () => {
     ]);
   });
 
-  it('invents no findings and asks no questions', () => {
+  it('invents no findings', () => {
     // A stub producing a fabricated conflict would put fiction in front of a
     // reviewer, which is the failure the whole phase exists to prevent.
     for (const task of ['requirement.conflicts', 'requirement.duplicates'] as const) {
@@ -68,10 +68,51 @@ describe('the echo scenario', () => {
 
       expect(output.conflicts ?? output.groups).toEqual([]);
     }
+  });
 
-    const questions = JSON.parse(echoResponse(request('clarification.generate', BLOCKS)) ?? '{}');
+  it('asks about an unqualified "users", and nothing else', () => {
+    // Mechanical rather than a judgement: it fires only where the evidence
+    // literally contains the word, which is what keeps it a transformation of
+    // the input rather than an invention about it.
+    const asked = JSON.parse(
+      echoResponse(
+        request('clarification.generate', [{ blockId: 'b0', text: 'Users can approve requests.' }]),
+      ) ?? '{}',
+    );
 
-    expect(questions.questions).toEqual([]);
+    expect(asked.questions).toHaveLength(1);
+    expect(asked.questions[0].impact).toBe('BLOCKING');
+
+    const silent = JSON.parse(
+      echoResponse(
+        request('clarification.generate', [
+          { blockId: 'b0', text: 'The system must send a quote within 24 hours.' },
+        ]),
+      ) ?? '{}',
+    );
+
+    expect(silent.questions).toEqual([]);
+  });
+
+  it('joins a confirmed answer onto the requirement it qualifies', () => {
+    const output = JSON.parse(
+      echoResponse(
+        request('clarification.integrate', [
+          {
+            blockId: 'Q-001',
+            text: 'Question: Which users?\nConfirmed answer: Only Project Managers.',
+          },
+          { blockId: 'req_1', text: '[REQ-001] (functional) Approve: Users can approve requests.' },
+        ]),
+      ) ?? '{}',
+    );
+
+    expect(output.updates).toHaveLength(1);
+    expect(output.updates[0].itemId).toBe('req_1');
+    expect(output.updates[0].description).toContain('Only Project Managers.');
+    // Never invents a requirement: one created here would arrive in a baseline
+    // as though the client had asked for it.
+    expect(output.newRequirements).toEqual([]);
   });
 
   it('returns nothing when there is no evidence to echo', () => {

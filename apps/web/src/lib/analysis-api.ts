@@ -8,8 +8,11 @@ import {
   type Clarification,
   type Conflict,
   type DuplicateGroup,
+  type IntegrationResult,
   type ManualRequirement,
   type MissingInfoFinding,
+  type RequirementVersion,
+  type ResolveProposal,
   type RequirementItem,
   type RequirementItemEdit,
   type ResolveConflict,
@@ -132,6 +135,36 @@ export async function answerClarification(
     body: request,
     headers: mutationHeaders(),
   });
+}
+
+export async function confirmClarification(
+  clarificationId: string,
+  expectedVersion: number,
+): Promise<IntegrationResult> {
+  return apiFetch<IntegrationResult>(ANALYSIS_ROUTES.confirmClarification(clarificationId), {
+    method: 'POST',
+    body: { acknowledged: true, expectedVersion },
+    headers: mutationHeaders(),
+  });
+}
+
+export async function listProposals(): Promise<RequirementItem[]> {
+  return apiFetch<RequirementItem[]>(ANALYSIS_ROUTES.proposals);
+}
+
+export async function resolveProposal(
+  itemId: string,
+  request: ResolveProposal,
+): Promise<RequirementItem> {
+  return apiFetch<RequirementItem>(ANALYSIS_ROUTES.proposal(itemId), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function readRequirementHistory(itemId: string): Promise<RequirementVersion[]> {
+  return apiFetch<RequirementVersion[]>(ANALYSIS_ROUTES.requirementHistory(itemId));
 }
 
 export async function dismissClarification(

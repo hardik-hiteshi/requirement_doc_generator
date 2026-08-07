@@ -24,6 +24,8 @@ export const ANALYSIS_ERROR_CODES = {
   FINDING_ALREADY_RESOLVED: 'FINDING_ALREADY_RESOLVED',
   CLARIFICATION_NOT_FOUND: 'CLARIFICATION_NOT_FOUND',
   CLARIFICATION_ALREADY_ANSWERED: 'CLARIFICATION_ALREADY_ANSWERED',
+  CLARIFICATION_NOT_ANSWERED: 'CLARIFICATION_NOT_ANSWERED',
+  NO_PROPOSAL: 'NO_PROPOSAL',
   BASELINE_NOT_FOUND: 'BASELINE_NOT_FOUND',
   BASELINE_HAS_BLOCKERS: 'BASELINE_HAS_BLOCKERS',
   BASELINE_ALREADY_APPROVED: 'BASELINE_ALREADY_APPROVED',
@@ -49,7 +51,10 @@ export const ANALYSIS_ERROR_MESSAGES: Readonly<Record<AnalysisErrorCode, string>
   FINDING_NOT_FOUND: 'That finding could not be found in this project.',
   FINDING_ALREADY_RESOLVED: 'Someone has already decided about this one.',
   CLARIFICATION_NOT_FOUND: 'That question could not be found in this project.',
-  CLARIFICATION_ALREADY_ANSWERED: 'That question has already been answered.',
+  CLARIFICATION_ALREADY_ANSWERED:
+    'That question has already been answered and applied. Answer it again to change it.',
+  CLARIFICATION_NOT_ANSWERED: 'There is no answer to confirm yet.',
+  NO_PROPOSAL: 'There is no proposed change waiting on this requirement.',
   BASELINE_NOT_FOUND: 'There is no requirement baseline for this project yet.',
   BASELINE_HAS_BLOCKERS:
     'This baseline cannot be approved yet. Work through the items listed above it first.',

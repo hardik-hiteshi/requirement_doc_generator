@@ -11,9 +11,14 @@ import {
   type ApproveBaseline,
   type Baseline,
   type Clarification,
+  type ClarificationAnswer,
+  type IntegrationResult,
   type ManualRequirement,
+  type ProposedRevision,
+  type ResolveProposal,
   type RequirementItem,
   type RequirementItemEdit,
+  type RequirementVersion,
   type ResolveConflict,
   type ResolveDuplicate,
   type ResolveFinding,
@@ -22,6 +27,9 @@ import {
 
 import { AuditService } from '../audit/audit.service';
 import { AnalysisRepository } from './analysis.repository';
+import { ClarificationIntegration } from './clarification-integration.service';
+import { clarificationLink } from './pipeline/evidence.service';
+import type { ClarificationDocument } from './schemas/analysis.schema';
 import { AnalysisError } from './analysis.errors';
 import {
   toAmbiguity,
@@ -77,6 +85,7 @@ export class AnalysisService {
     private readonly loader: EvidenceLoader,
     private readonly evidence: EvidenceService,
     private readonly baselines: BaselineService,
+    private readonly integration: ClarificationIntegration,
     private readonly audit: AuditService,
   ) {}
 
@@ -287,7 +296,7 @@ export class AnalysisService {
         references,
         evidenceContext,
         {
-          hasConfirmedClarification: false,
+          clarificationKeys: [],
           humanReviewed: carried !== undefined,
           inOpenConflict: result.conflicts.some((conflict) =>
             conflict.keys.includes(candidate.key),
@@ -450,7 +459,8 @@ export class AnalysisService {
       relatedItemIds: resolve(question.itemKeys),
       relatedConflictIds: [],
       relatedFindingIds: [],
-      status: 'open',
+      status: 'UNANSWERED',
+      answers: [],
       blocksApproval: question.blocksApproval,
       version: 0,
     }));
@@ -710,6 +720,7 @@ export class AnalysisService {
       return block
         ? [
             {
+              kind: 'document' as const,
               sourceId: reference.sourceId,
               blockId: reference.blockId,
               excerpt: block.text.slice(0, 1_000),
@@ -741,7 +752,7 @@ export class AnalysisService {
           references,
           evidenceContext,
           {
-            hasConfirmedClarification: false,
+            clarificationKeys: [],
             humanReviewed: true,
             inOpenConflict: false,
             hasOpenAmbiguity: false,
@@ -1031,6 +1042,16 @@ export class AnalysisService {
    * and the application must not choose for them — an assumption recorded as a
    * fact is the most expensive error this document can carry.
    */
+  /**
+   * Records an answer, as a new version.
+   *
+   * Answering is not confirming. An answer typed after a meeting and an answer
+   * the client has agreed to are different things, and only the second rewrites
+   * requirements — so this stores the text and stops. Answering again supersedes
+   * the previous version rather than overwriting it, marks the requirements that
+   * version touched for revalidation, and takes any baseline built on it out of
+   * date.
+   */
   async answerClarification(
     context: AnalysisContext,
     clarificationId: string,
@@ -1045,23 +1066,39 @@ export class AnalysisService {
       throw new AnalysisError(ANALYSIS_ERROR_CODES.CLARIFICATION_NOT_FOUND, 404);
     }
 
-    if (clarification.status !== 'open') {
-      throw new AnalysisError(ANALYSIS_ERROR_CODES.CLARIFICATION_ALREADY_ANSWERED, 409);
-    }
-
     const now = new Date();
+    const answers = (clarification.answers ?? []) as unknown as ClarificationAnswer[];
+    const previous = answers.find((answer) => answer.status === 'current');
+    const nextVersion = answers.length + 1;
+
+    const superseded = answers.map((answer) =>
+      answer.status === 'current'
+        ? {
+            ...answer,
+            status: 'superseded' as const,
+            supersededAt: now.toISOString(),
+            supersededByVersion: nextVersion,
+          }
+        : answer,
+    );
+
     const updated = await this.repository.updateClarification(
       context.projectId,
       clarificationId,
       request.expectedVersion,
       {
-        status: 'answered',
-        answer: {
-          text: request.text,
-          answeredAt: now.toISOString(),
-          isAssumption: request.isAssumption,
-          affectedItemIds: clarification.relatedItemIds,
-        },
+        status: 'ANSWERED',
+        answers: [
+          ...superseded,
+          {
+            version: nextVersion,
+            text: request.text,
+            answeredAt: now.toISOString(),
+            isAssumption: request.isAssumption,
+            status: 'current',
+            affectedItemIds: [],
+          },
+        ],
       },
     );
 
@@ -1074,56 +1111,428 @@ export class AnalysisService {
     }
 
     /*
-     * An assumption becomes a requirement item marked as one, so it appears in
-     * the baseline labelled for what it is. This is the *only* path that
-     * creates an `assumption` — the analysis never converts a gap into one.
+     * A changed answer invalidates what the previous one produced. The
+     * requirements it touched are flagged rather than reverted — reverting would
+     * throw away wording a person may since have improved — and the baseline
+     * goes out of date, because it was approved against a fact that has changed.
      */
-    if (request.isAssumption) {
-      const sequence = await this.repository.nextItemSequence(context.projectId);
-      const itemId = AnalysisRepository.newId('req');
-
-      await this.repository.insertItems([
-        {
-          itemId,
-          projectId: context.projectId,
-          runId: clarification.runId,
-          key: requirementKey(sequence),
-          title: `Assumption: ${clarification.question.slice(0, 200)}`,
-          statement: request.text,
-          category: 'assumption',
-          priority: 'unspecified',
-          references: [],
-          evidenceConfidence: this.evidence.score(
-            [],
-            await this.loader.buildContext(context.projectId),
-            {
-              hasConfirmedClarification: true,
-              humanReviewed: true,
-              inOpenConflict: false,
-              hasOpenAmbiguity: false,
-            },
-            now,
-          ),
-          origin: 'clarification',
-          status: 'accepted',
-          editedByUser: true,
-          chunkIds: [],
-          version: 0,
-        },
-      ]);
+    if (previous) {
+      await this.repository.markForRevalidation(context.projectId, previous.affectedItemIds);
+      await this.baselines.markOutdated(
+        context.projectId,
+        'clarification_changed',
+        now,
+        context.correlationId,
+      );
     }
 
     await this.audit.record({
       type: 'CLARIFICATION_ANSWERED',
       projectId: context.projectId,
       correlationId: context.correlationId,
-      // Whether it was an assumption, never the answer itself.
-      metadata: { clarificationId, key: clarification.key, isAssumption: request.isAssumption },
+      // Whether it was an assumption and which version — never the answer text,
+      // which is a client's confidential material.
+      metadata: {
+        clarificationId,
+        key: clarification.key,
+        answerVersion: nextVersion,
+        isAssumption: request.isAssumption,
+        supersededVersion: previous?.version,
+      },
     });
 
     await this.baselines.refresh(context.projectId, now);
 
     return toClarification(updated);
+  }
+
+  /**
+   * Confirms the answer and folds it into the requirements it affects.
+   *
+   * The moment text somebody typed becomes evidence. From here the answer is
+   * cited by the requirements it changed, counts towards their confidence, and
+   * is versioned so a requirement written against it stays readable.
+   *
+   * An answer marked as an assumption takes the other path: it becomes an
+   * assumption item, labelled, rather than rewriting anything. That is the only
+   * route by which an assumption is ever created.
+   */
+  async confirmClarification(
+    context: AnalysisContext,
+    clarificationId: string,
+    expectedVersion: number,
+  ): Promise<IntegrationResult> {
+    const clarification = await this.repository.findClarification(
+      context.projectId,
+      clarificationId,
+    );
+
+    if (!clarification) {
+      throw new AnalysisError(ANALYSIS_ERROR_CODES.CLARIFICATION_NOT_FOUND, 404);
+    }
+
+    const answers = (clarification.answers ?? []) as unknown as ClarificationAnswer[];
+    const current = answers.find((answer) => answer.status === 'current');
+
+    if (!current) {
+      throw new AnalysisError(ANALYSIS_ERROR_CODES.CLARIFICATION_NOT_ANSWERED, 422);
+    }
+
+    if (clarification.status === 'INTEGRATED' && current.confirmedAt) {
+      throw new AnalysisError(ANALYSIS_ERROR_CODES.CLARIFICATION_ALREADY_ANSWERED, 409);
+    }
+
+    const now = new Date();
+
+    const confirmed = await this.repository.updateClarification(
+      context.projectId,
+      clarificationId,
+      expectedVersion,
+      {
+        status: 'INTEGRATING',
+        answers: answers.map((answer) =>
+          answer.version === current.version
+            ? { ...answer, confirmedAt: now.toISOString() }
+            : answer,
+        ),
+      },
+    );
+
+    if (!confirmed) {
+      throw new AnalysisError(
+        ANALYSIS_ERROR_CODES.CLARIFICATION_NOT_FOUND,
+        409,
+        'version_conflict',
+      );
+    }
+
+    if (current.isAssumption) {
+      // The one path that creates an assumption, and only because a person said
+      // this is what they are assuming rather than what the client confirmed.
+      await this.recordAssumption(context, clarification, current, now);
+
+      const settled = await this.repository.updateClarification(
+        context.projectId,
+        clarificationId,
+        confirmed.version,
+        { status: 'INTEGRATED' },
+      );
+
+      await this.baselines.refresh(context.projectId, now);
+
+      return {
+        clarificationId,
+        clarificationKey: clarification.key,
+        answerVersion: current.version,
+        status: 'INTEGRATED',
+        impacts: [],
+        resolvedFindingIds: [],
+        ...(settled ? {} : {}),
+      };
+    }
+
+    const approved = await this.approvedItemIds(context.projectId);
+
+    const result = await this.integration.integrate({
+      projectId: context.projectId,
+      correlationId: context.correlationId,
+      clarification: confirmed,
+      answerVersion: current.version,
+      answerText: current.text,
+      approvedItemIds: approved,
+    });
+
+    const latest = await this.repository.findClarification(context.projectId, clarificationId);
+    const affectedItemIds = result.impacts.map((impact) => impact.itemId);
+
+    await this.repository.updateClarification(
+      context.projectId,
+      clarificationId,
+      latest?.version ?? confirmed.version,
+      {
+        status: result.status,
+        answers: ((latest?.answers ?? []) as unknown as ClarificationAnswer[]).map((answer) =>
+          answer.version === current.version
+            ? {
+                ...answer,
+                affectedItemIds,
+                ...(result.status === 'INTEGRATED' || result.status === 'NEEDS_REVIEW'
+                  ? { integratedAt: now.toISOString() }
+                  : {}),
+                ...(result.failureReason ? { failureReason: result.failureReason } : {}),
+              }
+            : answer,
+        ),
+      },
+    );
+
+    /*
+     * A baseline built before the answer no longer reflects it. Said plainly
+     * rather than silently rewritten: the approved document still says what it
+     * said, and its status records that the world moved.
+     */
+    if (result.impacts.some((impact) => impact.outcome !== 'unchanged')) {
+      await this.baselines.markOutdated(
+        context.projectId,
+        'clarification_integrated',
+        now,
+        context.correlationId,
+      );
+    }
+
+    await this.audit.record({
+      type: 'CLARIFICATION_INTEGRATED',
+      projectId: context.projectId,
+      correlationId: context.correlationId,
+      // Counts and outcomes only. The question, the answer and the requirement
+      // text are all a client's confidential material.
+      metadata: {
+        clarificationId,
+        key: clarification.key,
+        answerVersion: current.version,
+        status: result.status,
+        applied: result.impacts.filter((impact) => impact.outcome === 'applied').length,
+        proposed: result.impacts.filter((impact) => impact.outcome === 'proposed').length,
+        unchanged: result.impacts.filter((impact) => impact.outcome === 'unchanged').length,
+        resolvedFindings: result.resolvedFindingIds.length,
+      },
+    });
+
+    await this.baselines.refresh(context.projectId, now);
+
+    return result;
+  }
+
+  /** An explicit assumption, recorded as one and labelled as one. */
+  private async recordAssumption(
+    context: AnalysisContext,
+    clarification: ClarificationDocument,
+    answer: ClarificationAnswer,
+    now: Date,
+  ): Promise<void> {
+    const sequence = await this.repository.nextItemSequence(context.projectId);
+    const itemId = AnalysisRepository.newId('req');
+
+    await this.repository.insertItems([
+      {
+        itemId,
+        projectId: context.projectId,
+        runId: clarification.runId,
+        key: requirementKey(sequence),
+        title: `Assumption: ${clarification.question.slice(0, 200)}`,
+        statement: answer.text,
+        category: 'assumption',
+        priority: 'unspecified',
+        references: [
+          clarificationLink({
+            clarificationId: clarification.clarificationId,
+            clarificationKey: clarification.key,
+            answerVersion: answer.version,
+            text: answer.text,
+          }),
+        ],
+        evidenceConfidence: this.evidence.score(
+          [],
+          await this.loader.buildContext(context.projectId),
+          {
+            clarificationKeys: [clarification.key],
+            humanReviewed: true,
+            inOpenConflict: false,
+            hasOpenAmbiguity: false,
+          },
+          now,
+        ),
+        origin: 'clarification',
+        status: 'accepted',
+        editedByUser: true,
+        chunkIds: [],
+        version: 0,
+      },
+    ]);
+  }
+
+  /** Requirement ids named by a baseline that has been approved. */
+  private async approvedItemIds(projectId: string): Promise<ReadonlySet<string>> {
+    const baselines = await this.repository.listBaselines(projectId);
+
+    return new Set(
+      baselines
+        .filter((baseline) => baseline.status === 'approved' || baseline.status === 'outdated')
+        .flatMap((baseline) => baseline.itemIds),
+    );
+  }
+
+  /* -------------------------------------------------------- proposals */
+
+  /** Every requirement with a revision waiting for a decision. */
+  async listProposals(context: AnalysisContext): Promise<RequirementItem[]> {
+    const items = await this.repository.listProposals(context.projectId);
+
+    return items.map(toItem);
+  }
+
+  /**
+   * Accepts, rejects or rewrites a proposed revision.
+   *
+   * Accepting is what turns a proposal into the requirement's wording, and it
+   * records the previous version first. Rejecting keeps what is there and
+   * clears the proposal — a decision, not an omission.
+   */
+  async resolveProposal(
+    context: AnalysisContext,
+    itemId: string,
+    request: ResolveProposal,
+  ): Promise<RequirementItem> {
+    const item = await this.repository.findItem(context.projectId, itemId);
+
+    if (!item) {
+      throw new AnalysisError(ANALYSIS_ERROR_CODES.REQUIREMENT_NOT_FOUND, 404);
+    }
+
+    const proposal = item.proposedRevision as unknown as ProposedRevision | undefined;
+
+    if (!proposal) {
+      throw new AnalysisError(ANALYSIS_ERROR_CODES.NO_PROPOSAL, 409);
+    }
+
+    const now = new Date();
+
+    if (request.decision === 'reject') {
+      const kept = await this.repository.updateItem(
+        context.projectId,
+        itemId,
+        request.expectedVersion,
+        { needsRevalidation: false },
+        ['proposedRevision'],
+      );
+
+      if (!kept) {
+        throw new AnalysisError(
+          ANALYSIS_ERROR_CODES.REQUIREMENT_NOT_FOUND,
+          409,
+          'version_conflict',
+        );
+      }
+
+      await this.audit.record({
+        type: 'PROPOSAL_REJECTED',
+        projectId: context.projectId,
+        correlationId: context.correlationId,
+        metadata: { itemId, key: item.key, clarificationKey: proposal.clarificationKey },
+      });
+
+      await this.afterProposalDecision(context, now);
+
+      return toItem(kept);
+    }
+
+    const statement =
+      request.decision === 'edit'
+        ? (request.statement ?? proposal.proposedStatement)
+        : proposal.proposedStatement;
+
+    await this.repository.recordVersion({
+      itemId,
+      projectId: context.projectId,
+      version: item.version,
+      title: item.title,
+      statement: item.statement,
+      category: item.category,
+      priority: item.priority,
+      status: item.status,
+      references: item.references,
+      changedBy: 'proposal_accepted',
+      reason: `Accepted the revision proposed from ${proposal.clarificationKey}.`,
+      clarificationKey: proposal.clarificationKey,
+      recordedAt: now,
+    });
+
+    const existing = item.references.filter(
+      (reference) => (reference as { sourceId?: string }).sourceId !== proposal.clarificationId,
+    );
+    const clarification = await this.repository.findClarification(
+      context.projectId,
+      proposal.clarificationId,
+    );
+    const current = ((clarification?.answers ?? []) as unknown as ClarificationAnswer[]).find(
+      (answer) => answer.status === 'current',
+    );
+
+    const updated = await this.repository.updateItem(
+      context.projectId,
+      itemId,
+      request.expectedVersion,
+      {
+        statement,
+        status: 'edited',
+        // Accepting a proposal is a human decision, so it counts as one from
+        // here on: a later integration will propose to this item, not rewrite it.
+        editedByUser: true,
+        needsRevalidation: false,
+        references: [
+          ...existing,
+          ...(current
+            ? [
+                clarificationLink({
+                  clarificationId: proposal.clarificationId,
+                  clarificationKey: proposal.clarificationKey,
+                  answerVersion: current.version,
+                  text: current.text,
+                }) as unknown as Record<string, unknown>,
+              ]
+            : []),
+        ],
+      },
+      ['proposedRevision'],
+    );
+
+    if (!updated) {
+      throw new AnalysisError(ANALYSIS_ERROR_CODES.REQUIREMENT_NOT_FOUND, 409, 'version_conflict');
+    }
+
+    await this.audit.record({
+      type: 'PROPOSAL_ACCEPTED',
+      projectId: context.projectId,
+      correlationId: context.correlationId,
+      metadata: {
+        itemId,
+        key: item.key,
+        clarificationKey: proposal.clarificationKey,
+        edited: request.decision === 'edit',
+      },
+    });
+
+    await this.afterProposalDecision(context, now);
+
+    return toItem(updated);
+  }
+
+  /**
+   * Moves a clarification on once its last proposal has been decided.
+   *
+   * `NEEDS_REVIEW` means "the answer is not fully reflected yet". When no
+   * proposal remains outstanding, it is.
+   */
+  private async afterProposalDecision(context: AnalysisContext, now: Date): Promise<void> {
+    const outstanding = await this.repository.listProposals(context.projectId);
+    const blocked = new Set(
+      outstanding.map(
+        (item) => (item.proposedRevision as unknown as ProposedRevision).clarificationId,
+      ),
+    );
+
+    for (const clarification of await this.repository.listClarifications(context.projectId)) {
+      if (clarification.status === 'NEEDS_REVIEW' && !blocked.has(clarification.clarificationId)) {
+        await this.repository.updateClarification(
+          context.projectId,
+          clarification.clarificationId,
+          clarification.version,
+          { status: 'INTEGRATED' },
+        );
+      }
+    }
+
+    await this.baselines.refresh(context.projectId, now);
   }
 
   async dismissClarification(
@@ -1136,7 +1545,7 @@ export class AnalysisService {
       context.projectId,
       clarificationId,
       expectedVersion,
-      { status: 'dismissed', dismissedReason: reason },
+      { status: 'DISMISSED', dismissedReason: reason },
     );
 
     if (!updated) {
@@ -1183,13 +1592,44 @@ export class AnalysisService {
         relatedItemIds: input.relatedItemIds,
         relatedConflictIds: input.relatedConflictIds,
         relatedFindingIds: [],
-        status: 'open',
+        status: 'UNANSWERED',
+        answers: [],
         blocksApproval: true,
         version: 0,
       },
     ]);
 
     return clarificationId;
+  }
+
+  /** What this requirement said before, and why it changed. */
+  async requirementHistory(
+    context: AnalysisContext,
+    itemId: string,
+  ): Promise<RequirementVersion[]> {
+    const item = await this.repository.findItem(context.projectId, itemId);
+
+    if (!item) {
+      throw new AnalysisError(ANALYSIS_ERROR_CODES.REQUIREMENT_NOT_FOUND, 404);
+    }
+
+    const versions = await this.repository.listVersions(context.projectId, itemId);
+
+    return versions.map((version) => ({
+      itemId: version.itemId,
+      projectId: version.projectId,
+      version: version.version,
+      title: version.title,
+      statement: version.statement,
+      category: version.category as RequirementVersion['category'],
+      priority: version.priority as RequirementVersion['priority'],
+      status: version.status as RequirementVersion['status'],
+      references: version.references as unknown as RequirementVersion['references'],
+      changedBy: version.changedBy as RequirementVersion['changedBy'],
+      ...(version.reason ? { reason: version.reason } : {}),
+      ...(version.clarificationKey ? { clarificationKey: version.clarificationKey } : {}),
+      recordedAt: version.recordedAt.toISOString(),
+    }));
   }
 
   /* ------------------------------------------------------------ baseline */

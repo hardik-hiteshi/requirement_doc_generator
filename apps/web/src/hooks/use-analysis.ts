@@ -8,6 +8,10 @@ import {
   answerClarification,
   approveBaseline,
   cancelRun,
+  confirmClarification,
+  listProposals,
+  readRequirementHistory,
+  resolveProposal,
   dismissClarification,
   editRequirement,
   listClarifications,
@@ -95,6 +99,18 @@ export function useClarifications() {
   return useQuery({ queryKey: queryKeys.clarifications, queryFn: listClarifications });
 }
 
+export function useProposals() {
+  return useQuery({ queryKey: queryKeys.proposals, queryFn: listProposals });
+}
+
+export function useRequirementHistory(itemId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.requirementHistory(itemId ?? ''),
+    queryFn: () => readRequirementHistory(itemId!),
+    enabled: Boolean(itemId),
+  });
+}
+
 export function useBaseline() {
   return useQuery({
     queryKey: queryKeys.baseline,
@@ -115,6 +131,7 @@ function useInvalidateAnalysis() {
       client.invalidateQueries({ queryKey: queryKeys.findings }),
       client.invalidateQueries({ queryKey: queryKeys.clarifications }),
       client.invalidateQueries({ queryKey: queryKeys.baseline }),
+      client.invalidateQueries({ queryKey: queryKeys.proposals }),
     ]);
   }, [client]);
 }
@@ -208,6 +225,28 @@ export function useAnswerClarification() {
     onSuccess: invalidate,
   });
 }
+
+export function useConfirmClarification() {
+  const invalidate = useInvalidateAnalysis();
+
+  return useMutation({
+    mutationFn: (input: { clarificationId: string; expectedVersion: number }) =>
+      confirmClarification(input.clarificationId, input.expectedVersion),
+    onSuccess: invalidate,
+  });
+}
+
+export function useResolveProposal() {
+  const invalidate = useInvalidateAnalysis();
+
+  return useMutation({
+    mutationFn: ({ itemId, ...request }: { itemId: string } & ResolveProposalInput) =>
+      resolveProposal(itemId, request),
+    onSuccess: invalidate,
+  });
+}
+
+type ResolveProposalInput = Parameters<typeof resolveProposal>[1];
 
 export function useDismissClarification() {
   const invalidate = useInvalidateAnalysis();

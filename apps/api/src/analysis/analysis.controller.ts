@@ -22,6 +22,8 @@ import {
 import {
   answerClarificationSchema,
   approveBaselineSchema,
+  confirmClarificationSchema,
+  resolveProposalSchema,
   dismissClarificationSchema,
   manualRequirementSchema,
   requirementItemEditSchema,
@@ -35,8 +37,11 @@ import {
   type Baseline,
   type Clarification,
   type DismissClarification,
+  type ConfirmClarification,
+  type IntegrationResult,
   type ManualRequirement,
   type RequirementItem,
+  type ResolveProposal,
   type RequirementItemEdit,
   type ResolveConflict,
   type ResolveDuplicate,
@@ -242,6 +247,24 @@ export class AnalysisController {
     return this.analysis.answerClarification(contextOf(request), clarificationId, body);
   }
 
+  @Post('clarifications/:clarificationId/confirm')
+  @ApiParam({ name: 'clarificationId' })
+  @ApiOperation({
+    summary: 'Confirm the answer, which folds it into the requirements it affects',
+  })
+  @ApiOkResponse({ description: 'What the answer changed, and what it proposed.' })
+  async confirmClarification(
+    @Req() request: AuthenticatedRequest,
+    @Param('clarificationId') clarificationId: string,
+    @Body(new ZodValidationPipe(confirmClarificationSchema)) body: ConfirmClarification,
+  ): Promise<IntegrationResult> {
+    return this.analysis.confirmClarification(
+      contextOf(request),
+      clarificationId,
+      body.expectedVersion,
+    );
+  }
+
   @Post('clarifications/:clarificationId/dismiss')
   @ApiParam({ name: 'clarificationId' })
   @ApiOperation({ summary: 'Dismiss a question, with a reason' })
@@ -257,6 +280,35 @@ export class AnalysisController {
       body.reason,
       body.expectedVersion,
     );
+  }
+
+  /* ----------------------------------------------------------- proposals */
+
+  @Get('proposals')
+  @ApiOperation({ summary: 'Requirements with a revision waiting for a decision' })
+  @ApiOkResponse({ description: 'Each with its current and proposed wording.' })
+  async listProposals(@Req() request: AuthenticatedRequest): Promise<RequirementItem[]> {
+    return this.analysis.listProposals(contextOf(request));
+  }
+
+  @Post('requirements/:itemId/proposal')
+  @ApiParam({ name: 'itemId' })
+  @ApiOperation({ summary: 'Accept, reject or rewrite a proposed revision' })
+  @ApiOkResponse({ description: 'The requirement, with the proposal settled.' })
+  async resolveProposal(
+    @Req() request: AuthenticatedRequest,
+    @Param('itemId') itemId: string,
+    @Body(new ZodValidationPipe(resolveProposalSchema)) body: ResolveProposal,
+  ): Promise<RequirementItem> {
+    return this.analysis.resolveProposal(contextOf(request), itemId, body);
+  }
+
+  @Get('requirements/:itemId/history')
+  @ApiParam({ name: 'itemId' })
+  @ApiOperation({ summary: 'What this requirement said before, and why it changed' })
+  @ApiOkResponse({ description: 'Versions, newest first.' })
+  async requirementHistory(@Req() request: AuthenticatedRequest, @Param('itemId') itemId: string) {
+    return this.analysis.requirementHistory(contextOf(request), itemId);
   }
 
   /* ------------------------------------------------------------ baseline */

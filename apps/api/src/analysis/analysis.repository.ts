@@ -11,12 +11,14 @@ import {
   BaselineRecord,
   ClarificationRecord,
   RequirementItemRecord,
+  RequirementVersionRecord,
   type AnalysisChunkDocument,
   type AnalysisFindingDocument,
   type AnalysisRunDocument,
   type BaselineDocument,
   type ClarificationDocument,
   type RequirementItemDocument,
+  type RequirementVersionDocument,
 } from './schemas/analysis.schema';
 
 /**
@@ -48,6 +50,8 @@ export class AnalysisRepository {
     private readonly clarifications: Model<ClarificationRecord>,
     @InjectModel(BaselineRecord.name)
     private readonly baselines: Model<BaselineRecord>,
+    @InjectModel(RequirementVersionRecord.name)
+    private readonly itemVersions: Model<RequirementVersionRecord>,
   ) {}
 
   /** Crockford base32, matching the ids used everywhere else. */
@@ -223,12 +227,64 @@ export class AnalysisRepository {
     itemId: string,
     expectedVersion: number,
     changes: Partial<RequirementItemRecord>,
+    /**
+     * Fields to remove.
+     *
+     * Separate from `changes` because Mongoose silently drops
+     * `$set: { field: undefined }` — clearing a proposal by setting it to
+     * undefined leaves it exactly where it was, which is how a rejected
+     * proposal came back in the response. `$unset` is the only thing that
+     * removes a field.
+     */
+    unset: readonly (keyof RequirementItemRecord)[] = [],
   ): Promise<RequirementItemDocument | null> {
     return this.items
       .findOneAndUpdate(
         { projectId, itemId, version: expectedVersion },
-        { $set: changes, $inc: { version: 1 } },
+        {
+          $set: changes,
+          $inc: { version: 1 },
+          ...(unset.length > 0
+            ? { $unset: Object.fromEntries(unset.map((field) => [field, ''])) }
+            : {}),
+        },
         { returnDocument: 'after' },
+      )
+      .exec();
+  }
+
+  /**
+   * Records what a requirement said before it was changed.
+   *
+   * Called by everything that changes one, *before* the change. "The AI rewrote
+   * my requirement" has to be answerable with the previous wording in hand.
+   */
+  async recordVersion(record: Partial<RequirementVersionRecord>): Promise<void> {
+    await this.itemVersions.create(record);
+  }
+
+  async listVersions(projectId: string, itemId: string): Promise<RequirementVersionDocument[]> {
+    return this.itemVersions.find({ projectId, itemId }).sort({ version: -1 }).limit(50).exec();
+  }
+
+  /** Items with a proposal outstanding, for the review screen. */
+  async listProposals(projectId: string): Promise<RequirementItemDocument[]> {
+    return this.items
+      .find({ projectId, proposedRevision: { $exists: true, $ne: null } })
+      .sort({ key: 1 })
+      .exec();
+  }
+
+  /** Flags requirements as needing another look, without touching their text. */
+  async markForRevalidation(projectId: string, itemIds: readonly string[]): Promise<void> {
+    if (itemIds.length === 0) {
+      return;
+    }
+
+    await this.items
+      .updateMany(
+        { projectId, itemId: { $in: [...itemIds] } },
+        { $set: { needsRevalidation: true } },
       )
       .exec();
   }
@@ -439,6 +495,7 @@ export class AnalysisRepository {
       this.findings.deleteMany({ projectId }).exec(),
       this.clarifications.deleteMany({ projectId }).exec(),
       this.baselines.deleteMany({ projectId }).exec(),
+      this.itemVersions.deleteMany({ projectId }).exec(),
     ]);
   }
 }
