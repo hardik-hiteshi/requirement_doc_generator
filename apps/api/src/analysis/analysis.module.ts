@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
+import { MongooseModule } from '@nestjs/mongoose';
 
+import { AuditModule } from '../audit/audit.module';
+import { RequirementsModule } from '../requirements/requirements.module';
+import { ProjectAccessModule } from '../project-access/project-access.module';
 import { AppConfigModule } from '../config/app-config.module';
 import { AppConfigService } from '../config/app-config.service';
 import { AI_PROVIDER_PORT } from '../ports';
@@ -11,6 +15,27 @@ import { InferenceError, type InferenceProvider } from './providers/inference.ty
 import { OllamaProvider } from './providers/ollama.provider';
 import { OpenAiCompatibleProvider } from './providers/openai-compatible.provider';
 import { AiTaskRunner } from './task-runner.service';
+import { AnalysisController } from './analysis.controller';
+import { AnalysisRepository } from './analysis.repository';
+import { AnalysisService } from './analysis.service';
+import { BaselineService } from './baseline.service';
+import { AnalysisPipeline } from './pipeline/analysis-pipeline.service';
+import { EvidenceLoader } from './pipeline/evidence-loader.service';
+import { EvidenceService } from './pipeline/evidence.service';
+import {
+  AnalysisChunkRecord,
+  AnalysisChunkSchema,
+  AnalysisFindingRecord,
+  AnalysisFindingSchema,
+  AnalysisRunRecord,
+  AnalysisRunSchema,
+  BaselineRecord,
+  BaselineSchema,
+  ClarificationRecord,
+  ClarificationSchema,
+  RequirementItemRecord,
+  RequirementItemSchema,
+} from './schemas/analysis.schema';
 
 /**
  * The self-hosted inference layer.
@@ -25,8 +50,28 @@ import { AiTaskRunner } from './task-runner.service';
  * getting one.
  */
 @Module({
-  imports: [AppConfigModule],
+  imports: [
+    AppConfigModule,
+    AuditModule,
+    ProjectAccessModule,
+    RequirementsModule,
+    MongooseModule.forFeature([
+      { name: AnalysisRunRecord.name, schema: AnalysisRunSchema },
+      { name: AnalysisChunkRecord.name, schema: AnalysisChunkSchema },
+      { name: RequirementItemRecord.name, schema: RequirementItemSchema },
+      { name: AnalysisFindingRecord.name, schema: AnalysisFindingSchema },
+      { name: ClarificationRecord.name, schema: ClarificationSchema },
+      { name: BaselineRecord.name, schema: BaselineSchema },
+    ]),
+  ],
+  controllers: [AnalysisController],
   providers: [
+    AnalysisRepository,
+    AnalysisService,
+    BaselineService,
+    AnalysisPipeline,
+    EvidenceLoader,
+    EvidenceService,
     EndpointGuard,
     SafeHttpClient,
     OllamaProvider,
@@ -56,6 +101,8 @@ import { AiTaskRunner } from './task-runner.service';
     },
   ],
   exports: [
+    AnalysisRepository,
+    AnalysisService,
     AI_PROVIDER_PORT,
     AiTaskRunner,
     EndpointGuard,

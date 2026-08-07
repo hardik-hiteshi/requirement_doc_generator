@@ -11,6 +11,9 @@ const config: Config = {
   rootDir: '.',
   testEnvironment: 'node',
   roots: ['<rootDir>/test'],
+  // Before any import, because ConfigModule reads the environment when
+  // app.module.ts is imported rather than when a test runs.
+  setupFiles: ['<rootDir>/test/e2e-env.ts'],
   testRegex: '.*\\.e2e-spec\\.ts$',
   transform: {
     '^.+\\.(t|j)s$': ['@swc/jest', {}],

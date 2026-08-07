@@ -7,12 +7,16 @@ documents.
 The public workspace needs no account: a project is reached through a private
 recovery link.
 
-> **Current state: Phase 2 — public workspace and anonymous project lifecycle.**
+> **Current state: Phase 4 — AI-assisted requirement analysis.**
 > You can create a project without an account, receive a private recovery link,
-> return to it later, and configure project details, delivery timeline, optional
-> start date, team capacity and export-format preferences. Requirement upload,
-> extraction, AI analysis, estimation and document generation are **not**
-> implemented — see [Roadmap](#roadmap).
+> upload and paste requirement documents, review what was extracted from them,
+> then analyse them into a traceable requirement baseline: classification,
+> duplicates, contradictions, ambiguity, gaps, clarification questions, evidence
+> confidence, coverage, alignment and approval. **The analysis runs on a model
+> you host** — see [self-hosted
+> inference](docs/operations/self-hosted-inference.md). Technology-stack
+> recommendation, estimation and document generation are **not** implemented —
+> see [Roadmap](#roadmap).
 
 ---
 
@@ -37,19 +41,20 @@ Full setup notes and troubleshooting:
 
 ## Commands
 
-| Command                          | Does                                                |
-| -------------------------------- | --------------------------------------------------- |
-| `pnpm dev`                       | Both apps in watch mode                             |
-| `pnpm build`                     | Production builds                                   |
-| `pnpm test`                      | Unit + component tests — no infrastructure required |
-| `pnpm test:e2e`                  | API integration tests — **requires MongoDB**        |
-| `pnpm test:browser`              | Browser E2E — **requires MongoDB + Playwright**     |
-| `pnpm lint`                      | ESLint, zero warnings tolerated                     |
-| `pnpm typecheck`                 | `tsc --noEmit` across every package                 |
-| `pnpm format` / `format:check`   | Prettier                                            |
-| `pnpm verify`                    | Every gate, in CI order                             |
-| `pnpm docker:up` / `docker:down` | MongoDB, MinIO and ClamAV                           |
-| `pnpm docker:wait:all`           | Block until every service answers                   |
+| Command                               | Does                                                            |
+| ------------------------------------- | --------------------------------------------------------------- |
+| `pnpm dev`                            | Both apps in watch mode                                         |
+| `pnpm build`                          | Production builds                                               |
+| `pnpm test`                           | Unit + component tests — no infrastructure required             |
+| `pnpm test:e2e`                       | API integration tests — **requires MongoDB**                    |
+| `pnpm test:browser`                   | Browser E2E — **requires MongoDB + Playwright**                 |
+| `pnpm lint`                           | ESLint, zero warnings tolerated                                 |
+| `pnpm typecheck`                      | `tsc --noEmit` across every package                             |
+| `pnpm format` / `format:check`        | Prettier                                                        |
+| `pnpm verify`                         | Every gate, in CI order                                         |
+| `pnpm docker:up` / `docker:down`      | MongoDB, MinIO and ClamAV                                       |
+| `pnpm --filter @wdrg/api test:ollama` | Provider check against a **real local model** — never run by CI |
+| `pnpm docker:wait:all`                | Block until every service answers                               |
 
 Scope any command to one package with
 `pnpm --filter @wdrg/api <command>`.
@@ -93,6 +98,7 @@ Detail: [architecture overview](docs/architecture/overview.md) ·
 [dependency inventory](docs/architecture/dependency-and-service-inventory.md) ·
 [self-hosting](docs/operations/self-hosting.md) ·
 [self-hosted inference](docs/operations/self-hosted-inference.md) ·
+[requirement analysis](docs/product/requirement-analysis.md) ·
 [anonymous-access threat model](docs/architecture/anonymous-access-threat-model.md)
 
 ## How project access works
@@ -201,6 +207,9 @@ Recorded as [ADRs](docs/adr/), with the reasoning and the rejected alternatives:
 | [0019](docs/adr/0019-prompt-versioning.md)                   | Versioned, registered, checksummed prompts                                            |
 | [0020](docs/adr/0020-structured-output-repair.md)            | Bounded repair; unvalidated model output is never persisted                           |
 | [0021](docs/adr/0021-inference-endpoint-hardening.md)        | Connect to a validated address, not to a name                                         |
+| [0022](docs/adr/0022-chunking-and-reconciliation.md)         | Chunk, then reconcile across the chunks                                               |
+| [0023](docs/adr/0023-two-confidences.md)                     | Two confidences; only the evidence-derived one governs                                |
+| [0024](docs/adr/0024-baseline-lifecycle.md)                  | The baseline earns its numbers; versions supersede                                    |
 | [0009](docs/adr/0009-request-validation-and-mapping.md)      | Reject undeclared properties; map explicitly to domain types                          |
 | [0010](docs/adr/0010-anonymous-project-access.md)            | Anonymous access: split identifier, secret in the URL fragment, stateless session     |
 
@@ -288,9 +297,9 @@ of secrets.
 | Phase | Delivers                                             | Status       |
 | ----- | ---------------------------------------------------- | ------------ |
 | 1     | Repository foundation and architecture               | **Complete** |
-| 2     | Public workspace, anonymous project lifecycle        | Planned      |
-| 3     | Upload, storage, extraction, OCR                     | Planned      |
-| 4     | Requirement analysis, conflicts, baseline            | Planned      |
+| 2     | Public workspace, anonymous project lifecycle        | **Complete** |
+| 3     | Upload, storage, extraction, OCR                     | **Complete** |
+| 4     | Requirement analysis, conflicts, baseline            | **Complete** |
 | 5     | Technology-stack recommendation and locking          | Planned      |
 | 6     | Estimation and timeline planning                     | Planned      |
 | 7     | Document engine + Our Understanding, Feature Listing | Planned      |

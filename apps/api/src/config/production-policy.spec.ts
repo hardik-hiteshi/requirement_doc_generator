@@ -42,6 +42,8 @@ function config(
       maxContextTokens: 0,
       maxOutputTokens: 0,
       maxAttempts: 3,
+      requireRemoteEndpoint: false,
+      deterministicScenario: '',
       ...(ai ?? {}),
     },
   } as unknown as AppConfigService;
@@ -228,6 +230,15 @@ describe('production policy', () => {
         }),
       ).toContain('AI_MODEL_PROFILE');
     }
+  });
+
+  it('refuses the test provider’s echo scenario in production', () => {
+    // Only meaningful for the deterministic provider, which is already refused
+    // — but a setting that turns a stub into a source of requirements has no
+    // business being set in production under any provider.
+    expect(settings({ provider: 'ollama', deterministicScenario: 'echo' })).toContain(
+      'AI_DETERMINISTIC_SCENARIO',
+    );
   });
 
   it('never prints the endpoint it rejected', () => {

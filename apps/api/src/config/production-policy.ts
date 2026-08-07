@@ -121,6 +121,21 @@ export function checkProductionPolicy(config: AppConfigService): PolicyViolation
       });
     }
 
+    /*
+     * Belt and braces. The scenario only does anything with the deterministic
+     * provider, which is already refused above — but a setting that turns a
+     * stub into a source of requirements has no business being set in
+     * production under any provider, and saying so is cheaper than reasoning
+     * about whether it could ever matter.
+     */
+    if (config.ai.deterministicScenario !== '') {
+      violations.push({
+        setting: 'AI_DETERMINISTIC_SCENARIO',
+        problem: 'is set, which only has meaning for the test provider.',
+        fix: 'Leave it empty. It exists so the browser suite can run without a model.',
+      });
+    }
+
     // The endpoint policy, at startup as well as per request: a deployment that
     // has pointed at a vendor should find out before it accepts any work.
     const endpoint = checkInferenceEndpoint(config.ai.baseUrl, {

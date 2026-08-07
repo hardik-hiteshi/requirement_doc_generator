@@ -156,6 +156,19 @@ files. Invoking it as a separate process creates no obligation.
 No npm dependency: the provider speaks Ollama's HTTP API with `fetch`. A client
 library would add a supply-chain surface for two endpoints.
 
+## Phase 4 added no dependency
+
+The whole requirement-analysis pipeline — chunking, reconciliation, similarity,
+evidence scoring, coverage, alignment, the SSRF-hardened HTTP client and the DNS
+guard — is built on Node's own `crypto`, `dns` and `http` modules plus packages
+already in the tree. No new npm package, no new service, no new cost.
+
+That is not frugality for its own sake. Every dependency here is a supply-chain
+surface on a path that carries a client's confidential requirements, and the two
+places it would have been tempting to add one — an HTTP client and an IP-range
+library — are exactly the two where a subtle difference between what the library
+checks and what the socket does would be a security hole.
+
 ## Model weights
 
 **Never committed to Git.** Large, not source, and several model licences forbid

@@ -75,6 +75,8 @@ export interface AiConfig {
   readonly maxAttempts: number;
   /** Whether production refuses a loopback endpoint as well as a public one. */
   readonly requireRemoteEndpoint: boolean;
+  /** Built-in behaviour for the deterministic test provider. Empty means none. */
+  readonly deterministicScenario: '' | 'echo';
 }
 
 export interface UploadConfig {
@@ -269,6 +271,7 @@ export class AppConfigService {
       maxOutputTokens: this.config.get('AI_MAX_OUTPUT_TOKENS', { infer: true }),
       maxAttempts: this.config.get('AI_MAX_ATTEMPTS', { infer: true }),
       requireRemoteEndpoint: this.config.get('AI_REQUIRE_REMOTE_ENDPOINT', { infer: true }),
+      deterministicScenario: this.config.get('AI_DETERMINISTIC_SCENARIO', { infer: true }),
     };
   }
 

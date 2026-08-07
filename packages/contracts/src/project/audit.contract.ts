@@ -41,6 +41,28 @@ export const AUDIT_EVENT_TYPES = [
   'REQUIREMENT_SOURCE_RETRIED',
   'REQUIREMENT_SOURCE_DELETED',
   'REQUIREMENT_FILE_DOWNLOADED',
+
+  /* Phase 4 — requirement analysis. As above, these record that something
+     happened, never what a requirement said. The one exception is a decision's
+     *kind* — "merged", "chose a winner" — because a decision nobody can name is
+     not an audit trail. */
+  'ANALYSIS_STARTED',
+  'ANALYSIS_COMPLETED',
+  'ANALYSIS_FAILED',
+  'ANALYSIS_CANCELLED',
+  'REQUIREMENT_EDITED',
+  'REQUIREMENT_ACCEPTED',
+  'REQUIREMENT_REJECTED',
+  'REQUIREMENT_ADDED_MANUALLY',
+  'DUPLICATE_RESOLVED',
+  'CONFLICT_RESOLVED',
+  'FINDING_RESOLVED',
+  'CLARIFICATION_ANSWERED',
+  'CLARIFICATION_DISMISSED',
+  'BASELINE_CREATED',
+  'BASELINE_REVIEW_STARTED',
+  'BASELINE_APPROVED',
+  'BASELINE_OUTDATED',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];

@@ -231,6 +231,15 @@ export const apiEnvSchema = z.object({
    * requires inference to be a separate internal host turns this on.
    */
   AI_REQUIRE_REMOTE_ENDPOINT: booleanFromString(false),
+  /**
+   * A built-in behaviour for the deterministic test provider.
+   *
+   * Only meaningful with `AI_PROVIDER=deterministic`, which production refuses.
+   * `echo` makes the stub answer from the evidence it was given, so the browser
+   * suite — which runs the API as a separate process and cannot register
+   * fixtures — can drive the whole workflow without a model.
+   */
+  AI_DETERMINISTIC_SCENARIO: z.enum(['', 'echo']).default(''),
 
   /* ---------------------------------------------------------------- docs */
   /** Serve the interactive OpenAPI UI. Disabled by default in production. */

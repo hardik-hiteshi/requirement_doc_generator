@@ -12,4 +12,12 @@ export const queryKeys = {
   /* Phase 3 — requirement ingestion. */
   sources: ['sources'] as const,
   source: (sourceId: string) => ['sources', sourceId] as const,
+
+  /* Phase 4 — requirement analysis. */
+  analysisRun: ['analysis', 'run'] as const,
+  requirements: ['analysis', 'requirements'] as const,
+  findings: ['analysis', 'findings'] as const,
+  clarifications: ['analysis', 'clarifications'] as const,
+  baseline: ['analysis', 'baseline'] as const,
+  baselineVersions: ['analysis', 'baseline', 'versions'] as const,
 } as const;
