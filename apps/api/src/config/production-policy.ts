@@ -1,3 +1,6 @@
+import { checkInferenceEndpoint, isProductionUsable } from '@wdrg/contracts';
+
+import { findModelProfile } from '../analysis/models/model-profiles';
 import type { AppConfigService } from './app-config.service';
 
 /**
@@ -103,12 +106,72 @@ export function checkProductionPolicy(config: AppConfigService): PolicyViolation
 
   /* ------------------------------------------------------------------ AI */
 
-  if (config.ai.provider !== 'disabled' && config.ai.baseUrl.trim().length === 0) {
-    violations.push({
-      setting: 'AI_BASE_URL',
-      problem: 'is empty, but an AI provider is selected.',
-      fix: 'Point it at the inference server you run yourself. This application never calls a hosted model vendor.',
+  if (config.ai.provider !== 'disabled') {
+    /*
+     * The deterministic provider returns fixtures. Reaching production with it
+     * selected would produce a requirement baseline made of nothing, presented
+     * with exactly the same confidence as a real one — which is the worst
+     * possible failure for a document a client signs.
+     */
+    if (config.ai.provider === 'deterministic') {
+      violations.push({
+        setting: 'AI_PROVIDER',
+        problem: 'is "deterministic", which returns test fixtures rather than analysing anything.',
+        fix: 'Set AI_PROVIDER=ollama or local-openai-compatible, pointing at an inference server you run.',
+      });
+    }
+
+    // The endpoint policy, at startup as well as per request: a deployment that
+    // has pointed at a vendor should find out before it accepts any work.
+    const endpoint = checkInferenceEndpoint(config.ai.baseUrl, {
+      requirePrivateAddress: true,
     });
+
+    if (!endpoint.allowed && config.ai.provider !== 'deterministic') {
+      violations.push({
+        setting: 'AI_BASE_URL',
+        problem: endpoint.reason ?? 'is not a permitted inference endpoint.',
+        fix: 'Point it at an inference server on your own network. Requirement content never leaves your infrastructure.',
+      });
+    }
+
+    const profileId = config.ai.modelProfile.trim();
+
+    if (profileId.length === 0) {
+      violations.push({
+        setting: 'AI_MODEL_PROFILE',
+        problem: 'is empty, but an AI provider is selected.',
+        fix: 'Name one of the model profiles. Each records its licence and its limits.',
+      });
+    } else {
+      const profile = findModelProfile(profileId);
+
+      if (!profile) {
+        violations.push({
+          setting: 'AI_MODEL_PROFILE',
+          problem: `names "${profileId}", which is not a known model profile.`,
+          fix: 'Use a profile from apps/api/src/analysis/models/model-profiles.ts, or add one.',
+        });
+      } else {
+        const usable = isProductionUsable(profile);
+
+        if (!usable.usable) {
+          violations.push({
+            setting: 'AI_MODEL_PROFILE',
+            problem: usable.reason ?? 'is not approved for production.',
+            fix: 'Validate the model, record its licence, and set validationStatus to production-approved.',
+          });
+        }
+
+        if (!profile.structuredOutput) {
+          violations.push({
+            setting: 'AI_MODEL_PROFILE',
+            problem: `"${profile.id}" does not reliably produce structured output, which every analysis task requires.`,
+            fix: 'Choose a model that supports constrained JSON output.',
+          });
+        }
+      }
+    }
   }
 
   return violations;

@@ -1,3 +1,4 @@
+import { MODEL_PROFILES } from '../analysis/models/model-profiles';
 import type { AppConfigService } from './app-config.service';
 import { checkProductionPolicy, describeViolations } from './production-policy';
 
@@ -9,7 +10,11 @@ import { checkProductionPolicy, describeViolations } from './production-policy';
  * dangerous kind: nothing looks wrong until an unscanned file has been accepted.
  */
 
-function config(overrides: Record<string, unknown> = {}): AppConfigService {
+function config(
+  overrides: Record<string, unknown> & { ai?: Record<string, unknown> } = {},
+): AppConfigService {
+  const { ai, ...rest } = overrides;
+
   return {
     isProduction: true,
     upload: { adapter: 's3' },
@@ -25,8 +30,20 @@ function config(overrides: Record<string, unknown> = {}): AppConfigService {
     },
     malware: { scanner: 'clamav', host: 'clamav.internal', port: 3310, failClosed: true },
     session: { secret: 'a-real-secret-of-sufficient-length-0000000' },
-    ai: { provider: 'disabled', baseUrl: '', model: '' },
-    ...overrides,
+    ...rest,
+    ai: {
+      provider: 'disabled',
+      baseUrl: '',
+      model: '',
+      modelProfile: '',
+      modelOverride: '',
+      requestTimeoutMs: 120_000,
+      runTimeoutMs: 900_000,
+      maxContextTokens: 0,
+      maxOutputTokens: 0,
+      maxAttempts: 3,
+      ...(ai ?? {}),
+    },
   } as unknown as AppConfigService;
 }
 
@@ -119,14 +136,115 @@ describe('production policy', () => {
     expect(violations.map((violation) => violation.setting)).toContain('PROJECT_SESSION_SECRET');
   });
 
-  it('refuses an AI provider with no self-hosted endpoint', () => {
+  /* ------------------------------------------------------------------ AI */
+
+  const settings = (overrides: Record<string, unknown>): string[] =>
+    checkProductionPolicy(config({ ai: overrides })).map((violation) => violation.setting);
+
+  it('checks nothing about AI when no provider is selected', () => {
+    // Every other phase of the product works without it, and a deployment that
+    // has not enabled analysis should not be asked to name a model.
+    expect(checkProductionPolicy(config({ ai: { provider: 'disabled' } }))).toEqual([]);
+  });
+
+  it('refuses the deterministic provider, which returns fixtures rather than analysis', () => {
     const violations = checkProductionPolicy(
-      config({ ai: { provider: 'ollama', baseUrl: '', model: 'llama3.1:8b' } }),
+      config({ ai: { provider: 'deterministic', modelProfile: 'deterministic-test' } }),
     );
 
-    const ai = violations.find((violation) => violation.setting === 'AI_BASE_URL');
-    expect(ai).toBeDefined();
-    expect(ai?.fix).toMatch(/run yourself/i);
+    const provider = violations.find((violation) => violation.setting === 'AI_PROVIDER');
+
+    expect(provider).toBeDefined();
+    expect(provider?.problem).toMatch(/fixtures/i);
+  });
+
+  it('refuses an AI provider with no endpoint at all', () => {
+    const violations = checkProductionPolicy(
+      config({ ai: { provider: 'ollama', baseUrl: '', modelProfile: 'qwen2.5-7b-instruct' } }),
+    );
+
+    const endpoint = violations.find((violation) => violation.setting === 'AI_BASE_URL');
+
+    expect(endpoint).toBeDefined();
+    expect(endpoint?.fix).toMatch(/your own network/i);
+  });
+
+  it.each([
+    ['https://api.openai.com/v1', 'a hosted vendor'],
+    ['https://api.anthropic.com', 'a hosted vendor'],
+    ['https://generativelanguage.googleapis.com', 'a hosted vendor'],
+    ['http://203.0.113.10:11434', 'a public address'],
+  ])('refuses %s, which is %s', (baseUrl) => {
+    expect(
+      settings({ provider: 'ollama', baseUrl, modelProfile: 'qwen2.5-7b-instruct' }),
+    ).toContain('AI_BASE_URL');
+  });
+
+  it("accepts an inference server on the operator's own network", () => {
+    // The endpoint is fine; only the unapproved profile is objected to, which is
+    // what proves the address itself passed.
+    expect(
+      settings({
+        provider: 'ollama',
+        baseUrl: 'http://ollama.internal:11434',
+        modelProfile: 'qwen2.5-7b-instruct',
+      }),
+    ).not.toContain('AI_BASE_URL');
+  });
+
+  it.each([
+    ['', /is empty/i],
+    ['gpt-4o', /not a known model profile/i],
+  ])('refuses AI_MODEL_PROFILE %p', (modelProfile, expected) => {
+    const violations = checkProductionPolicy(
+      config({
+        ai: { provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', modelProfile },
+      }),
+    );
+
+    const profile = violations.find((violation) => violation.setting === 'AI_MODEL_PROFILE');
+
+    expect(profile).toBeDefined();
+    expect(profile?.problem).toMatch(expected);
+  });
+
+  it('refuses every profile shipped with the application until an operator approves one', () => {
+    /*
+     * Not an oversight — the deliberate consequence of the model-profile design.
+     * Nothing shipped here is production-approved, because approval means
+     * someone checked this model's licence and this model's behaviour on their
+     * own hardware. Shipping a pre-approved profile would make that decision on
+     * their behalf, silently.
+     *
+     * This test fails the moment a profile is marked production-approved in the
+     * repository, which is exactly when someone should have to think about it.
+     */
+    for (const profile of MODEL_PROFILES) {
+      expect(
+        settings({
+          provider: 'ollama',
+          baseUrl: 'http://127.0.0.1:11434',
+          modelProfile: profile.id,
+        }),
+      ).toContain('AI_MODEL_PROFILE');
+    }
+  });
+
+  it('never prints the endpoint it rejected', () => {
+    const violations = checkProductionPolicy(
+      config({
+        ai: {
+          provider: 'local-openai-compatible',
+          baseUrl: 'https://user:hunter2pass@api.openai.com',
+          modelProfile: 'qwen2.5-7b-instruct',
+        },
+      }),
+    );
+
+    const message = describeViolations(violations);
+
+    expect(message).toContain('AI_BASE_URL');
+    expect(message).not.toContain('hunter2pass');
   });
 
   it('reports every problem at once, with a fix for each', () => {

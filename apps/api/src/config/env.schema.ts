@@ -179,21 +179,48 @@ export const apiEnvSchema = z.object({
    */
   MALWARE_FAIL_CLOSED: booleanFromString(true),
 
-  /* ------------------------------------------------ AI provider (Phase 4) */
+  /* ---------------------------------------------------------- AI provider */
   /**
-   * Reserved for Phase 4, and constrained now so a paid provider cannot be
-   * assumed later.
+   * Which inference provider to use.
    *
-   * `disabled` is the default and the only value Phase 3 accepts. The other two
-   * are **self-hosted inference servers** — Ollama for development, an
-   * OpenAI-protocol-compatible local server such as vLLM for production. The
-   * protocol is borrowed; the service is not. See ADR-0017.
+   * `ollama` and `local-openai-compatible` are both **self-hosted**: the
+   * protocol is borrowed, the service is not. `deterministic` returns fixtures
+   * for tests and is rejected at startup in production. There is no hosted
+   * option, by design — see ADR-0017.
    */
-  AI_PROVIDER: z.enum(['disabled', 'ollama', 'local-openai-compatible']).default('disabled'),
-  /** Base URL of the self-hosted inference server. Never a vendor endpoint. */
+  AI_PROVIDER: z
+    .enum(['disabled', 'ollama', 'local-openai-compatible', 'deterministic'])
+    .default('disabled'),
+  /**
+   * Base URL of the inference server you run.
+   *
+   * No default. An unconfigured deployment fails rather than reaching anywhere,
+   * and production additionally refuses hosted-vendor domains and public
+   * addresses.
+   */
   AI_BASE_URL: z.string().default(''),
-  /** Model identifier, e.g. `llama3.1:8b`. Weights are never committed. */
+  /** Which model profile to use. Resolved against the profile registry. */
+  AI_MODEL_PROFILE: z.string().default(''),
+  /**
+   * Overrides the profile's model name, for a server that publishes it under a
+   * different tag. The profile still supplies the licence and the limits.
+   */
   AI_MODEL: z.string().default(''),
+  /** Ceiling for one inference request. Local models are slow; be generous. */
+  AI_REQUEST_TIMEOUT_MS: integerSchema({ default: 180_000, min: 5_000, max: 1_800_000 }),
+  /** Ceiling for the whole analysis run, across every task and chunk. */
+  AI_RUN_TIMEOUT_MS: integerSchema({ default: 3_600_000, min: 60_000, max: 21_600_000 }),
+  /**
+   * Overrides the profile's context and output limits.
+   *
+   * Present because the same weights can be served with a smaller context to
+   * fit available memory, and the application must budget against what the
+   * *server* will accept rather than what the model could theoretically do.
+   */
+  AI_MAX_CONTEXT_TOKENS: integerSchema({ default: 0, min: 0, max: 2_000_000 }),
+  AI_MAX_OUTPUT_TOKENS: integerSchema({ default: 0, min: 0, max: 200_000 }),
+  /** Retries for a retryable provider failure, beyond the first attempt. */
+  AI_MAX_ATTEMPTS: integerSchema({ default: 3, min: 1, max: 10 }),
 
   /* ---------------------------------------------------------------- docs */
   /** Serve the interactive OpenAPI UI. Disabled by default in production. */

@@ -35,3 +35,10 @@ export * from './requirements/requirement-source.contract';
 export * from './requirements/requirement-errors';
 export * from './requirements/requirement-routes';
 export * from './requirements/evidence-boundary';
+
+/* Phase 4 — requirement analysis. The provider layer lands first; the analysis
+   pipeline, clarifications and baseline follow on the same branch. */
+export * from './analysis/ai-task.contract';
+export * from './analysis/model-profile.contract';
+export * from './analysis/inference-endpoint.contract';
+export * from './analysis/analysis-limits';

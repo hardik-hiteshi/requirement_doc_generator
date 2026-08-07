@@ -92,6 +92,7 @@ Detail: [architecture overview](docs/architecture/overview.md) ·
 [requirement ingestion](docs/architecture/requirement-ingestion.md) ·
 [dependency inventory](docs/architecture/dependency-and-service-inventory.md) ·
 [self-hosting](docs/operations/self-hosting.md) ·
+[self-hosted inference](docs/operations/self-hosted-inference.md) ·
 [anonymous-access threat model](docs/architecture/anonymous-access-threat-model.md)
 
 ## How project access works
@@ -138,9 +139,10 @@ rejected alternatives: [ADR-0010](docs/adr/0010-anonymous-project-access.md).
 > requirement ingestion, OCR, storage, malware scanning, AI processing,
 > estimation, document generation, or export.
 
-MongoDB, MinIO, ClamAV, Tesseract and — from Phase 4 — Ollama or vLLM. All
+MongoDB, MinIO, ClamAV, Tesseract, and Ollama or vLLM for inference. All
 open-source, all running on hardware you control, and **no client requirement
-document ever leaves your network**.
+document ever leaves your network** — the endpoint policy refuses hosted model
+vendors outright, in development as well as production.
 
 That is a statement about vendor dependency, not about cost: servers, storage,
 GPUs, backups and patching are still yours, and this is more operational work
@@ -195,6 +197,9 @@ Recorded as [ADRs](docs/adr/), with the reasoning and the rejected alternatives:
 | [0015](docs/adr/0015-legacy-file-strategy.md)                | A conversion boundary for .doc and .xls, off by default                               |
 | [0016](docs/adr/0016-source-revision-model.md)               | Append-only content revisions with an explicit effective pointer                      |
 | [0017](docs/adr/0017-self-hosted-ai-inference.md)            | Self-hosted inference, never a hosted model vendor                                    |
+| [0018](docs/adr/0018-model-profile-strategy.md)              | Model profiles as data, not a hardcoded choice                                        |
+| [0019](docs/adr/0019-prompt-versioning.md)                   | Versioned, registered, checksummed prompts                                            |
+| [0020](docs/adr/0020-structured-output-repair.md)            | Bounded repair; unvalidated model output is never persisted                           |
 | [0009](docs/adr/0009-request-validation-and-mapping.md)      | Reject undeclared properties; map explicitly to domain types                          |
 | [0010](docs/adr/0010-anonymous-project-access.md)            | Anonymous access: split identifier, secret in the URL fragment, stateless session     |
 
