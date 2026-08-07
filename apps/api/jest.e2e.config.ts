@@ -21,12 +21,19 @@ const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   testTimeout: 30_000,
   /*
-   * One suite at a time, stated here rather than left to the `--runInBand` flag
-   * in the script. These share a MongoDB and a job queue, so running two at once
-   * would have one suite's worker draining another's jobs — and a config that
-   * only holds when invoked through one particular command is a trap.
+   * A process per suite.
+   *
+   * pdfjs is loaded through a real dynamic import so it escapes Jest's module
+   * registry and becomes a *process*-level singleton. Run every suite in one
+   * process and a spec that boots and tears down a Nest application leaves it in
+   * a state where the next PDF extraction throws — which presented as a broken
+   * extractor and was really shared state between unrelated files.
+   *
+   * Safe because the background extraction worker is off for the whole suite
+   * (see `test/e2e-env.ts`): the only thing two suites could have contended over
+   * was the job queue, and now each drives its own jobs explicitly.
    */
-  maxWorkers: 1,
+  maxWorkers: 2,
   clearMocks: true,
 };
 
