@@ -7,16 +7,17 @@ documents.
 The public workspace needs no account: a project is reached through a private
 recovery link.
 
-> **Current state: Phase 4 — AI-assisted requirement analysis.**
+> **Current state: Phase 5 — technology-stack recommendation and locking.**
 > You can create a project without an account, receive a private recovery link,
 > upload and paste requirement documents, review what was extracted from them,
-> then analyse them into a traceable requirement baseline: classification,
+> analyse them into a traceable requirement baseline — classification,
 > duplicates, contradictions, ambiguity, gaps, clarification questions, evidence
-> confidence, coverage, alignment and approval. **The analysis runs on a model
-> you host** — see [self-hosted
-> inference](docs/operations/self-hosted-inference.md). Technology-stack
-> recommendation, estimation and document generation are **not** implemented —
-> see [Roadmap](#roadmap).
+> confidence, coverage, alignment and approval — and then decide the technology
+> stack against that baseline and lock it as authoritative for everything after.
+> **Both the analysis and the technology suggestions run on a model you host**
+> — see [self-hosted inference](docs/operations/self-hosted-inference.md) — and
+> the stack step works end to end with no model at all. Estimation and document
+> generation are **not** implemented — see [Roadmap](#roadmap).
 
 ---
 
@@ -95,10 +96,12 @@ Detail: [architecture overview](docs/architecture/overview.md) ·
 [API conventions](docs/api/README.md) ·
 [project data model](docs/architecture/project-data-model.md) ·
 [requirement ingestion](docs/architecture/requirement-ingestion.md) ·
+[technology-stack architecture](docs/architecture/technology-stack.md) ·
 [dependency inventory](docs/architecture/dependency-and-service-inventory.md) ·
 [self-hosting](docs/operations/self-hosting.md) ·
 [self-hosted inference](docs/operations/self-hosted-inference.md) ·
 [requirement analysis](docs/product/requirement-analysis.md) ·
+[technology stack](docs/product/technology-stack.md) ·
 [anonymous-access threat model](docs/architecture/anonymous-access-threat-model.md)
 
 ## How project access works
@@ -301,7 +304,7 @@ of secrets.
 | 2     | Public workspace, anonymous project lifecycle        | **Complete** |
 | 3     | Upload, storage, extraction, OCR                     | **Complete** |
 | 4     | Requirement analysis, conflicts, baseline            | **Complete** |
-| 5     | Technology-stack recommendation and locking          | Planned      |
+| 5     | Technology-stack recommendation and locking          | **Complete** |
 | 6     | Estimation and timeline planning                     | Planned      |
 | 7     | Document engine + Our Understanding, Feature Listing | Planned      |
 | 8     | Acceptance Criteria, Assumptions, Statement of Work  | Planned      |

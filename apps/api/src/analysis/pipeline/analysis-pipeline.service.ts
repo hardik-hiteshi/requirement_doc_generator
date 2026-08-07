@@ -12,7 +12,7 @@ import {
 import { AppConfigService } from '../../config/app-config.service';
 import { AI_PROVIDER_PORT } from '../../ports';
 import { AnalysisRepository } from '../analysis.repository';
-import { resolveModelProfile } from '../analysis.module';
+import { resolveModelProfile } from '../models/resolve-profile';
 import type { InferenceProvider } from '../providers/inference.types';
 import { AiTaskRunner, type TaskOutcome } from '../task-runner.service';
 import { chunkEvidence, planChunks, type PlannedChunk } from './chunker';

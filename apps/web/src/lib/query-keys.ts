@@ -24,4 +24,10 @@ export const queryKeys = {
     ['analysis', 'conflicts', conflictId, 'history'] as const,
   baseline: ['analysis', 'baseline'] as const,
   baselineVersions: ['analysis', 'baseline', 'versions'] as const,
+
+  /* Phase 5 — technology stack. */
+  stack: ['stack'] as const,
+  stackVersions: ['stack', 'versions'] as const,
+  stackCatalog: ['stack', 'catalog'] as const,
+  stackRecommendationRun: ['stack', 'recommendations', 'run'] as const,
 } as const;

@@ -99,14 +99,20 @@ project details → requirement input → extraction review → requirement anal
    → estimation & timeline → document generation → export & recovery
 ```
 
-Two rules govern it _(planned, from Phase 6 onward)_:
+Two rules govern it. Both are live as far as the technology stack; the document
+steps that follow are still planned.
 
 - **Approval gates progression.** The approved requirement baseline is the source
-  of truth for everything downstream; the locked technology stack is
-  authoritative and is never silently replaced.
-- **Changing an approved artefact invalidates what depended on it.** Reopening a
-  document creates a new version and marks downstream documents outdated, rather
-  than leaving a stale document that looks current.
+  of truth for everything downstream, and the technology stack refuses to be
+  approved without one. The locked stack is in turn authoritative and is never
+  silently replaced — it emits a `DownstreamAuthority` contract that later phases
+  read, and `GET /stack/authority` refuses anything that is not locked. See
+  [technology stack](technology-stack.md).
+- **Changing an approved artefact invalidates what depended on it.** A document
+  arriving after a baseline is approved marks it out of date; a baseline going out
+  of date marks the stack out of date; unlocking a stack supersedes it and creates
+  a new version. In every case the approved artefact keeps saying exactly what it
+  said, and the user decides what to do — nothing is silently regenerated.
 
 ## Security posture
 

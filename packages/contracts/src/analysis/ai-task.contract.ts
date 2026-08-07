@@ -43,6 +43,14 @@ export const AI_TASK_IDS = [
   'baseline.validate',
   /** Terminology and meaning consistent across sources. */
   'baseline.crossSource',
+  /**
+   * Technologies for the categories a stack has not decided.
+   *
+   * Phase 5. Picks from the reviewed catalogue and explains why for this
+   * project; it supplies no commercial fact and no authority — see
+   * `stack/recommendation-schema.ts`.
+   */
+  'stack.recommend',
 ] as const;
 
 export type AiTaskId = (typeof AI_TASK_IDS)[number];
@@ -63,6 +71,7 @@ export const AI_TASK_LABELS: Readonly<Record<AiTaskId, string>> = {
   'conflict.reevaluate': 'Re-checking affected contradictions',
   'baseline.validate': 'Validating the baseline',
   'baseline.crossSource': 'Checking consistency across sources',
+  'stack.recommend': 'Suggesting technologies',
 };
 
 /* ------------------------------------------------------------- failures */

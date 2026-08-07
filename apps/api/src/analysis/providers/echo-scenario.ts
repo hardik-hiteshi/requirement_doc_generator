@@ -160,9 +160,116 @@ export function echoResponse(request: InferenceRequest): string | null {
       });
     }
 
+    /*
+     * A fixed technology per category, from the catalogue.
+     *
+     * Unlike the findings above, there is nothing fictional about this: the
+     * categories come from the application's own request and the ids come from
+     * the reviewed catalogue, so the stub is choosing between real options
+     * rather than inventing one. What it cannot do is reason — the rationale
+     * says so plainly rather than imitating one.
+     *
+     * The table is what makes the Phase 5 fixtures reproducible: the same
+     * project always produces the same suggestions, so a test can assert them.
+     */
+    case 'stack.recommend': {
+      const categories = requestedCategories(request);
+
+      return JSON.stringify({
+        recommendations: categories
+          .map((category) => {
+            const technologyId = DETERMINISTIC_CHOICE[category];
+
+            return technologyId
+              ? {
+                  category,
+                  technologyId,
+                  rationale:
+                    'Chosen by the deterministic test provider, which picks a fixed technology per category rather than reasoning about your requirements.',
+                  requirementIds: [],
+                  benefits: [],
+                  limitations: [],
+                  risks: [],
+                  operationalConsiderations: [],
+                  alternativeTechnologyId: null,
+                  alternativeReason: null,
+                  modelConfidence: 0.5,
+                }
+              : null;
+          })
+          .filter((item) => item !== null),
+        // No opinions about anything a person chose. A stub second-guessing a
+        // user's decision would put a fabricated objection on the screen.
+        concerns: [],
+      });
+    }
+
     default:
       return null;
   }
+}
+
+/**
+ * One technology per category, fixed.
+ *
+ * Covers the categories the supported project types can require, so every
+ * fixture reaches a stack that can be approved. Categories absent from here
+ * simply get no suggestion, which the application reports honestly as a
+ * category still needing a decision.
+ */
+const DETERMINISTIC_CHOICE: Readonly<Record<string, string>> = {
+  web_frontend: 'react',
+  backend: 'nestjs',
+  database: 'postgresql',
+  mobile_framework: 'flutter',
+  native_android: 'kotlin-android',
+  native_ios: 'swift-ios',
+  desktop_framework: 'electron',
+  object_storage: 'minio',
+  authentication: 'app-native-auth',
+  authorization: 'casbin',
+  payment: 'stripe',
+  ai_model: 'open-weights-model',
+  ai_runtime: 'ollama',
+  background_jobs: 'db-backed-jobs',
+  integrations: 'rest-api',
+  hosting: 'vps-hosting',
+  ci_cd: 'github-actions',
+  monitoring: 'prometheus-grafana',
+  logging: 'structured-file-logs',
+  analytics: 'plausible',
+  testing: 'playwright',
+  security_tooling: 'dependency-audit',
+  content_management: 'markdown-content',
+};
+
+/**
+ * The categories the application asked about.
+ *
+ * Read out of the prior-results message the service builds, which is
+ * application text rather than evidence — so this is parsing our own request
+ * back, not interpreting a client's document.
+ */
+function requestedCategories(request: InferenceRequest): string[] {
+  for (const message of request.messages) {
+    if (message.role !== 'user') {
+      continue;
+    }
+
+    const line = message.content
+      .split('\n')
+      .find((candidate) => candidate.startsWith('Categories to fill:'));
+
+    if (line) {
+      return line
+        .slice('Categories to fill:'.length)
+        .split(',')
+        .map((category) => category.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [];
 }
 
 interface EvidenceBlock {
