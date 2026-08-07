@@ -496,7 +496,17 @@ describe('SafeHttpClient', () => {
       });
     });
 
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    /*
+     * Dual-stack, deliberately.
+     *
+     * `localhost` resolves to `::1` before `127.0.0.1` on some machines and the
+     * other way round on others, and the guard connects to what the resolver
+     * returned. Binding IPv4 only makes this suite pass locally and fail on a
+     * runner — which it did. Binding both means the tests assert what they are
+     * about (the Host header, the redirect policy) rather than the host's
+     * resolver ordering.
+     */
+    await new Promise<void>((resolve) => server.listen(0, resolve));
     port = (server.address() as AddressInfo).port;
   });
 
