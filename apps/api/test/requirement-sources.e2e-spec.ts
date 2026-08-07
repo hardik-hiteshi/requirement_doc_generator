@@ -278,12 +278,33 @@ describe('Requirement sources (e2e)', () => {
   /* ---------------------------------------------------------- extraction */
 
   describe('extraction', () => {
+    /**
+     * Uploads a fixture and waits for the source itself to settle.
+     *
+     * Waiting on the *source* rather than on the queue reporting empty: a job
+     * can be claimed and still running when `runOnce` next reports nothing to
+     * do, and the test then asserts against a source that is mid-extraction.
+     * That produced a failure that looked like a broken extractor and was
+     * really a race — and it only showed up once more suites shared the
+     * database. Bounded, so a genuine hang still fails rather than spins.
+     */
     async function uploadAndExtract(name: string, as = name) {
       const session = await newProject();
       const upload = await uploadFixture(session, name, as);
       const sourceId = upload.body.outcomes[0].source.sourceId as string;
+      const settled = ['READY', 'REVIEW_REQUIRED', 'FAILED', 'OCR_REQUIRED'];
 
-      await drainWorker();
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        await drainWorker();
+
+        const current = await session.agent.get(REQUIREMENT_ROUTES.source(sourceId)).expect(200);
+
+        if (settled.includes(current.body.status as string)) {
+          return { session, sourceId, source: current.body };
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
 
       const source = await session.agent.get(REQUIREMENT_ROUTES.source(sourceId)).expect(200);
       return { session, sourceId, source: source.body };

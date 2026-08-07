@@ -87,6 +87,17 @@ const baseApiEnv = {
 export const apiEnv: Record<string, string> = {
   ...baseApiEnv,
   NODE_ENV: 'test',
+
+  /* Phase 4. The deterministic provider, because the browser suite is about
+     what a reviewer sees — not about what a language model happens to say. A
+     real model would make every assertion probabilistic and would make the
+     suite depend on which weights are installed on the machine running it.
+     The stub answers from the evidence it is given, inventing no conflicts and
+     asking no questions — see echo-scenario.ts. */
+  AI_PROVIDER: 'deterministic',
+  AI_MODEL_PROFILE: 'deterministic-test',
+  AI_BASE_URL: 'http://127.0.0.1:11434',
+  AI_DETERMINISTIC_SCENARIO: 'echo',
   API_PORT: String(API_PORT),
   API_PUBLIC_URL: API_URL,
   MONGODB_URI: mongoUri(DATABASE_NAME),
@@ -118,6 +129,17 @@ export const productionApiEnv: Record<string, string> = {
   UPLOAD_STORAGE_ROOT: resolve(PACKAGE_ROOT, '.artifacts', 'storage-production'),
   MALWARE_SCANNER: 'reject',
   PROJECT_SESSION_SECRET: 'e2e-production-mode-session-secret-00000000',
+  /*
+   * Analysis off, and not as a convenience.
+   *
+   * Production refuses to start with the deterministic provider — a baseline
+   * made of fixtures would look exactly like a real one — so this instance
+   * simply does not do analysis. It exists to observe the cookie flags
+   * production sets, and turning the policy off to make it boot would be
+   * disabling the very check the policy exists for.
+   */
+  AI_PROVIDER: 'disabled',
+  AI_MODEL_PROFILE: '',
 };
 
 export const webEnv: Record<string, string> = {

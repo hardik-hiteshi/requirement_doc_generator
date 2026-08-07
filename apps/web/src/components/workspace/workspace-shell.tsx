@@ -20,6 +20,10 @@ import { DeleteProjectDialog } from '@/components/project/delete-project-dialog'
 import { DetailsSection } from '@/components/project/details-section';
 import { RecoveryLinkPanel } from '@/components/project/recovery-link-panel';
 import { RequirementInputStep } from '@/components/requirements/requirement-input-step';
+import { AnalysisStep } from '@/components/analysis/analysis-step';
+import { BaselineStep } from '@/components/analysis/baseline-step';
+import { ClarificationsStep } from '@/components/analysis/clarifications-step';
+import { useSources } from '@/hooks/use-sources';
 import { OutputPreferencesSection } from '@/components/project/output-preferences-section';
 import { StartDateSection } from '@/components/project/start-date-section';
 import { TeamCapacitySection } from '@/components/project/team-capacity-section';
@@ -36,6 +40,7 @@ import { WorkflowStepper } from './workflow-stepper';
  */
 function stepStates(
   project: ProjectResponse | undefined,
+  hasReviewedSources: boolean,
 ): Partial<Record<WorkflowStepId, WorkflowStepState>> {
   if (!project) {
     return { 'project-details': 'available' };
@@ -46,11 +51,28 @@ function stepStates(
   // a step that looks available and does nothing is worse than one marked locked.
   const detailsComplete = Boolean(project.timeline);
 
+  /*
+   * Analysis needs *reviewed* content, not merely uploaded content. Unlocking
+   * it earlier would offer a button whose only possible outcome is "there is
+   * nothing to analyse yet", which teaches users that the workflow lies about
+   * what is ready.
+   */
   return {
     'project-details': detailsComplete ? 'complete' : 'in_progress',
     'requirement-input': detailsComplete ? 'available' : 'locked',
+    'extraction-review': detailsComplete ? 'available' : 'locked',
+    'requirement-analysis': hasReviewedSources ? 'available' : 'locked',
+    clarifications: hasReviewedSources ? 'available' : 'locked',
+    'baseline-approval': hasReviewedSources ? 'available' : 'locked',
   };
 }
+
+/** The steps this phase implements, in the order the stepper shows them. */
+const ANALYSIS_STEPS: readonly WorkflowStepId[] = [
+  'requirement-analysis',
+  'clarifications',
+  'baseline-approval',
+];
 
 export function WorkspaceShell() {
   const queryClient = useQueryClient();
@@ -78,11 +100,16 @@ export function WorkspaceShell() {
   }
 
   const [activeStepId, setActiveStepId] = useState<WorkflowStepId>('project-details');
+  const { data: sources } = useSources();
+  const hasReviewedSources = Boolean(
+    sources?.sources.some((source) => source.reviewStatus === 'REVIEWED'),
+  );
   const requirementsUnlocked = Boolean(project?.timeline);
   // Falls back rather than showing a step the project has not earned: clearing
   // the timeline while requirement input is open must not leave it stranded there.
+  const analysisLocked = ANALYSIS_STEPS.includes(activeStepId) && !hasReviewedSources;
   const currentStepId: WorkflowStepId =
-    activeStepId === 'requirement-input' && !requirementsUnlocked
+    (activeStepId === 'requirement-input' && !requirementsUnlocked) || analysisLocked
       ? 'project-details'
       : activeStepId;
   const currentStep = WORKFLOW_STEPS.find((step) => step.id === currentStepId);
@@ -118,7 +145,10 @@ export function WorkspaceShell() {
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              <WorkflowStepper states={stepStates(project)} currentStepId={currentStepId} />
+              <WorkflowStepper
+                states={stepStates(project, hasReviewedSources)}
+                currentStepId={currentStepId}
+              />
               <p className="rounded-md border border-border bg-surface-hover p-3 text-xs text-muted">
                 Steps beyond project setup are not built yet. They unlock as later phases ship —
                 requirement upload and extraction come next.
@@ -205,7 +235,7 @@ export function WorkspaceShell() {
                     </p>
                   )}
                 </>
-              ) : (
+              ) : currentStepId === 'requirement-input' ? (
                 <>
                   <Button
                     variant="secondary"
@@ -215,6 +245,40 @@ export function WorkspaceShell() {
                     Back to project details
                   </Button>
                   <RequirementInputStep />
+                  {hasReviewedSources ? (
+                    <Button
+                      className="self-start"
+                      onClick={() => setActiveStepId('requirement-analysis')}
+                    >
+                      Continue to requirement analysis
+                    </Button>
+                  ) : (
+                    <p className="text-sm text-muted">
+                      Mark at least one source as reviewed to unlock requirement analysis.
+                    </p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="secondary"
+                    className="self-start"
+                    onClick={() => setActiveStepId('requirement-input')}
+                  >
+                    Back to requirement input
+                  </Button>
+
+                  {currentStepId === 'requirement-analysis' ? <AnalysisStep /> : null}
+                  {currentStepId === 'clarifications' ? <ClarificationsStep /> : null}
+                  {currentStepId === 'baseline-approval' ? <BaselineStep /> : null}
+
+                  <div className="flex flex-wrap gap-2">
+                    {ANALYSIS_STEPS.filter((step) => step !== currentStepId).map((step) => (
+                      <Button key={step} variant="secondary" onClick={() => setActiveStepId(step)}>
+                        {WORKFLOW_STEPS.find((definition) => definition.id === step)?.title}
+                      </Button>
+                    ))}
+                  </div>
                 </>
               )}
 

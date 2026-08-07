@@ -35,3 +35,19 @@ export * from './requirements/requirement-source.contract';
 export * from './requirements/requirement-errors';
 export * from './requirements/requirement-routes';
 export * from './requirements/evidence-boundary';
+
+/* Phase 4 — requirement analysis. */
+export * from './analysis/ai-task.contract';
+export * from './analysis/model-profile.contract';
+export * from './analysis/inference-endpoint.contract';
+export * from './analysis/analysis-limits';
+export * from './analysis/requirement-item.contract';
+export * from './analysis/analysis-run.contract';
+export * from './analysis/findings.contract';
+export * from './analysis/clarification.contract';
+export * from './analysis/baseline.contract';
+export * from './analysis/evidence-confidence';
+export * from './analysis/conflict-reevaluation';
+export * from './analysis/baseline-calculations';
+export * from './analysis/analysis-routes';
+export * from './analysis/analysis-errors';

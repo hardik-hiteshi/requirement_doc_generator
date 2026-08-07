@@ -38,7 +38,7 @@ export interface ProjectConfig {
 
 export type StorageAdapterName = 'filesystem' | 's3';
 export type MalwareScannerName = 'clamav' | 'none' | 'reject';
-export type AiProviderName = 'disabled' | 'ollama' | 'local-openai-compatible';
+export type AiProviderName = 'disabled' | 'ollama' | 'local-openai-compatible' | 'deterministic';
 
 export interface S3Config {
   readonly endpoint: string;
@@ -63,7 +63,20 @@ export interface MalwareConfig {
 export interface AiConfig {
   readonly provider: AiProviderName;
   readonly baseUrl: string;
-  readonly model: string;
+  /** Profile id, resolved against the model-profile registry. */
+  readonly modelProfile: string;
+  /** Overrides the profile's model name. Empty means "use the profile's". */
+  readonly modelOverride: string;
+  readonly requestTimeoutMs: number;
+  readonly runTimeoutMs: number;
+  /** 0 means "use the profile's value". */
+  readonly maxContextTokens: number;
+  readonly maxOutputTokens: number;
+  readonly maxAttempts: number;
+  /** Whether production refuses a loopback endpoint as well as a public one. */
+  readonly requireRemoteEndpoint: boolean;
+  /** Built-in behaviour for the deterministic test provider. Empty means none. */
+  readonly deterministicScenario: '' | 'echo';
 }
 
 export interface UploadConfig {
@@ -250,7 +263,15 @@ export class AppConfigService {
     return {
       provider: this.config.get('AI_PROVIDER', { infer: true }),
       baseUrl: this.config.get('AI_BASE_URL', { infer: true }),
-      model: this.config.get('AI_MODEL', { infer: true }),
+      modelProfile: this.config.get('AI_MODEL_PROFILE', { infer: true }),
+      modelOverride: this.config.get('AI_MODEL', { infer: true }),
+      requestTimeoutMs: this.config.get('AI_REQUEST_TIMEOUT_MS', { infer: true }),
+      runTimeoutMs: this.config.get('AI_RUN_TIMEOUT_MS', { infer: true }),
+      maxContextTokens: this.config.get('AI_MAX_CONTEXT_TOKENS', { infer: true }),
+      maxOutputTokens: this.config.get('AI_MAX_OUTPUT_TOKENS', { infer: true }),
+      maxAttempts: this.config.get('AI_MAX_ATTEMPTS', { infer: true }),
+      requireRemoteEndpoint: this.config.get('AI_REQUIRE_REMOTE_ENDPOINT', { infer: true }),
+      deterministicScenario: this.config.get('AI_DETERMINISTIC_SCENARIO', { infer: true }),
     };
   }
 

@@ -29,7 +29,7 @@ any third party in the application's runtime path.
 | OCR               | Tesseract          | No    | None           | Only for images and scans              |
 | Legacy conversion | LibreOffice        | No    | None           | No — off by default                    |
 | Queue             | MongoDB collection | No    | Self-hosted    | Yes                                    |
-| AI (Phase 4)      | Ollama / vLLM      | No    | Self-hosted    | Not yet implemented                    |
+| AI inference      | Ollama / vLLM      | No    | Self-hosted    | Only when analysis is enabled          |
 
 ¹ ClamAV's _signature updates_ fetch from the ClamAV project's mirrors. That is
 free, unmetered, and can be pointed at an internal mirror or disabled entirely —
@@ -139,6 +139,54 @@ on the model; the English data shipped by Debian and Ubuntu is Apache-2.0.
 
 MPL-2.0 is file-level copyleft and applies to modifications of LibreOffice's own
 files. Invoking it as a separate process creates no obligation.
+
+### Ollama 0.32.x
+
+|                |                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------- |
+| Purpose        | Local inference server for requirement analysis                                             |
+| Licence        | **MIT**                                                                                     |
+| Commercial use | Permitted                                                                                   |
+| Execution      | Local binary or container; reached over HTTP on a private address                           |
+| Network        | Local only for inference. Pulling a model downloads from Ollama's registry — free, one-time |
+| Cost           | Free software. Compute and electricity are yours                                            |
+| Mandatory      | Only when `AI_PROVIDER=ollama`                                                              |
+| Replacement    | Any OpenAI-protocol server — vLLM, llama.cpp, TGI — through the other provider              |
+
+No npm dependency: the provider speaks Ollama's HTTP API with `fetch`. A client
+library would add a supply-chain surface for two endpoints.
+
+## Phase 4 added no dependency
+
+The whole requirement-analysis pipeline — chunking, reconciliation, similarity,
+evidence scoring, coverage, alignment, the SSRF-hardened HTTP client and the DNS
+guard — is built on Node's own `crypto`, `dns` and `http` modules plus packages
+already in the tree. No new npm package, no new service, no new cost.
+
+That is not frugality for its own sake. Every dependency here is a supply-chain
+surface on a path that carries a client's confidential requirements, and the two
+places it would have been tempting to add one — an HTTP client and an IP-range
+library — are exactly the two where a subtle difference between what the library
+checks and what the socket does would be a security hole.
+
+## Model weights
+
+**Never committed to Git.** Large, not source, and several model licences forbid
+redistribution. Each profile records where its weights come from.
+
+| Model               | Licence        | Commercial use           | Status                    | Notes                                          |
+| ------------------- | -------------- | ------------------------ | ------------------------- | ---------------------------------------------- |
+| Qwen2.5 7B Instruct | **Apache-2.0** | Permitted, no conditions | Untested here             | The reference profile. ~6 GB at Q4             |
+| Qwen2.5 3B Instruct | **Apache-2.0** | Permitted, no conditions | **Development-validated** | Verified against Ollama 0.32.6 on CPU. ~2.5 GB |
+
+Apache-2.0 was chosen over better-benchmarked alternatives deliberately. Several
+widely-used model licences — Meta's community licence most prominently — permit
+commercial use while attaching an acceptable-use policy, a 700M-MAU threshold and
+naming requirements. For a product whose whole constraint is the absence of
+vendor dependency, a licence with no conditions is worth more than a few
+benchmark points. Any model with conditions must be recorded here with
+`commercialUse: 'permitted-with-conditions'` and flagged for legal review before
+production use.
 
 ---
 

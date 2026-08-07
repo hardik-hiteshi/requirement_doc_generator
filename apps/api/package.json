@@ -14,7 +14,8 @@
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.config.ts",
     "test:watch": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.config.ts --watch",
     "test:cov": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.config.ts --coverage",
-    "test:e2e": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.e2e.config.ts --runInBand"
+    "test:e2e": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.e2e.config.ts",
+    "test:ollama": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.ollama.config.ts --runInBand"
   },
   "dependencies": {
     "@napi-rs/canvas": "1.0.3",
