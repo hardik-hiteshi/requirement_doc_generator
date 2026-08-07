@@ -10,11 +10,13 @@ import {
   SETTLED_CLARIFICATION_STATUSES,
   type Clarification,
 } from './clarification.contract';
-import type {
-  AmbiguityFinding,
-  Conflict,
-  DuplicateGroup,
-  MissingInfoFinding,
+import {
+  isBlockingConflict,
+  BLOCKING_CONFLICT_STATUSES,
+  type AmbiguityFinding,
+  type Conflict,
+  type DuplicateGroup,
+  type MissingInfoFinding,
 } from './findings.contract';
 import { isAccountedFor, type BlockDispositionRecord } from './analysis-run.contract';
 import { isInBaseline, type RequirementItem } from './requirement-item.contract';
@@ -142,7 +144,11 @@ export function calculateAlignment(input: AlignmentInput): Alignment {
         );
 
   const findings = [
-    ...input.conflicts.map((conflict) => conflict.status),
+    // A re-evaluated conflict that is still a contradiction is not settled, and
+    // neither is one waiting for a person — both read as unresolved here.
+    ...input.conflicts.map((conflict) =>
+      BLOCKING_CONFLICT_STATUSES.includes(conflict.status) ? 'open' : conflict.status,
+    ),
     ...input.duplicates.map((duplicate) => duplicate.status),
     ...input.ambiguities.map((ambiguity) => ambiguity.status),
     ...input.missing.map((gap) => gap.status),
@@ -211,9 +217,7 @@ function describeIncompleteness(
     );
   }
 
-  const openBlockingConflicts = input.conflicts.filter(
-    (conflict) => conflict.status === 'open' && conflict.severity === 'blocking',
-  ).length;
+  const openBlockingConflicts = input.conflicts.filter(isBlockingConflict).length;
 
   if (openBlockingConflicts > 0) {
     reasons.push(
@@ -308,9 +312,7 @@ export function calculateBlockers(input: BlockerInput): ApprovalBlocker[] {
     );
   }
 
-  const blockingConflicts = input.conflicts.filter(
-    (conflict) => conflict.status === 'open' && conflict.severity === 'blocking',
-  );
+  const blockingConflicts = input.conflicts.filter(isBlockingConflict);
 
   if (blockingConflicts.length > 0) {
     blockers.push({

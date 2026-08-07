@@ -11,6 +11,7 @@ import {
   BaselineRecord,
   ClarificationRecord,
   RequirementItemRecord,
+  ConflictVersionRecord,
   RequirementVersionRecord,
   type AnalysisChunkDocument,
   type AnalysisFindingDocument,
@@ -18,6 +19,7 @@ import {
   type BaselineDocument,
   type ClarificationDocument,
   type RequirementItemDocument,
+  type ConflictVersionDocument,
   type RequirementVersionDocument,
 } from './schemas/analysis.schema';
 
@@ -52,6 +54,8 @@ export class AnalysisRepository {
     private readonly baselines: Model<BaselineRecord>,
     @InjectModel(RequirementVersionRecord.name)
     private readonly itemVersions: Model<RequirementVersionRecord>,
+    @InjectModel(ConflictVersionRecord.name)
+    private readonly conflictVersions: Model<ConflictVersionRecord>,
   ) {}
 
   /** Crockford base32, matching the ids used everywhere else. */
@@ -347,6 +351,28 @@ export class AnalysisRepository {
       .exec();
   }
 
+  /**
+   * Records a conflict exactly as it was, before anything changes it.
+   *
+   * Append-only and never updated. An auditor asking "what was conflicting
+   * before the clarification?" reads these, so the positions are stored whole
+   * rather than referenced.
+   */
+  async recordConflictVersion(record: Partial<ConflictVersionRecord>): Promise<void> {
+    await this.conflictVersions.create(record);
+  }
+
+  async listConflictVersions(
+    projectId: string,
+    conflictId: string,
+  ): Promise<ConflictVersionDocument[]> {
+    return this.conflictVersions
+      .find({ projectId, conflictId })
+      .sort({ version: -1 })
+      .limit(50)
+      .exec();
+  }
+
   /* ------------------------------------------------------ clarifications */
 
   async insertClarifications(records: readonly Partial<ClarificationRecord>[]): Promise<void> {
@@ -496,6 +522,7 @@ export class AnalysisRepository {
       this.clarifications.deleteMany({ projectId }).exec(),
       this.baselines.deleteMany({ projectId }).exec(),
       this.itemVersions.deleteMany({ projectId }).exec(),
+      this.conflictVersions.deleteMany({ projectId }).exec(),
     ]);
   }
 }

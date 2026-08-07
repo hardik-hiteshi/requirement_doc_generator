@@ -1,6 +1,8 @@
 'use client';
 
 import {
+  BLOCKING_CONFLICT_STATUSES,
+  CONFLICT_STATUS_LABELS,
   MISSING_DIMENSION_LABELS,
   type AmbiguityFinding,
   type Conflict,
@@ -11,7 +13,12 @@ import {
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@wdrg/ui';
 import { useState } from 'react';
 
-import { useResolveConflict, useResolveDuplicate, useResolveFinding } from '@/hooks/use-analysis';
+import {
+  useConflictHistory,
+  useResolveConflict,
+  useResolveDuplicate,
+  useResolveFinding,
+} from '@/hooks/use-analysis';
 import type { FindingsResponse } from '@/lib/analysis-api';
 
 /**
@@ -36,7 +43,14 @@ export function FindingsPanel({
   const byId = new Map(items.map((item) => [item.id, item]));
   const open = (status: string) => status === 'open';
 
-  const openConflicts = findings.conflicts.filter((finding) => open(finding.status));
+  // A re-evaluated conflict that is still a contradiction is still outstanding,
+  // however it got there.
+  const openConflicts = findings.conflicts.filter((finding) =>
+    BLOCKING_CONFLICT_STATUSES.includes(finding.status),
+  );
+  const settledConflicts = findings.conflicts.filter(
+    (finding) => finding.status === 'resolved_by_clarification',
+  );
   const openDuplicates = findings.duplicates.filter((finding) => open(finding.status));
   const openAmbiguities = findings.ambiguities.filter((finding) => open(finding.status));
   const openGaps = findings.gaps.filter((finding) => open(finding.status));
@@ -63,6 +77,17 @@ export function FindingsPanel({
           >
             {openConflicts.map((conflict) => (
               <ConflictRow key={conflict.id} conflict={conflict} byId={byId} />
+            ))}
+          </Section>
+        ) : null}
+
+        {settledConflicts.length > 0 ? (
+          <Section
+            title={`Settled by a client answer (${settledConflicts.length})`}
+            note="A confirmed clarification updated every side of these, so they are no longer contradictions. The original wording is kept."
+          >
+            {settledConflicts.map((conflict) => (
+              <SettledConflictRow key={conflict.id} conflict={conflict} />
             ))}
           </Section>
         ) : null}
@@ -142,6 +167,9 @@ function ConflictRow({
         <Badge tone={conflict.severity === 'blocking' ? 'danger' : 'warning'}>
           {conflict.severity === 'blocking' ? 'Blocks approval' : conflict.severity}
         </Badge>
+        <Badge tone={conflict.status === 'needs_review' ? 'warning' : 'neutral'}>
+          {CONFLICT_STATUS_LABELS[conflict.status]}
+        </Badge>
         <Badge tone="neutral">{conflict.kind.replace(/_/g, ' ')}</Badge>
         {conflict.crossSource ? (
           /* The case the whole reconciliation stage exists for. */
@@ -150,6 +178,16 @@ function ConflictRow({
       </div>
 
       <p className="mt-2 text-sm">{conflict.summary}</p>
+
+      {/* What a clarification already tried, and why it did not settle it. */}
+      {conflict.reevaluations.length > 0 ? (
+        <p className="mt-2 rounded-md border border-border bg-surface-raised p-2 text-xs">
+          <span className="font-medium">
+            Re-checked after {conflict.reevaluations.at(-1)?.clarificationKey}:{' '}
+          </span>
+          {conflict.reevaluations.at(-1)?.rationale}
+        </p>
+      ) : null}
 
       <ul className="mt-3 flex flex-col gap-2">
         {conflict.positions.map((position) => (
@@ -224,6 +262,61 @@ function ConflictRow({
         <p role="alert" className="mt-2 text-xs text-danger">
           {resolve.error.message}
         </p>
+      ) : null}
+    </li>
+  );
+}
+
+/** A conflict a confirmed answer settled, with the trail that shows why. */
+function SettledConflictRow({ conflict }: { readonly conflict: Conflict }) {
+  const [showHistory, setShowHistory] = useState(false);
+  const { data: history } = useConflictHistory(showHistory ? conflict.id : undefined);
+  const settled = conflict.reevaluations.at(-1);
+
+  return (
+    <li className="rounded-lg border border-success/30 bg-success-soft/40 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge tone="success">{CONFLICT_STATUS_LABELS[conflict.status]}</Badge>
+        {settled ? <Badge tone="neutral">From {settled.clarificationKey}</Badge> : null}
+      </div>
+
+      <p className="mt-2 text-sm">{conflict.summary}</p>
+      {settled ? <p className="mt-1 text-xs text-muted">{settled.rationale}</p> : null}
+
+      <Button
+        className="mt-3"
+        variant="secondary"
+        onClick={() => setShowHistory((current) => !current)}
+        aria-expanded={showHistory}
+      >
+        {showHistory ? 'Hide what it used to say' : 'What was conflicting before?'}
+      </Button>
+
+      {showHistory && history ? (
+        <ol className="mt-3 flex flex-col gap-2">
+          {history.map((version) => (
+            <li
+              key={`${version.version}-${version.recordedAt}`}
+              className="rounded-md border border-border bg-surface p-3 text-xs"
+            >
+              <p className="text-muted">
+                {version.changedBy === 'analysis'
+                  ? 'As found'
+                  : version.changedBy === 'user_decision'
+                    ? 'Before your decision'
+                    : `Before ${version.clarificationKey ?? 'a clarification'}`}
+              </p>
+              {version.positions.map((position, index) => (
+                <p key={`${position.itemId}-${index}`} className="mt-1">
+                  <span className="text-muted">
+                    {position.sourceName ? `${position.sourceName}: ` : ''}
+                  </span>
+                  {position.statement}
+                </p>
+              ))}
+            </li>
+          ))}
+        </ol>
       ) : null}
     </li>
   );

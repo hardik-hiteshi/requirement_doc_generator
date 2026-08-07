@@ -683,7 +683,7 @@ describe('alignment and blockers', () => {
   };
 
   function conflict(overrides: Partial<Conflict> = {}): Conflict {
-    return {
+    const base: Conflict = {
       id: 'con_1',
       projectId: 'p1',
       runId: 'run_1',
@@ -698,10 +698,12 @@ describe('alignment and blockers', () => {
       crossChunk: true,
       crossSource: true,
       status: 'open',
+      reevaluations: [],
       createdAt: NOW,
       version: 0,
-      ...overrides,
     };
+
+    return { ...base, ...overrides };
   }
 
   it('reaches complete only when nothing is outstanding', () => {

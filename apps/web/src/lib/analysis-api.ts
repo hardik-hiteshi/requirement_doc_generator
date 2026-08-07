@@ -7,6 +7,8 @@ import {
   type Baseline,
   type Clarification,
   type Conflict,
+  type ConflictVersion,
+  type DismissClarification,
   type DuplicateGroup,
   type IntegrationResult,
   type ManualRequirement,
@@ -169,14 +171,17 @@ export async function readRequirementHistory(itemId: string): Promise<Requiremen
 
 export async function dismissClarification(
   clarificationId: string,
-  reason: string,
-  expectedVersion: number,
+  request: DismissClarification,
 ): Promise<Clarification> {
   return apiFetch<Clarification>(ANALYSIS_ROUTES.dismissClarification(clarificationId), {
     method: 'POST',
-    body: { reason, expectedVersion },
+    body: request,
     headers: mutationHeaders(),
   });
+}
+
+export async function readConflictHistory(conflictId: string): Promise<ConflictVersion[]> {
+  return apiFetch<ConflictVersion[]>(ANALYSIS_ROUTES.conflictHistory(conflictId));
 }
 
 export async function readBaseline(): Promise<BaselineView> {

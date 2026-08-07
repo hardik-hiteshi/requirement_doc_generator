@@ -20,6 +20,8 @@ export const queryKeys = {
   clarifications: ['analysis', 'clarifications'] as const,
   proposals: ['analysis', 'proposals'] as const,
   requirementHistory: (itemId: string) => ['analysis', 'requirements', itemId, 'history'] as const,
+  conflictHistory: (conflictId: string) =>
+    ['analysis', 'conflicts', conflictId, 'history'] as const,
   baseline: ['analysis', 'baseline'] as const,
   baselineVersions: ['analysis', 'baseline', 'versions'] as const,
 } as const;

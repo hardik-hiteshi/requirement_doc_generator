@@ -220,6 +220,27 @@ this step is not an opportunity to revisit other requirements.`,
   ),
 
   definition(
+    'conflict.reevaluate',
+    'v1',
+    `Decide whether a confirmed client answer settles each contradiction.
+
+You are given one confirmed question-and-answer, and a list of contradictions
+between requirements that the answer has already been applied to.
+
+For each contradiction, answer one question only: does the client's answer say
+which of the conflicting positions holds, or otherwise make them compatible?
+
+Answer false whenever you are unsure. Answer false if the answer changes the
+wording without settling the disagreement. Answer false if it addresses one side
+and leaves the other standing.
+
+You are not choosing a winner and you are not resolving anything. Your answer is
+one condition among several that the application checks, and it can only prevent
+a resolution, never cause one.`,
+    `{"evaluations":[{"conflictId":"c1","settled":false,"reason":"..."}]}`,
+  ),
+
+  definition(
     'baseline.validate',
     'v1',
     `Check the assembled baseline for internal problems.

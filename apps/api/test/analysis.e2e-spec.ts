@@ -781,6 +781,8 @@ describe('Requirement analysis (e2e)', () => {
         .set('x-csrf-token', session.csrf)
         .send({
           reason: 'Settled with the client on the call.',
+          disposition: 'NOT_APPLICABLE',
+          acknowledged: true,
           expectedVersion: clarification.version,
         })
         .expect(201);

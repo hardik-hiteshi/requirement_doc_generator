@@ -10,6 +10,7 @@ import {
   cancelRun,
   confirmClarification,
   listProposals,
+  readConflictHistory,
   readRequirementHistory,
   resolveProposal,
   dismissClarification,
@@ -108,6 +109,14 @@ export function useRequirementHistory(itemId: string | undefined) {
     queryKey: queryKeys.requirementHistory(itemId ?? ''),
     queryFn: () => readRequirementHistory(itemId!),
     enabled: Boolean(itemId),
+  });
+}
+
+export function useConflictHistory(conflictId: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.conflictHistory(conflictId ?? ''),
+    queryFn: () => readConflictHistory(conflictId!),
+    enabled: Boolean(conflictId),
   });
 }
 
@@ -252,8 +261,11 @@ export function useDismissClarification() {
   const invalidate = useInvalidateAnalysis();
 
   return useMutation({
-    mutationFn: (input: { clarificationId: string; reason: string; expectedVersion: number }) =>
-      dismissClarification(input.clarificationId, input.reason, input.expectedVersion),
+    mutationFn: ({
+      clarificationId,
+      ...request
+    }: { clarificationId: string } & Parameters<typeof dismissClarification>[1]) =>
+      dismissClarification(clarificationId, request),
     onSuccess: invalidate,
   });
 }

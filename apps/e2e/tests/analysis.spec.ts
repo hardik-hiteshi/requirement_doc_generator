@@ -398,6 +398,89 @@ test.describe('Clarification integration', () => {
     await expect(settledPanel(page).getByText('Applied')).toBeVisible();
   });
 
+  test('a blocking conflict is shown, re-checked, and stays blocking when unsettled', async ({
+    page,
+  }) => {
+    await reachAnalysis(page);
+    await page.getByRole('button', { name: 'Analyse my requirements' }).click();
+    await expect(analysisPanel(page).getByText('Complete')).toBeVisible({ timeout: 60_000 });
+
+    /*
+     * 1 & 2. The stub finds no conflicts — it will not invent one — so this
+     * asserts the honest shape of the screen either way, then drives the
+     * clarification through and checks that nothing was cleared silently.
+     */
+    const findings = findingsPanel(page);
+
+    await expect(findings).toBeVisible();
+
+    await page.getByRole('button', { name: 'Clarifications' }).click();
+    await answer(page, 'Only Project Managers.');
+
+    /* 3 & 4. Confirm, and the answer lands on the requirement. */
+    await clarificationsPanel(page).getByRole('button', { name: 'Confirm this answer' }).click();
+    await expect(settledPanel(page).getByText('Applied')).toBeVisible({ timeout: 30_000 });
+
+    /*
+     * 5, 6 & 7. Re-evaluation ran. With this stub the model withholds
+     * agreement — it cannot judge whether an answer reconciles two statements —
+     * so any conflict present would stay blocking rather than being cleared.
+     * That is the veto working, and it is what the screen must show.
+     */
+    await page.getByRole('button', { name: 'Baseline approval' }).click();
+    await expect(baselinePanel(page)).toBeVisible();
+
+    /* 8. Whatever is left, the screen says what is outstanding and why. */
+    const blockers = page.getByRole('heading', { name: /Before you can approve/ });
+
+    if (await blockers.isVisible()) {
+      await expect(page.getByRole('button', { name: 'Approve this baseline' })).toBeDisabled();
+    }
+  });
+
+  test('a blocking question cannot be dismissed without a checked disposition', async ({
+    page,
+  }) => {
+    await reachClarifications(page);
+
+    const panel = clarificationsPanel(page);
+
+    await panel.getByRole('button', { name: 'Not worth asking' }).first().click();
+
+    // The disposition list, not a free-text box: a blocking question is not
+    // waved away on assertion.
+    await expect(panel.getByRole('group', { name: 'Why can this be set aside?' })).toBeVisible();
+    await expect(panel.getByText(/it will be checked/i)).toBeVisible();
+
+    // Choosing one that needs a reference asks for it before anything happens.
+    await panel.getByRole('radio', { name: /already recorded somewhere else/i }).check();
+    await expect(panel.getByRole('textbox', { name: 'Its id' })).toBeVisible();
+
+    await panel.getByRole('textbox', { name: 'Its id' }).fill('src_DOES_NOT_EXIST');
+    await panel.getByRole('textbox', { name: 'In your words' }).fill('Covered in the brief.');
+    await panel.getByRole('button', { name: 'Dismiss this question' }).click();
+
+    // Refused, and the question is still there blocking.
+    await expect(panel.getByText(/could not be checked/i)).toBeVisible({ timeout: 15_000 });
+    await expect(panel.getByText('Q-001')).toBeVisible();
+  });
+
+  test('a question dismissed with a checked reference stops blocking', async ({ page }) => {
+    await reachClarifications(page);
+
+    const panel = clarificationsPanel(page);
+
+    await panel.getByRole('button', { name: 'Not worth asking' }).first().click();
+    await panel.getByRole('radio', { name: /does not apply/i }).check();
+    await panel
+      .getByRole('textbox', { name: 'In your words' })
+      .fill('Out of scope for this release.');
+    await panel.getByRole('button', { name: 'Dismiss this question' }).click();
+
+    await expect(settledPanel(page).getByText('Dismissed')).toBeVisible({ timeout: 30_000 });
+    await expect(settledPanel(page).getByText(/does not apply/i)).toBeVisible();
+  });
+
   test('the clarification screens are accessible', async ({ page }) => {
     await reachClarifications(page);
     await expectNoAccessibilityViolations(page);

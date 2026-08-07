@@ -194,6 +194,103 @@ export const clarificationAnswerSchema = z
 
 export type ClarificationAnswer = z.infer<typeof clarificationAnswerSchema>;
 
+/* ---------------------------------------------------------- dismissal */
+
+/**
+ * Why a question is being dismissed.
+ *
+ * A closed list, and each one is checkable. A free-text "not needed" would
+ * clear a blocker on nothing but assertion — and the whole point of a blocking
+ * question is that it cannot be waved away.
+ */
+export const DISMISSAL_DISPOSITIONS = [
+  /**
+   * The answer already exists elsewhere.
+   *
+   * Requires a reference to *where*, and the reference has to resolve: a source
+   * in this project, a confirmed clarification, or a requirement.
+   */
+  'ANSWERED_ELSEWHERE',
+  /** The same thing is asked by another question. */
+  'DUPLICATE_QUESTION',
+  /** The question does not apply to this project. */
+  'NOT_APPLICABLE',
+  /**
+   * The requirement it was about is gone.
+   *
+   * Checked: the referenced requirement must actually be rejected or
+   * superseded. Saying a requirement was removed while it sits in the baseline
+   * is the one dismissal that would quietly hide a real gap.
+   */
+  'REQUIREMENT_REMOVED',
+] as const;
+
+export type DismissalDisposition = (typeof DISMISSAL_DISPOSITIONS)[number];
+
+export const DISMISSAL_DISPOSITION_LABELS: Readonly<Record<DismissalDisposition, string>> = {
+  ANSWERED_ELSEWHERE: 'The answer is already recorded somewhere else',
+  DUPLICATE_QUESTION: 'Another question asks the same thing',
+  NOT_APPLICABLE: 'This does not apply to the project',
+  REQUIREMENT_REMOVED: 'The requirement it was about has gone',
+};
+
+/** Dispositions that cannot be accepted without a resolvable reference. */
+export const DISPOSITIONS_REQUIRING_REFERENCE: readonly DismissalDisposition[] = [
+  'ANSWERED_ELSEWHERE',
+  'REQUIREMENT_REMOVED',
+];
+
+export const DISMISSAL_REFERENCE_KINDS = ['source', 'clarification', 'requirement'] as const;
+export type DismissalReferenceKind = (typeof DISMISSAL_REFERENCE_KINDS)[number];
+
+export const dismissalReferenceSchema = z
+  .object({
+    kind: z.enum(DISMISSAL_REFERENCE_KINDS),
+    id: z.string().min(1).max(64),
+  })
+  .strict();
+
+export type DismissalReference = z.infer<typeof dismissalReferenceSchema>;
+
+export const dismissClarificationSchema = z
+  .object({
+    reason: z.string().min(1).max(ANALYSIS_LIMITS.maxExplanationLength),
+    disposition: z.enum(DISMISSAL_DISPOSITIONS),
+    reference: dismissalReferenceSchema.optional(),
+    /**
+     * Explicit acknowledgement.
+     *
+     * Required, and deliberately not defaulted. Dismissing a blocking question
+     * removes a gate on a document a client will sign, and it should not be
+     * reachable by a mis-click.
+     */
+    acknowledged: z.literal(true),
+    expectedVersion: z.number().int().nonnegative(),
+  })
+  .strict()
+  .refine(
+    (input) =>
+      !DISPOSITIONS_REQUIRING_REFERENCE.includes(input.disposition) ||
+      input.reference !== undefined,
+    'Say where the answer is, or which requirement went.',
+  );
+
+export type DismissClarification = z.infer<typeof dismissClarificationSchema>;
+
+/** What was recorded about a dismissal. Kept, so it can be questioned later. */
+export const dismissalRecordSchema = z
+  .object({
+    reason: z.string().min(1).max(ANALYSIS_LIMITS.maxExplanationLength),
+    disposition: z.enum(DISMISSAL_DISPOSITIONS),
+    reference: dismissalReferenceSchema.optional(),
+    /** How the reference was validated, in plain language. */
+    validation: z.string().max(300).optional(),
+    dismissedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export type DismissalRecord = z.infer<typeof dismissalRecordSchema>;
+
 export const clarificationSchema = z
   .object({
     id: z.string().min(1).max(64),
@@ -213,7 +310,8 @@ export const clarificationSchema = z
     status: clarificationStatusSchema,
     /** Every version, oldest first. Never pruned. */
     answers: z.array(clarificationAnswerSchema).max(50),
-    dismissedReason: z.string().max(ANALYSIS_LIMITS.maxExplanationLength).optional(),
+    /** Present only when dismissed. Carries the disposition and its check. */
+    dismissal: dismissalRecordSchema.optional(),
     /**
      * Whether an unsettled state stops the baseline being approved.
      *
@@ -274,15 +372,6 @@ export const confirmClarificationSchema = z
   .strict();
 
 export type ConfirmClarification = z.infer<typeof confirmClarificationSchema>;
-
-export const dismissClarificationSchema = z
-  .object({
-    reason: z.string().min(1).max(ANALYSIS_LIMITS.maxExplanationLength),
-    expectedVersion: z.number().int().nonnegative(),
-  })
-  .strict();
-
-export type DismissClarification = z.infer<typeof dismissClarificationSchema>;
 
 /* ---------------------------------------------------------- integration */
 

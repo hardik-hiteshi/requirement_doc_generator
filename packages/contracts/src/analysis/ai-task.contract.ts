@@ -32,6 +32,13 @@ export const AI_TASK_IDS = [
   'clarification.generate',
   /** A confirmed answer folded back into the affected requirements. */
   'clarification.integrate',
+  /**
+   * Whether a confirmed answer settles a contradiction.
+   *
+   * Advisory only. The application decides; this can withhold agreement and
+   * nothing else — see `conflict-reevaluation.ts`.
+   */
+  'conflict.reevaluate',
   /** The assembled baseline, checked for internal consistency. */
   'baseline.validate',
   /** Terminology and meaning consistent across sources. */
@@ -53,6 +60,7 @@ export const AI_TASK_LABELS: Readonly<Record<AiTaskId, string>> = {
   'requirement.missing': 'Looking for missing detail',
   'clarification.generate': 'Preparing clarification questions',
   'clarification.integrate': 'Applying clarification answers',
+  'conflict.reevaluate': 'Re-checking affected contradictions',
   'baseline.validate': 'Validating the baseline',
   'baseline.crossSource': 'Checking consistency across sources',
 };

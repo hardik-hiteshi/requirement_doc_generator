@@ -26,6 +26,9 @@ export const ANALYSIS_ERROR_CODES = {
   CLARIFICATION_ALREADY_ANSWERED: 'CLARIFICATION_ALREADY_ANSWERED',
   CLARIFICATION_NOT_ANSWERED: 'CLARIFICATION_NOT_ANSWERED',
   NO_PROPOSAL: 'NO_PROPOSAL',
+  DISMISSAL_REFERENCE_REQUIRED: 'DISMISSAL_REFERENCE_REQUIRED',
+  DISMISSAL_REFERENCE_INVALID: 'DISMISSAL_REFERENCE_INVALID',
+  REQUIREMENT_STILL_PRESENT: 'REQUIREMENT_STILL_PRESENT',
   BASELINE_NOT_FOUND: 'BASELINE_NOT_FOUND',
   BASELINE_HAS_BLOCKERS: 'BASELINE_HAS_BLOCKERS',
   BASELINE_ALREADY_APPROVED: 'BASELINE_ALREADY_APPROVED',
@@ -55,6 +58,12 @@ export const ANALYSIS_ERROR_MESSAGES: Readonly<Record<AnalysisErrorCode, string>
     'That question has already been answered and applied. Answer it again to change it.',
   CLARIFICATION_NOT_ANSWERED: 'There is no answer to confirm yet.',
   NO_PROPOSAL: 'There is no proposed change waiting on this requirement.',
+  DISMISSAL_REFERENCE_REQUIRED:
+    'Say where the answer already is, or which requirement went. A blocking question is not dismissed on assertion alone.',
+  DISMISSAL_REFERENCE_INVALID:
+    'That reference could not be checked. Point at a document in this project, a question with a confirmed answer, or a requirement.',
+  REQUIREMENT_STILL_PRESENT:
+    'That requirement is still in the baseline, so the question about it still stands. Reject or merge it first.',
   BASELINE_NOT_FOUND: 'There is no requirement baseline for this project yet.',
   BASELINE_HAS_BLOCKERS:
     'This baseline cannot be approved yet. Work through the items listed above it first.',

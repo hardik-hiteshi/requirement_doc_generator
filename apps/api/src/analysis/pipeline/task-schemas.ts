@@ -444,6 +444,35 @@ export const integrateOutputSchema = z
 
 export type IntegrateOutput = z.infer<typeof integrateOutputSchema>;
 
+/* ------------------------------------------------ conflict re-evaluation */
+
+/**
+ * The model's opinion on whether an answer settles a contradiction.
+ *
+ * Advisory, and deliberately narrow: a boolean and a sentence. There is no
+ * confidence field, because a confidence would invite somebody to threshold it
+ * — and this opinion is a veto, not a vote. The application's deterministic
+ * rules decide; a `false` here can stop a resolution and a `true` can never
+ * cause one.
+ */
+export const conflictReevaluationOutputSchema = z
+  .object({
+    evaluations: z
+      .array(
+        z
+          .object({
+            conflictId: id,
+            settled: z.boolean(),
+            reason: explanation,
+          })
+          .strict(),
+      )
+      .max(ANALYSIS_LIMITS.maxConflicts),
+  })
+  .strict();
+
+export type ConflictReevaluationOutput = z.infer<typeof conflictReevaluationOutputSchema>;
+
 /* --------------------------------------------------------- validation */
 
 export const MODEL_VALIDATION_KINDS = {

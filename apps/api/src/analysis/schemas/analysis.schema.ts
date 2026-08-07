@@ -10,6 +10,7 @@ import {
   CLARIFICATION_STATUSES,
   CONFLICT_KINDS,
   CONFLICT_SEVERITIES,
+  CONFLICT_STATUSES,
   DUPLICATE_KINDS,
   FINDING_STATUSES,
   MISSING_DIMENSIONS,
@@ -325,7 +326,16 @@ export class AnalysisFindingRecord {
   })
   type!: 'duplicate' | 'conflict' | 'ambiguity' | 'missing';
 
-  @Prop({ type: String, required: true, enum: FINDING_STATUSES, index: true })
+  /**
+   * Wider than `FINDING_STATUSES` because a conflict can be settled by a
+   * clarification, which the other finding kinds cannot.
+   */
+  @Prop({
+    type: String,
+    required: true,
+    enum: [...new Set([...FINDING_STATUSES, ...CONFLICT_STATUSES])],
+    index: true,
+  })
   status!: string;
 
   /** Ids of the requirements this finding is about. Queried, so it is top-level. */
@@ -351,6 +361,15 @@ export class AnalysisFindingRecord {
 
   @Prop({ type: Object })
   resolution?: Record<string, unknown>;
+
+  /**
+   * Every re-evaluation this conflict has been through, oldest first.
+   *
+   * Append-only, and embedded because it is only read with the conflict.
+   * Conflicts only; the other finding kinds never carry any.
+   */
+  @Prop({ type: [Object], required: true, default: [] })
+  reevaluations!: Record<string, unknown>[];
 
   @Prop({ type: Number, required: true, default: 0 })
   version!: number;
@@ -423,8 +442,9 @@ export class ClarificationRecord {
   @Prop({ type: [Object], required: true, default: [] })
   answers!: Record<string, unknown>[];
 
-  @Prop({ type: String })
-  dismissedReason?: string;
+  /** Present only when dismissed: the disposition, its reference and its check. */
+  @Prop({ type: Object })
+  dismissal?: Record<string, unknown>;
 
   @Prop({ type: Boolean, required: true, default: false })
   blocksApproval!: boolean;
@@ -581,6 +601,69 @@ export type RequirementVersionDocument = HydratedDocument<RequirementVersionReco
 export const RequirementVersionSchema = SchemaFactory.createForClass(RequirementVersionRecord);
 
 RequirementVersionSchema.index({ projectId: 1, itemId: 1, version: -1 });
+
+/* ---------------------------------------------------- conflict history */
+
+/**
+ * An immutable snapshot of a conflict, written before every change to one.
+ *
+ * Its own collection rather than an embedded array because the positions are
+ * copied *in full* — the whole point is to answer "what was conflicting before
+ * the clarification?", and a reference to a requirement that has since been
+ * rewritten cannot answer it. Embedding whole positions would grow the conflict
+ * document on every re-evaluation.
+ */
+@Schema({ collection: 'conflict_versions', timestamps: true, id: false, versionKey: false })
+export class ConflictVersionRecord {
+  @Prop({ type: String, required: true, index: true })
+  conflictId!: string;
+
+  @Prop({ type: String, required: true, index: true })
+  projectId!: string;
+
+  @Prop({ type: Number, required: true })
+  version!: number;
+
+  @Prop({ type: String, required: true })
+  status!: string;
+
+  @Prop({ type: String, required: true })
+  severity!: string;
+
+  @Prop({ type: String, required: true })
+  kind!: string;
+
+  @Prop({ type: String, required: true, default: '' })
+  summary!: string;
+
+  @Prop({ type: [String], required: true, default: [] })
+  itemIds!: string[];
+
+  /** Copied whole. A rewritten requirement must not change this record. */
+  @Prop({ type: [Object], required: true, default: [] })
+  positions!: Record<string, unknown>[];
+
+  @Prop({
+    type: String,
+    required: true,
+    enum: ['analysis', 'user_decision', 'clarification_reevaluation'],
+  })
+  changedBy!: string;
+
+  @Prop({ type: String })
+  clarificationKey?: string;
+
+  @Prop({ type: String })
+  rationale?: string;
+
+  @Prop({ type: Date, required: true })
+  recordedAt!: Date;
+}
+
+export type ConflictVersionDocument = HydratedDocument<ConflictVersionRecord>;
+export const ConflictVersionSchema = SchemaFactory.createForClass(ConflictVersionRecord);
+
+ConflictVersionSchema.index({ projectId: 1, conflictId: 1, version: -1 });
 
 /** Every block disposition, so coverage can be recomputed and audited. */
 export const BLOCK_DISPOSITION_VALUES = BLOCK_DISPOSITIONS;

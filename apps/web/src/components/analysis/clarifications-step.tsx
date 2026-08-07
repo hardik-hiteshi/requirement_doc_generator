@@ -4,6 +4,11 @@ import {
   CLARIFICATION_CATEGORY_LABELS,
   CLARIFICATION_STATUS_LABELS,
   currentAnswer,
+  DISMISSAL_DISPOSITION_LABELS,
+  DISMISSAL_DISPOSITIONS,
+  DISPOSITIONS_REQUIRING_REFERENCE,
+  type DismissalDisposition,
+  type DismissalReferenceKind,
   SETTLED_CLARIFICATION_STATUSES,
   type Clarification,
   type ClarificationStatus,
@@ -110,8 +115,19 @@ export function ClarificationsStep() {
                   </div>
                   <p className="mt-1 text-sm font-medium">{clarification.question}</p>
                   <AnswerHistory clarification={clarification} />
-                  {clarification.dismissedReason ? (
-                    <p className="mt-1 text-sm text-muted">{clarification.dismissedReason}</p>
+                  {clarification.dismissal ? (
+                    <div className="mt-1 text-sm text-muted">
+                      <p>
+                        <span className="font-medium">
+                          {DISMISSAL_DISPOSITION_LABELS[clarification.dismissal.disposition]}:
+                        </span>{' '}
+                        {clarification.dismissal.reason}
+                      </p>
+                      {/* What was actually checked, not just what was claimed. */}
+                      {clarification.dismissal.validation ? (
+                        <p className="text-xs">{clarification.dismissal.validation}</p>
+                      ) : null}
+                    </div>
                   ) : null}
                 </li>
               ))}
@@ -176,12 +192,17 @@ function ClarificationRow({ clarification }: { readonly clarification: Clarifica
   const [isAssumption, setIsAssumption] = useState<boolean | null>(null);
   const [dismissing, setDismissing] = useState(false);
   const [reason, setReason] = useState('');
+  const [disposition, setDisposition] = useState<DismissalDisposition | null>(null);
+  const [referenceKind, setReferenceKind] = useState<DismissalReferenceKind>('source');
+  const [referenceId, setReferenceId] = useState('');
   const answer = useAnswerClarification();
   const confirm = useConfirmClarification();
   const dismiss = useDismissClarification();
 
   const current = currentAnswer(clarification);
   const awaitingConfirmation = current !== undefined && current.confirmedAt === undefined;
+  const needsReference =
+    disposition !== null && DISPOSITIONS_REQUIRING_REFERENCE.includes(disposition);
 
   return (
     <li className="rounded-lg border border-border p-4">
@@ -241,18 +262,85 @@ function ClarificationRow({ clarification }: { readonly clarification: Clarifica
 
       {dismissing ? (
         <form
-          className="mt-3 flex flex-col gap-2"
+          className="mt-3 flex flex-col gap-3 rounded-md border border-border p-3"
           onSubmit={(event) => {
             event.preventDefault();
+
+            if (!disposition) {
+              return;
+            }
+
             dismiss.mutate({
               clarificationId: clarification.id,
               reason,
+              disposition,
+              ...(needsReference && referenceId
+                ? { reference: { kind: referenceKind, id: referenceId } }
+                : {}),
+              acknowledged: true,
               expectedVersion: clarification.version,
             });
           }}
         >
+          {/*
+            Dismissing a blocking question removes a gate on a document a client
+            will sign. It is not a free-text escape hatch: the disposition is a
+            closed list, two of them need a reference, and the reference is
+            checked before anything changes.
+          */}
+          <p className="text-xs text-muted">
+            {clarification.blocksApproval
+              ? 'This question blocks approval. Say why it can be set aside — it will be checked.'
+              : 'Say why this question can be set aside.'}
+          </p>
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="text-xs font-medium">Why can this be set aside?</legend>
+            {DISMISSAL_DISPOSITIONS.map((value) => (
+              <label key={value} className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name={`disposition-${clarification.id}`}
+                  checked={disposition === value}
+                  onChange={() => setDisposition(value)}
+                  className="mt-1"
+                  required
+                />
+                <span>{DISMISSAL_DISPOSITION_LABELS[value]}</span>
+              </label>
+            ))}
+          </fieldset>
+
+          {needsReference ? (
+            <div className="flex flex-wrap gap-2">
+              <label className="flex flex-col gap-1 text-xs">
+                <span className="font-medium">What does it point at?</span>
+                <select
+                  value={referenceKind}
+                  onChange={(event) =>
+                    setReferenceKind(event.target.value as DismissalReferenceKind)
+                  }
+                  className="rounded-md border border-border px-2 py-1 text-sm"
+                >
+                  <option value="source">A document</option>
+                  <option value="clarification">Another question</option>
+                  <option value="requirement">A requirement</option>
+                </select>
+              </label>
+              <label className="flex flex-1 flex-col gap-1 text-xs">
+                <span className="font-medium">Its id</span>
+                <input
+                  value={referenceId}
+                  onChange={(event) => setReferenceId(event.target.value)}
+                  required
+                  className="rounded-md border border-border px-2 py-1 text-sm"
+                />
+              </label>
+            </div>
+          ) : null}
+
           <label className="flex flex-col gap-1 text-xs">
-            <span className="font-medium">Why is this not worth asking?</span>
+            <span className="font-medium">In your words</span>
             <input
               value={reason}
               onChange={(event) => setReason(event.target.value)}
@@ -260,14 +348,21 @@ function ClarificationRow({ clarification }: { readonly clarification: Clarifica
               className="rounded-md border border-border px-2 py-1 text-sm"
             />
           </label>
+
           <div className="flex gap-2">
-            <Button type="submit" disabled={dismiss.isPending}>
-              Dismiss
+            <Button type="submit" disabled={dismiss.isPending || !disposition}>
+              Dismiss this question
             </Button>
             <Button type="button" variant="secondary" onClick={() => setDismissing(false)}>
               Cancel
             </Button>
           </div>
+
+          {dismiss.isError ? (
+            <p role="alert" className="text-xs text-danger">
+              {dismiss.error.message}
+            </p>
+          ) : null}
         </form>
       ) : (
         <form

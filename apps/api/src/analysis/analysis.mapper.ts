@@ -114,6 +114,7 @@ export function toConflict(document: AnalysisFindingDocument): Conflict {
     crossChunk: payload.crossChunk,
     crossSource: payload.crossSource,
     status: document.status as Conflict['status'],
+    reevaluations: (document.reevaluations ?? []) as unknown as Conflict['reevaluations'],
     ...(document.resolution
       ? { resolution: document.resolution as unknown as Conflict['resolution'] }
       : {}),
@@ -179,7 +180,9 @@ export function toClarification(document: ClarificationDocument): Clarification 
     relatedFindingIds: document.relatedFindingIds,
     status: document.status as Clarification['status'],
     answers: (document.answers ?? []) as unknown as Clarification['answers'],
-    ...(document.dismissedReason ? { dismissedReason: document.dismissedReason } : {}),
+    ...(document.dismissal
+      ? { dismissal: document.dismissal as unknown as Clarification['dismissal'] }
+      : {}),
     blocksApproval: document.blocksApproval,
     createdAt: timestamp(document, 'createdAt'),
     updatedAt: timestamp(document, 'updatedAt'),

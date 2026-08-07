@@ -35,6 +35,9 @@ export const ANALYSIS_ROUTES = {
   /** POST — resolve a conflict. Never resolved automatically. */
   conflict: (conflictId: string) =>
     buildApiPath('projects/current/analysis/findings/conflicts', conflictId),
+  /** GET — what this conflict looked like before each change to it. */
+  conflictHistory: (conflictId: string) =>
+    buildApiPath('projects/current/analysis/findings/conflicts', conflictId, 'history'),
   /** POST — settle an ambiguity finding. */
   ambiguity: (findingId: string) =>
     buildApiPath('projects/current/analysis/findings/ambiguities', findingId),
@@ -87,6 +90,7 @@ export const ANALYSIS_ROUTE_TEMPLATES = {
   findings: ANALYSIS_ROUTES.findings,
   duplicate: ANALYSIS_ROUTES.duplicate(':groupId'),
   conflict: ANALYSIS_ROUTES.conflict(':conflictId'),
+  conflictHistory: ANALYSIS_ROUTES.conflictHistory(':conflictId'),
   ambiguity: ANALYSIS_ROUTES.ambiguity(':findingId'),
   gap: ANALYSIS_ROUTES.gap(':findingId'),
   clarifications: ANALYSIS_ROUTES.clarifications,

@@ -5,6 +5,7 @@ import {
   BASELINE_AI_NOTICE,
   canApprove,
   clarificationKey,
+  DISPOSITIONS_REQUIRING_REFERENCE,
   requirementKey,
   type AnalysisRun,
   type AnswerClarification,
@@ -12,6 +13,8 @@ import {
   type Baseline,
   type Clarification,
   type ClarificationAnswer,
+  type ConflictVersion,
+  type DismissClarification,
   type IntegrationResult,
   type ManualRequirement,
   type ProposedRevision,
@@ -28,6 +31,7 @@ import {
 import { AuditService } from '../audit/audit.service';
 import { AnalysisRepository } from './analysis.repository';
 import { ClarificationIntegration } from './clarification-integration.service';
+import { ConflictReevaluator, reevaluationInputFrom } from './conflict-reevaluation.service';
 import { clarificationLink } from './pipeline/evidence.service';
 import type { ClarificationDocument } from './schemas/analysis.schema';
 import { AnalysisError } from './analysis.errors';
@@ -86,6 +90,7 @@ export class AnalysisService {
     private readonly evidence: EvidenceService,
     private readonly baselines: BaselineService,
     private readonly integration: ClarificationIntegration,
+    private readonly conflicts: ConflictReevaluator,
     private readonly audit: AuditService,
   ) {}
 
@@ -388,6 +393,7 @@ export class AnalysisService {
         blocking: conflict.severity === 'blocking',
         kind: conflict.kind,
         severity: conflict.severity,
+        reevaluations: [],
         payload: {
           summary: conflict.summary,
           positions: conflict.positions.map((position) => ({
@@ -446,6 +452,35 @@ export class AnalysisService {
     }
 
     await this.repository.insertFindings(findings);
+
+    /*
+     * The original positions, snapshotted the moment the conflict exists.
+     *
+     * Later changes each record what came before them, so this would eventually
+     * be captured anyway — but only if something changes. Writing it now means
+     * "what was originally conflicting?" is answerable even for a conflict that
+     * is resolved on its first touch.
+     */
+    for (const finding of findings.filter((entry) => entry.type === 'conflict')) {
+      const payload = finding.payload as {
+        summary?: string;
+        positions?: Record<string, unknown>[];
+      };
+
+      await this.repository.recordConflictVersion({
+        conflictId: finding.findingId as string,
+        projectId: context.projectId,
+        version: 0,
+        status: 'open',
+        severity: (finding.severity as string) ?? 'major',
+        kind: (finding.kind as string) ?? 'contradiction',
+        summary: payload.summary ?? '',
+        itemIds: [...((finding.itemIds as string[]) ?? [])],
+        positions: payload.positions ?? [],
+        changedBy: 'analysis',
+        recordedAt: now,
+      });
+    }
 
     const clarifications = result.questions.map((question, index) => ({
       clarificationId: AnalysisRepository.newId('clr'),
@@ -952,6 +987,26 @@ export class AnalysisService {
       });
     }
 
+    const payload = finding.payload as {
+      summary?: string;
+      positions?: Record<string, unknown>[];
+    };
+
+    await this.repository.recordConflictVersion({
+      conflictId,
+      projectId: context.projectId,
+      version: finding.version,
+      status: finding.status,
+      severity: finding.severity ?? 'major',
+      kind: finding.kind ?? 'contradiction',
+      summary: payload.summary ?? '',
+      itemIds: [...finding.itemIds],
+      positions: payload.positions ?? [],
+      changedBy: 'user_decision',
+      rationale: request.note ?? `Resolved by ${request.action}.`,
+      recordedAt: new Date(),
+    });
+
     const updated = await this.repository.updateFinding(
       context.projectId,
       conflictId,
@@ -1023,6 +1078,39 @@ export class AnalysisService {
     });
 
     await this.baselines.refresh(context.projectId, new Date());
+  }
+
+  /**
+   * What this conflict looked like before each change to it.
+   *
+   * The audit answer to "what was conflicting before the clarification?" —
+   * positions copied whole at the time, so a requirement rewritten since cannot
+   * change what the record says.
+   */
+  async conflictHistory(context: AnalysisContext, conflictId: string): Promise<ConflictVersion[]> {
+    const finding = await this.repository.findFinding(context.projectId, conflictId);
+
+    if (finding?.type !== 'conflict') {
+      throw new AnalysisError(ANALYSIS_ERROR_CODES.FINDING_NOT_FOUND, 404);
+    }
+
+    const versions = await this.repository.listConflictVersions(context.projectId, conflictId);
+
+    return versions.map((version) => ({
+      conflictId: version.conflictId,
+      projectId: version.projectId,
+      version: version.version,
+      status: version.status as ConflictVersion['status'],
+      severity: version.severity as ConflictVersion['severity'],
+      kind: version.kind as ConflictVersion['kind'],
+      summary: version.summary,
+      itemIds: version.itemIds,
+      positions: version.positions as unknown as ConflictVersion['positions'],
+      changedBy: version.changedBy as ConflictVersion['changedBy'],
+      ...(version.clarificationKey ? { clarificationKey: version.clarificationKey } : {}),
+      ...(version.rationale ? { rationale: version.rationale } : {}),
+      recordedAt: version.recordedAt.toISOString(),
+    }));
   }
 
   /* ------------------------------------------------------ clarifications */
@@ -1267,6 +1355,54 @@ export class AnalysisService {
     );
 
     /*
+     * Every contradiction the answer touched, re-checked.
+     *
+     * A confirmed answer that changes one side of a conflict may have settled
+     * it — and leaving it blocking would mean the client answered a question
+     * and watched nothing happen. Equally, an answer that changes wording
+     * without settling the disagreement must leave it blocking. Deterministic
+     * rules decide which; see `conflict-reevaluation.ts`.
+     */
+    const reevaluated = await this.conflicts.reevaluate(
+      reevaluationInputFrom(latest ?? confirmed, {
+        projectId: context.projectId,
+        correlationId: context.correlationId,
+        answerText: current.text,
+        answerVersion: current.version,
+        answerConfirmed: true,
+        isAssumption: current.isAssumption,
+        appliedItemIds: result.impacts
+          .filter((impact) => impact.outcome === 'applied')
+          .map((impact) => impact.itemId),
+        proposedItemIds: result.impacts
+          .filter((impact) => impact.outcome === 'proposed')
+          .map((impact) => impact.itemId),
+      }),
+    );
+
+    if (reevaluated.length > 0) {
+      await this.audit.record({
+        type: 'CONFLICT_REEVALUATED',
+        projectId: context.projectId,
+        correlationId: context.correlationId,
+        // Counts and outcomes. The positions are a client's requirement text.
+        metadata: {
+          clarificationKey: clarification.key,
+          answerVersion: current.version,
+          evaluated: reevaluated.length,
+          resolved: reevaluated.filter(
+            (entry) => entry.resultingStatus === 'resolved_by_clarification',
+          ).length,
+          stillConflicting: reevaluated.filter(
+            (entry) => entry.resultingStatus === 'still_conflicting',
+          ).length,
+          needsReview: reevaluated.filter((entry) => entry.resultingStatus === 'needs_review')
+            .length,
+        },
+      });
+    }
+
+    /*
      * A baseline built before the answer no longer reflects it. Said plainly
      * rather than silently rewritten: the approved document still says what it
      * said, and its status records that the world moved.
@@ -1349,6 +1485,26 @@ export class AnalysisService {
         version: 0,
       },
     ]);
+  }
+
+  /**
+   * Requirements that cite this clarification, meaning its answer landed on them.
+   *
+   * Read from the traceability links rather than remembered from the
+   * integration, so it is still correct after a proposal is accepted minutes or
+   * days later.
+   */
+  private async appliedItemIdsFor(projectId: string, clarificationId: string): Promise<string[]> {
+    const items = await this.repository.listItems(projectId);
+
+    return items
+      .filter((item) =>
+        (item.references as { sourceId?: string; kind?: string }[]).some(
+          (reference) =>
+            reference.kind === 'clarification' && reference.sourceId === clarificationId,
+        ),
+      )
+      .map((item) => item.itemId);
   }
 
   /** Requirement ids named by a baseline that has been approved. */
@@ -1502,7 +1658,11 @@ export class AnalysisService {
       },
     });
 
-    await this.afterProposalDecision(context, now);
+    await this.afterProposalDecision(context, now, {
+      clarificationId: proposal.clarificationId,
+      itemId,
+      accepted: true,
+    });
 
     return toItem(updated);
   }
@@ -1513,7 +1673,43 @@ export class AnalysisService {
    * `NEEDS_REVIEW` means "the answer is not fully reflected yet". When no
    * proposal remains outstanding, it is.
    */
-  private async afterProposalDecision(context: AnalysisContext, now: Date): Promise<void> {
+  private async afterProposalDecision(
+    context: AnalysisContext,
+    now: Date,
+    settled?: { clarificationId: string; itemId: string; accepted: boolean },
+  ): Promise<void> {
+    /*
+     * Accepting a proposal can be the last thing a conflict was waiting for:
+     * `updates_applied` fails while a revision sits unaccepted, so a conflict
+     * held at `needs_review` may become resolvable the moment somebody accepts.
+     */
+    if (settled?.accepted) {
+      const clarification = await this.repository.findClarification(
+        context.projectId,
+        settled.clarificationId,
+      );
+      const current = ((clarification?.answers ?? []) as unknown as ClarificationAnswer[]).find(
+        (answer) => answer.status === 'current',
+      );
+
+      if (clarification && current) {
+        const applied = await this.appliedItemIdsFor(context.projectId, settled.clarificationId);
+
+        await this.conflicts.reevaluate(
+          reevaluationInputFrom(clarification, {
+            projectId: context.projectId,
+            correlationId: context.correlationId,
+            answerText: current.text,
+            answerVersion: current.version,
+            answerConfirmed: current.confirmedAt !== undefined,
+            isAssumption: current.isAssumption,
+            appliedItemIds: applied,
+            proposedItemIds: [],
+          }),
+        );
+      }
+    }
+
     const outstanding = await this.repository.listProposals(context.projectId);
     const blocked = new Set(
       outstanding.map(
@@ -1535,33 +1731,150 @@ export class AnalysisService {
     await this.baselines.refresh(context.projectId, now);
   }
 
+  /**
+   * Dismisses a question, under controls.
+   *
+   * Dismissing a blocking question removes a gate on a document a client will
+   * sign, so it is not a free-text escape hatch. The reviewer names a
+   * disposition from a closed list, supplies a reference where the disposition
+   * needs one, and acknowledges explicitly — and the reference is *checked*
+   * before anything changes. A dismissal that cannot be checked is refused, and
+   * the blocker stays exactly where it was.
+   */
   async dismissClarification(
     context: AnalysisContext,
     clarificationId: string,
-    reason: string,
-    expectedVersion: number,
+    request: DismissClarification,
   ): Promise<Clarification> {
+    const clarification = await this.repository.findClarification(
+      context.projectId,
+      clarificationId,
+    );
+
+    if (!clarification) {
+      throw new AnalysisError(ANALYSIS_ERROR_CODES.CLARIFICATION_NOT_FOUND, 404);
+    }
+
+    // Validated first, and nothing is written until it passes: blockers are
+    // recalculated only after the disposition stands up.
+    const validation = await this.validateDismissal(context.projectId, request);
+
+    const now = new Date();
     const updated = await this.repository.updateClarification(
       context.projectId,
       clarificationId,
-      expectedVersion,
-      { status: 'DISMISSED', dismissedReason: reason },
+      request.expectedVersion,
+      {
+        status: 'DISMISSED',
+        dismissal: {
+          reason: request.reason,
+          disposition: request.disposition,
+          ...(request.reference ? { reference: request.reference } : {}),
+          validation,
+          dismissedAt: now.toISOString(),
+        },
+      },
     );
 
     if (!updated) {
-      throw new AnalysisError(ANALYSIS_ERROR_CODES.CLARIFICATION_NOT_FOUND, 404);
+      throw new AnalysisError(
+        ANALYSIS_ERROR_CODES.CLARIFICATION_NOT_FOUND,
+        409,
+        'version_conflict',
+      );
     }
 
     await this.audit.record({
       type: 'CLARIFICATION_DISMISSED',
       projectId: context.projectId,
       correlationId: context.correlationId,
-      metadata: { clarificationId, key: updated.key },
+      reason: request.disposition,
+      // The disposition and what kind of thing it pointed at. Never the reason
+      // text or the question, which are a client's confidential material.
+      metadata: {
+        clarificationId,
+        key: updated.key,
+        disposition: request.disposition,
+        referenceKind: request.reference?.kind,
+        blocking: clarification.blocksApproval,
+      },
     });
 
-    await this.baselines.refresh(context.projectId, new Date());
+    await this.baselines.refresh(context.projectId, now);
 
     return toClarification(updated);
+  }
+
+  /**
+   * Checks that a dismissal's disposition is true, not merely asserted.
+   *
+   * Returns a plain-language note recorded with the dismissal, so a reader
+   * months later can see what was verified rather than taking the disposition
+   * on trust.
+   */
+  private async validateDismissal(
+    projectId: string,
+    request: DismissClarification,
+  ): Promise<string> {
+    const reference = request.reference;
+
+    if (!DISPOSITIONS_REQUIRING_REFERENCE.includes(request.disposition)) {
+      return `Recorded as ${request.disposition} with a reason.`;
+    }
+
+    if (!reference) {
+      // Unreachable through the schema, which refuses it. Kept because a
+      // refinement is not a guarantee once somebody adds a second caller.
+      throw new AnalysisError(ANALYSIS_ERROR_CODES.DISMISSAL_REFERENCE_REQUIRED, 422);
+    }
+
+    if (reference.kind === 'source') {
+      const sources = await this.loader.buildContext(projectId);
+
+      if (!sources.sources.has(reference.id)) {
+        throw new AnalysisError(ANALYSIS_ERROR_CODES.DISMISSAL_REFERENCE_INVALID, 422);
+      }
+
+      return `Checked: the named document is part of this project.`;
+    }
+
+    if (reference.kind === 'clarification') {
+      const other = await this.repository.findClarification(projectId, reference.id);
+      const answer = ((other?.answers ?? []) as unknown as ClarificationAnswer[]).find(
+        (entry) => entry.status === 'current',
+      );
+
+      /*
+       * A *confirmed* answer, not merely an answered question. Pointing at
+       * another unanswered question would move a blocker rather than settle it.
+       */
+      if (!other || !answer?.confirmedAt) {
+        throw new AnalysisError(ANALYSIS_ERROR_CODES.DISMISSAL_REFERENCE_INVALID, 422);
+      }
+
+      return `Checked: ${other.key} has a confirmed answer.`;
+    }
+
+    const item = await this.repository.findItem(projectId, reference.id);
+
+    if (!item) {
+      throw new AnalysisError(ANALYSIS_ERROR_CODES.DISMISSAL_REFERENCE_INVALID, 422);
+    }
+
+    if (request.disposition === 'REQUIREMENT_REMOVED') {
+      /*
+       * The requirement has to actually be gone. Saying one was removed while
+       * it sits in the baseline is the one dismissal that would quietly hide a
+       * real gap, so it is the one the application checks hardest.
+       */
+      if (item.status !== 'rejected' && item.status !== 'superseded') {
+        throw new AnalysisError(ANALYSIS_ERROR_CODES.REQUIREMENT_STILL_PRESENT, 422);
+      }
+
+      return `Checked: ${item.key} is ${item.status} and is not in the baseline.`;
+    }
+
+    return `Checked: ${item.key} is part of this project.`;
   }
 
   private async raiseClarification(

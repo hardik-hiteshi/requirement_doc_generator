@@ -85,6 +85,23 @@ export function echoResponse(request: InferenceRequest): string | null {
       return JSON.stringify({ findings: [] });
     case 'baseline.validate':
       return JSON.stringify({ findings: [] });
+
+    /*
+     * Never settles a conflict.
+     *
+     * A stub cannot read two statements and judge whether an answer reconciles
+     * them, and guessing "yes" would let it clear a blocker on a document
+     * somebody signs. Withholding is the only honest answer, and it is exactly
+     * what the veto is for.
+     */
+    case 'conflict.reevaluate':
+      return JSON.stringify({
+        evaluations: blocks.map((block) => ({
+          conflictId: block.blockId,
+          settled: false,
+          reason: 'This stub does not judge whether an answer settles a contradiction.',
+        })),
+      });
     /*
      * One question, derived mechanically.
      *

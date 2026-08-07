@@ -93,6 +93,41 @@ requirements it changed are flagged for another look, and an approved baseline
 goes out of date. Nothing in that baseline changes — it still says what it said
 when it was approved.
 
+### What it does to a contradiction
+
+If the analysis found two statements that cannot both be true, and your answer
+changes one of them, the contradiction is looked at again — just that one, and
+the others it shares a requirement with. Nothing else is re-analysed.
+
+It closes only when all of it is true: the answer is confirmed, it is a fact
+rather than an assumption, it reaches this contradiction, it changed **every**
+side of it, those changes are applied rather than waiting for you, and the model
+agrees the answer speaks to what the two statements disagreed about. The model
+can only object here — it can never be the reason something closes, and how
+confident it says it is does not count for anything.
+
+Anything short of that and the contradiction stays blocking, with a reason:
+_"the answer changed part of this conflict but left one contradicting
+requirement untouched"_. A contradiction nobody settled is not settled because a
+question was answered nearby.
+
+You can see what it used to say. Every contradiction keeps its original two
+positions, their sources, and each status it has been through — including the
+times it was re-checked and nothing changed.
+
+### Setting a question aside
+
+Some questions do not need answering: it was asked twice, the answer is already
+in a document you uploaded, it does not apply, or the requirement it was about
+has gone. You can set one aside, but not by simply saying so.
+
+You pick which of those four it is, and for the two that point at something —
+_the answer is already recorded somewhere else_ and _the requirement it was about
+has gone_ — you say what, and it is checked. A document has to be in this
+project. Another question has to have a **confirmed** answer. A requirement has
+to actually be rejected or superseded. If the thing you point at does not check
+out, the question is not dismissed and it keeps blocking.
+
 ## Coverage and alignment
 
 **Coverage** is how much of your documents was accounted for — counted in blocks

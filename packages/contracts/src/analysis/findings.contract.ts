@@ -149,6 +149,109 @@ export type ConflictKind = (typeof CONFLICT_KINDS)[number];
 export const conflictKindSchema = z.enum(CONFLICT_KINDS);
 
 /**
+ * Where a conflict stands.
+ *
+ * Wider than the generic finding statuses, because a conflict is the one
+ * finding a *clarification* can settle. The extra states exist so that
+ * "re-evaluated, still a contradiction" is distinguishable from "nobody has
+ * looked at it yet" — a distinction that matters to a reviewer deciding what to
+ * spend their attention on.
+ *
+ * Three of these block approval, and they block for the same reason: the
+ * baseline contains a contradiction nobody has settled.
+ */
+export const CONFLICT_STATUSES = [
+  /** Found, untouched. */
+  'open',
+  /**
+   * Re-evaluated after a confirmed clarification and still a contradiction.
+   *
+   * The answer did not address it, or addressed only part of it and the rest
+   * still cannot both be true.
+   */
+  'still_conflicting',
+  /**
+   * Settled by a confirmed clarification, under deterministic rules.
+   *
+   * Never reachable on a model's opinion alone — see
+   * `CLARIFICATION_RESOLUTION_CONDITIONS`.
+   */
+  'resolved_by_clarification',
+  /**
+   * A clarification touched it but did not settle it cleanly.
+   *
+   * A person has to look. Blocks approval, because an unsettled contradiction
+   * is unsettled however it got there.
+   */
+  'needs_review',
+  /** A person decided: chose, rewrote, or agreed the two do not conflict. */
+  'resolved',
+  /** A person judged it not a conflict. */
+  'dismissed',
+  /** A person accepted it as a known risk. */
+  'accepted_risk',
+  /** Replaced by a re-evaluated version of the same conflict. */
+  'superseded',
+] as const;
+
+export type ConflictStatus = (typeof CONFLICT_STATUSES)[number];
+export const conflictStatusSchema = z.enum(CONFLICT_STATUSES);
+
+export const CONFLICT_STATUS_LABELS: Readonly<Record<ConflictStatus, string>> = {
+  open: 'Unresolved',
+  still_conflicting: 'Still a contradiction',
+  resolved_by_clarification: 'Settled by a client answer',
+  needs_review: 'Needs your review',
+  resolved: 'Resolved',
+  dismissed: 'Dismissed',
+  accepted_risk: 'Accepted as a risk',
+  superseded: 'Replaced',
+};
+
+/** Conflict states that stop a baseline being approved. */
+export const BLOCKING_CONFLICT_STATUSES: readonly ConflictStatus[] = [
+  'open',
+  'still_conflicting',
+  'needs_review',
+];
+
+/**
+ * Every condition that must hold before a conflict may be marked
+ * `resolved_by_clarification` automatically.
+ *
+ * Listed as data because the list *is* the control. Each is checked by
+ * application code against stored records; the model is consulted about one of
+ * them and can only withhold agreement, never supply it.
+ */
+export const CLARIFICATION_RESOLUTION_CONDITIONS = [
+  /** The answer has been confirmed as the client's, not merely typed. */
+  'confirmed_answer',
+  /** It is a fact from the client, not something the team is assuming. */
+  'authoritative_not_assumption',
+  /** The clarification is linked to at least one requirement in the conflict. */
+  'linked_to_conflict',
+  /** Every position in the conflict was actually updated by the answer. */
+  'all_positions_addressed',
+  /** Those updates are applied, not sitting as unaccepted proposals. */
+  'updates_applied',
+  /** The model agrees the answer resolves the contradiction. */
+  'semantic_agreement',
+] as const;
+
+export type ClarificationResolutionCondition = (typeof CLARIFICATION_RESOLUTION_CONDITIONS)[number];
+
+export const RESOLUTION_CONDITION_LABELS: Readonly<
+  Record<ClarificationResolutionCondition, string>
+> = {
+  confirmed_answer: 'The answer was confirmed as the client’s',
+  authoritative_not_assumption: 'It is a client fact, not an assumption',
+  linked_to_conflict: 'The question is linked to a requirement in this conflict',
+  all_positions_addressed: 'Every contradicting requirement was updated by the answer',
+  updates_applied: 'Those updates are applied, not waiting for review',
+  semantic_agreement: 'The answer addresses what the two statements disagreed about',
+};
+
+/**
  * How badly a conflict has to be dealt with.
  *
  * `blocking` prevents approval outright. That is not a judgement about
@@ -171,6 +274,36 @@ export const CONFLICT_RESOLUTIONS = [
 ] as const;
 
 export type ConflictResolution = (typeof CONFLICT_RESOLUTIONS)[number];
+
+/**
+ * One re-evaluation of a conflict, triggered by a confirmed clarification.
+ *
+ * Written whether or not the conflict changed. "We looked at this again after
+ * Q-004 and it is still a contradiction" is exactly as much a fact worth
+ * recording as a resolution, and an auditor needs both.
+ */
+export const conflictReevaluationSchema = z
+  .object({
+    clarificationId: z.string().min(1).max(64),
+    clarificationKey: z.string().max(16),
+    /** Which version of the answer. A later answer re-evaluates again. */
+    answerVersion: z.number().int().positive(),
+    /** The requirements the clarification changed, scoped to this conflict. */
+    affectedItemIds: z.array(z.string().max(64)).max(50),
+    previousStatus: conflictStatusSchema,
+    resultingStatus: conflictStatusSchema,
+    previousVersion: z.number().int().nonnegative(),
+    resultingVersion: z.number().int().nonnegative(),
+    /** Which conditions held. The list is the reason. */
+    conditionsMet: z.array(z.enum(CLARIFICATION_RESOLUTION_CONDITIONS)).max(10),
+    conditionsFailed: z.array(z.enum(CLARIFICATION_RESOLUTION_CONDITIONS)).max(10),
+    /** Plain language, for a reviewer and an auditor. Never model output. */
+    rationale: z.string().min(1).max(ANALYSIS_LIMITS.maxExplanationLength),
+    evaluatedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export type ConflictReevaluation = z.infer<typeof conflictReevaluationSchema>;
 
 export const conflictSchema = z
   .object({
@@ -205,7 +338,14 @@ export const conflictSchema = z
      * chunk ran last quietly winning.
      */
     crossSource: z.boolean(),
-    status: findingStatusSchema,
+    status: conflictStatusSchema,
+    /**
+     * Every re-evaluation this conflict has been through, oldest first.
+     *
+     * Append-only. An auditor asking "why is this no longer blocking?" reads
+     * the trail; nothing here is ever rewritten.
+     */
+    reevaluations: z.array(conflictReevaluationSchema).max(50),
     resolution: z
       .object({
         action: z.enum(CONFLICT_RESOLUTIONS),
@@ -368,7 +508,53 @@ export const resolveFindingSchema = z
 
 export type ResolveFinding = z.infer<typeof resolveFindingSchema>;
 
-/** A conflict that stops approval: blocking severity, still open. */
-export function isBlockingConflict(conflict: Conflict): boolean {
-  return conflict.severity === 'blocking' && conflict.status === 'open';
+/**
+ * A conflict that stops approval.
+ *
+ * Blocking severity and an unsettled status. `still_conflicting` and
+ * `needs_review` count: a contradiction that has been looked at and not settled
+ * is no less of a contradiction than one nobody has read.
+ */
+export function isBlockingConflict(conflict: Pick<Conflict, 'severity' | 'status'>): boolean {
+  return conflict.severity === 'blocking' && BLOCKING_CONFLICT_STATUSES.includes(conflict.status);
 }
+
+/**
+ * An immutable snapshot of a conflict, written before every change.
+ *
+ * The positions are copied in full rather than referenced, because the whole
+ * point is to answer "what was conflicting before the clarification?" — and a
+ * reference to a requirement that has since been rewritten cannot answer it.
+ */
+export const conflictVersionSchema = z
+  .object({
+    conflictId: z.string().min(1).max(64),
+    projectId: z.string().min(1).max(64),
+    version: z.number().int().nonnegative(),
+    status: conflictStatusSchema,
+    severity: conflictSeveritySchema,
+    kind: conflictKindSchema,
+    summary: z.string().min(1).max(ANALYSIS_LIMITS.maxExplanationLength),
+    itemIds: z.array(z.string().max(64)).max(20),
+    positions: z
+      .array(
+        z
+          .object({
+            itemId: z.string().min(1).max(64),
+            statement: z.string().min(1).max(ANALYSIS_LIMITS.maxExcerptLength),
+            sourceId: z.string().min(1).max(64),
+            sourceName: z.string().max(300).optional(),
+            citation: z.string().max(200).optional(),
+          })
+          .strict(),
+      )
+      .max(20),
+    /** What caused this snapshot to be taken. */
+    changedBy: z.enum(['analysis', 'user_decision', 'clarification_reevaluation']),
+    clarificationKey: z.string().max(16).optional(),
+    rationale: z.string().max(ANALYSIS_LIMITS.maxExplanationLength).optional(),
+    recordedAt: z.iso.datetime(),
+  })
+  .strict();
+
+export type ConflictVersion = z.infer<typeof conflictVersionSchema>;

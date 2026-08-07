@@ -281,6 +281,28 @@ export function registerIntegrationFixture(
   ]);
 }
 
+/**
+ * The model's answer to "does this confirmed answer settle these conflicts?"
+ *
+ * Advisory only: the application checks five other conditions and a `true` here
+ * cannot supply any of them. Registered separately so a test can say what the
+ * model thought and still assert that the deterministic rules decided.
+ */
+export function registerConflictVerdict(
+  provider: DeterministicProvider,
+  verdicts: readonly { conflictId: string; settled: boolean; reason?: string }[],
+): void {
+  provider.registerSequence('conflict.reevaluate', [
+    JSON.stringify({
+      evaluations: verdicts.map((verdict) => ({
+        conflictId: verdict.conflictId,
+        settled: verdict.settled,
+        reason: verdict.reason ?? 'Scripted for this test.',
+      })),
+    }),
+  ]);
+}
+
 /** Makes the next integration attempt fail, without touching anything else. */
 export function registerIntegrationFailure(provider: DeterministicProvider): void {
   provider.registerSequence('clarification.integrate', [

@@ -872,7 +872,12 @@ describe('Clarification integration (e2e)', () => {
       await session.agent
         .post(ANALYSIS_ROUTES.dismissClarification(clarification.id))
         .set('x-csrf-token', session.csrf)
-        .send({ reason: 'Answered elsewhere.', expectedVersion: clarification.version })
+        .send({
+          reason: 'Settled with the client on the call.',
+          disposition: 'NOT_APPLICABLE',
+          acknowledged: true,
+          expectedVersion: clarification.version,
+        })
         .expect(201);
     }
 

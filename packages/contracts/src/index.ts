@@ -47,6 +47,7 @@ export * from './analysis/findings.contract';
 export * from './analysis/clarification.contract';
 export * from './analysis/baseline.contract';
 export * from './analysis/evidence-confidence';
+export * from './analysis/conflict-reevaluation';
 export * from './analysis/baseline-calculations';
 export * from './analysis/analysis-routes';
 export * from './analysis/analysis-errors';

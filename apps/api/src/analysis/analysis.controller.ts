@@ -202,6 +202,17 @@ export class AnalysisController {
     await this.analysis.resolveConflict(contextOf(request), conflictId, body);
   }
 
+  @Get('findings/conflicts/:conflictId/history')
+  @ApiParam({ name: 'conflictId' })
+  @ApiOperation({ summary: 'What this conflict looked like before each change to it' })
+  @ApiOkResponse({ description: 'Snapshots, newest first, with the positions as they were.' })
+  async conflictHistory(
+    @Req() request: AuthenticatedRequest,
+    @Param('conflictId') conflictId: string,
+  ) {
+    return this.analysis.conflictHistory(contextOf(request), conflictId);
+  }
+
   @Post('findings/ambiguities/:findingId')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiParam({ name: 'findingId' })
@@ -274,12 +285,7 @@ export class AnalysisController {
     @Param('clarificationId') clarificationId: string,
     @Body(new ZodValidationPipe(dismissClarificationSchema)) body: DismissClarification,
   ): Promise<Clarification> {
-    return this.analysis.dismissClarification(
-      contextOf(request),
-      clarificationId,
-      body.reason,
-      body.expectedVersion,
-    );
+    return this.analysis.dismissClarification(contextOf(request), clarificationId, body);
   }
 
   /* ----------------------------------------------------------- proposals */
