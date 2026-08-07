@@ -812,6 +812,8 @@ describe('Technology stack (e2e)', () => {
      * for them.
      */
     expect(stack.projectTypes).toEqual(['WEB_APPLICATION']);
+    expect(stack.blockers.map((blocker) => blocker.kind)).toContain('project_type_changed');
+    /* Nothing was replanned and nothing was removed. */
     expect(componentIn(stack, 'web_frontend')?.technologyName).toBe('React');
   }, 120_000);
 

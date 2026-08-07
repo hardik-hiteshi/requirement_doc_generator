@@ -91,6 +91,14 @@ export const STACK_BLOCKER_KINDS = [
   'baseline_not_approved',
   /** The project type is `OTHER` or absent, so nothing can be planned. */
   'project_type_unconfirmed',
+  /**
+   * The project type changed after the stack was decided.
+   *
+   * Which categories the project even has follows from the type, so this is not
+   * a detail — a stack decided as a web application and now describing an API
+   * service may be holding a frontend nobody is paying for.
+   */
+  'project_type_changed',
   /** Nothing in the stack. */
   'empty_stack',
 ] as const;

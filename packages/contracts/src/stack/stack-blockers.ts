@@ -36,6 +36,15 @@ export interface StackBlockerInput {
   readonly baselineApproved: boolean;
   readonly baselineCurrent: boolean;
   readonly projectTypeConfirmed: boolean;
+  /** The project types the stack was decided against. */
+  readonly decidedProjectTypes: readonly string[];
+  /** The project's types now. */
+  readonly currentProjectTypes: readonly string[];
+}
+
+/** Order-insensitive comparison, because the selection is a set. */
+function sameTypes(first: readonly string[], second: readonly string[]): boolean {
+  return first.length === second.length && [...first].sort().join() === [...second].sort().join();
 }
 
 export function calculateStackBlockers(input: StackBlockerInput): readonly StackBlocker[] {
@@ -70,6 +79,23 @@ export function calculateStackBlockers(input: StackBlockerInput): readonly Stack
     });
 
     return blockers;
+  }
+
+  /*
+   * The project type moved. Reported, and nothing else — the stack is not
+   * replanned and no technology is removed, because which of them is now wrong
+   * is a judgement rather than a calculation.
+   */
+  if (!sameTypes(input.decidedProjectTypes, input.currentProjectTypes)) {
+    blockers.push({
+      kind: 'project_type_changed',
+      count: 1,
+      summary: 'The project type changed after this stack was set.',
+      action:
+        'Review the stack against the new project type — which technologies apply follows from it.',
+      componentIds: [],
+      findingIds: [],
+    });
   }
 
   if (!input.baselineCurrent) {

@@ -396,6 +396,8 @@ describe('approval blockers', () => {
     baselineApproved: true,
     baselineCurrent: true,
     projectTypeConfirmed: true,
+    decidedProjectTypes: ['WEB_APPLICATION'],
+    currentProjectTypes: ['WEB_APPLICATION'],
   };
 
   it('stops everything when the baseline is not approved', () => {
@@ -435,6 +437,44 @@ describe('approval blockers', () => {
   it('allows approval once every suggestion has been decided', () => {
     const blockers = calculateStackBlockers({
       ...base,
+      requiredCategories: ['database'],
+      components: [
+        {
+          id: 'c1',
+          category: 'database',
+          technologyName: 'PostgreSQL',
+          status: 'USER_APPROVED',
+          acknowledgedFindingIds: [],
+        },
+      ],
+    });
+
+    expect(blockers).toEqual([]);
+  });
+
+  it('reports a changed project type without replanning anything', () => {
+    const blockers = calculateStackBlockers({
+      ...base,
+      currentProjectTypes: ['BACKEND_API'],
+      components: [
+        {
+          id: 'c1',
+          category: 'web_frontend',
+          technologyName: 'React',
+          status: 'USER_APPROVED',
+          acknowledgedFindingIds: [],
+        },
+      ],
+    });
+
+    expect(blockers.map((blocker) => blocker.kind)).toContain('project_type_changed');
+  });
+
+  it('does not care what order the project types are in', () => {
+    const blockers = calculateStackBlockers({
+      ...base,
+      decidedProjectTypes: ['WEB_APPLICATION', 'MOBILE_APPLICATION'],
+      currentProjectTypes: ['MOBILE_APPLICATION', 'WEB_APPLICATION'],
       requiredCategories: ['database'],
       components: [
         {

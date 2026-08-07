@@ -883,6 +883,8 @@ export class StackService {
       baselineApproved: Boolean(baseline),
       baselineCurrent: this.baselineIsCurrent(snapshot, baseline),
       projectTypeConfirmed: projectTypeIsActionable(projectTypes),
+      decidedProjectTypes: snapshot.projectTypes,
+      currentProjectTypes: projectTypes,
     });
 
     return {
