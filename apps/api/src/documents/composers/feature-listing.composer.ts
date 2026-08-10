@@ -58,13 +58,16 @@ export class FeatureListingComposer implements DocumentComposer {
   readonly requiredSectionKeys = [];
 
   compose(context: UpstreamContext): ComposedContent {
-    const byKey = new Map(
-      context.requirements.map((requirement) => [requirement.key, requirement]),
-    );
+    /*
+     * Keyed by the stored id, because that is what an estimate unit cites. The
+     * rows then carry the human-facing `key` (REQ-004), which is what coverage
+     * and the client-facing document work in.
+     */
+    const byId = new Map(context.requirements.map((requirement) => [requirement.id, requirement]));
 
     const features = this.buildableUnits(context).map((unit, index) => {
       const requirements = unit.requirementIds
-        .map((id) => byKey.get(id))
+        .map((id) => byId.get(id))
         .filter((requirement): requirement is RequirementItem => requirement !== undefined);
 
       const effort = aggregateFeatureEffort([{ effort: unit.effort }]);

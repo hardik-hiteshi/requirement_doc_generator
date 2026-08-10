@@ -238,7 +238,22 @@ export function documentOutdatedReasons(input: OutdatedInput): readonly Document
     now: number | undefined,
     noun: string,
   ): void => {
-    if (!dependencies.upstream.includes(kind) || was === undefined || now === undefined) {
+    if (!dependencies.upstream.includes(kind) || was === undefined) {
+      return;
+    }
+
+    /*
+     * The input has gone entirely — a stack unlocked, an estimate reopened. That
+     * is a stronger statement than a version change: the document is quoting
+     * something that is no longer authority at all.
+     */
+    if (now === undefined) {
+      reasons.push({
+        cause,
+        summary: `${noun} is no longer approved, and this document was written against v${was}.`,
+        generatedAgainst: `v${was}`,
+      });
+
       return;
     }
 

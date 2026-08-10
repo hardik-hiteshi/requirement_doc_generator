@@ -61,9 +61,18 @@ export class UpstreamReader {
       (baseline) => baseline.status === 'approved' || baseline.status === 'outdated',
     );
 
+    /*
+     * Mapped field by field rather than through `toObject`. The stored id is
+     * `itemId`, and a spread would leave `id` undefined — which silently emptied
+     * every section, because nothing matched the baseline's `itemIds`.
+     */
     const items = await this.analysis.listItems(projectId);
     const allRequirements = items.map(
-      (item) => item.toObject({ getters: false }) as unknown as RequirementItem,
+      (item) =>
+        ({
+          ...(item.toObject({ getters: false }) as unknown as RequirementItem),
+          id: item.itemId,
+        }),
     );
 
     const inBaseline = new Set(approved?.itemIds ?? []);

@@ -329,6 +329,18 @@ export class DocumentsService {
     await this.repository.replaceSections(context.projectId, type, version, sections);
     await this.repository.replaceFeatures(context.projectId, type, version, features);
 
+    /*
+     * The new version is archived immediately, not only when it is superseded.
+     * `document_versions` is what "every version of this document" reads, and a
+     * version that only appears once it has been replaced is a version nobody can
+     * point at while they are working on it.
+     */
+    await this.archive(
+      context.projectId,
+      record,
+      await this.currentContent(context.projectId, record),
+    );
+
     await this.audit.record({
       type: 'DOCUMENT_GENERATION_COMPLETED',
       projectId: context.projectId,
@@ -1039,6 +1051,21 @@ export class DocumentsService {
       metadata: { documentType: type, version: record.version, ...metadata },
     });
 
+    /*
+     * The archive of the *current* version is kept in step with every content
+     * change, so "restore version 2" restores what version 2 actually says. Past
+     * versions cannot be reached by this: they are no longer the current one.
+     */
+    const current = await this.repository.find(context.projectId, type);
+
+    if (current) {
+      await this.archive(
+        context.projectId,
+        current,
+        await this.currentContent(context.projectId, current),
+      );
+    }
+
     if (wasApproved) {
       await this.markDependentsOutdated(context, type);
     }
@@ -1305,6 +1332,24 @@ export class DocumentsService {
         },
         changedPrerequisites: [],
       }),
+      /*
+       * A baseline that went out of date without changing version. Phase 4 keeps
+       * an approved-then-outdated baseline at the same version until a new
+       * analysis run supersedes it, so a version comparison cannot see this — and
+       * a document built on it is nonetheless no longer current.
+       */
+      ...(!upstream.baselineCurrent &&
+      DOCUMENT_DEPENDENCIES[type].upstream.includes('REQUIREMENT_BASELINE') &&
+      record.baselineVersion !== undefined
+        ? [
+            {
+              cause: 'baseline_changed' as const,
+              summary:
+                'The approved requirements are no longer current — something changed upstream after this document was written.',
+              generatedAgainst: `v${record.baselineVersion}`,
+            },
+          ]
+        : []),
       /* Prerequisite changes are recorded on the document as they happen. */
       ...(record.outdatedReasons as unknown as DocumentSnapshot['outdatedReasons']),
     ];

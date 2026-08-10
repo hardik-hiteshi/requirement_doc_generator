@@ -1,0 +1,5 @@
+Module,Feature,Priority,Estimate
+"Catalogue","Browse products","High","8"
+"Catalogue","Search by SKU","Medium","5"
+"Quoting","Build a quote","High","13"
+"Quoting","Formula cell","Low","=1+1"

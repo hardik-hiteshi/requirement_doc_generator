@@ -138,7 +138,14 @@ export class DocumentsRepository {
     await this.sections.deleteMany({ projectId, type, documentVersion }).exec();
 
     if (records.length > 0) {
-      await this.sections.insertMany(records);
+      /*
+       * `projectId` and `type` are stamped here rather than by the caller. Every
+       * row in this collection is scoped by them, and a caller that forgot one
+       * would write a section belonging to nothing — so the repository owns it.
+       */
+      await this.sections.insertMany(
+        records.map((record) => ({ ...record, projectId, type, documentVersion })),
+      );
     }
   }
 
@@ -175,7 +182,9 @@ export class DocumentsRepository {
     await this.features.deleteMany({ projectId, type, documentVersion }).exec();
 
     if (records.length > 0) {
-      await this.features.insertMany(records);
+      await this.features.insertMany(
+        records.map((record) => ({ ...record, projectId, type, documentVersion })),
+      );
     }
   }
 

@@ -1,0 +1,5 @@
+Northwind Quoting Platform
+
+The system must let a sales user build a quote from a product catalogue.
+Quotes must be approved by a manager before they are sent to a client.
+Approved quotes must be exported as PDF.
