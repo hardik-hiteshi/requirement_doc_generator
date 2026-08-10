@@ -22,6 +22,7 @@ import { RecoveryLinkPanel } from '@/components/project/recovery-link-panel';
 import { RequirementInputStep } from '@/components/requirements/requirement-input-step';
 import { AnalysisStep } from '@/components/analysis/analysis-step';
 import { TechnologyStackStep } from '@/components/stack/technology-stack-step';
+import { DocumentsStep } from '@/components/documents/documents-step';
 import { EstimationStep } from '@/components/estimation/estimation-step';
 import { BaselineStep } from '@/components/analysis/baseline-step';
 import { ClarificationsStep } from '@/components/analysis/clarifications-step';
@@ -80,6 +81,11 @@ function stepStates(
      * missing — more useful than a tab that explains nothing.
      */
     'estimation-timeline': hasReviewedSources ? 'available' : 'locked',
+    /*
+     * Unlocked with the rest. The step lists every document with the reason each
+     * locked one is locked, which is more useful than a tab that explains nothing.
+     */
+    'document-generation': hasReviewedSources ? 'available' : 'locked',
   };
 }
 
@@ -90,6 +96,7 @@ const ANALYSIS_STEPS: readonly WorkflowStepId[] = [
   'baseline-approval',
   'technology-stack',
   'estimation-timeline',
+  'document-generation',
 ];
 
 export function WorkspaceShell() {
@@ -291,6 +298,7 @@ export function WorkspaceShell() {
                   {currentStepId === 'baseline-approval' ? <BaselineStep /> : null}
                   {currentStepId === 'technology-stack' ? <TechnologyStackStep /> : null}
                   {currentStepId === 'estimation-timeline' ? <EstimationStep /> : null}
+                  {currentStepId === 'document-generation' ? <DocumentsStep /> : null}
 
                   <div className="flex flex-wrap gap-2">
                     {ANALYSIS_STEPS.filter((step) => step !== currentStepId).map((step) => (

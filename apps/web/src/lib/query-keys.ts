@@ -35,4 +35,14 @@ export const queryKeys = {
   estimate: ['estimate'] as const,
   estimateVersions: ['estimate', 'versions'] as const,
   estimationRun: ['estimate', 'run'] as const,
+
+  /* Phase 7 — controlled documents. Keyed by type, because one set of hooks
+     serves every document and two of them can be open in one session. */
+  documents: ['documents'] as const,
+  document: (type: string) => ['documents', type] as const,
+  documentVersions: (type: string) => ['documents', type, 'versions'] as const,
+  documentDiff: (type: string, left: number, right: number) =>
+    ['documents', type, 'diff', left, right] as const,
+  documentCsv: (type: string) => ['documents', type, 'csv'] as const,
+  documentRun: (type: string) => ['documents', type, 'run'] as const,
 } as const;
