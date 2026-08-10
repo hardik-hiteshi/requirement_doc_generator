@@ -59,6 +59,39 @@ export const AI_TASK_IDS = [
    * application does the sums; see `estimation/estimation-engine.ts`.
    */
   'estimation.assess',
+  /**
+   * Which sections of a document the evidence can actually support.
+   *
+   * Phase 7. Plans a document against the approved baseline: what each section
+   * has evidence for, and which requirements belong to it. It selects and
+   * groups; it writes no prose and invents no section — the template is fixed.
+   */
+  'document.plan',
+  /**
+   * The prose for one section of a document.
+   *
+   * Phase 7. Writes into a section the application chose, from evidence the
+   * application selected, citing only requirement ids it was given. Used for
+   * first generation and for regeneration alike — a rewrite is the same task
+   * with a correction in the evidence channel.
+   */
+  'document.section',
+  /**
+   * Requirements grouped into implementable features.
+   *
+   * Phase 7. Returns module, submodule, screen and description per feature, and
+   * the requirements behind it. Its schema has nowhere to put an hours figure:
+   * effort comes from the approved estimate — see `feature-listing.contract.ts`.
+   */
+  'document.features',
+  /**
+   * A finished document, read for statements the evidence does not support.
+   *
+   * Phase 7. Advisory and additive: it can raise findings a checker cannot see,
+   * and it can never clear or downgrade one. Deterministic checks decide whether
+   * a document may be approved.
+   */
+  'document.validate',
 ] as const;
 
 export type AiTaskId = (typeof AI_TASK_IDS)[number];
@@ -81,6 +114,10 @@ export const AI_TASK_LABELS: Readonly<Record<AiTaskId, string>> = {
   'baseline.crossSource': 'Checking consistency across sources',
   'stack.recommend': 'Suggesting technologies',
   'estimation.assess': 'Assessing how hard each thing is',
+  'document.plan': 'Planning the document',
+  'document.section': 'Writing a section',
+  'document.features': 'Grouping requirements into features',
+  'document.validate': 'Reading the document back',
 };
 
 /* ------------------------------------------------------------- failures */

@@ -84,3 +84,18 @@ export * from './estimation/estimate-blockers';
 export * from './estimation/estimation-run.contract';
 export * from './estimation/estimation-routes';
 export * from './estimation/estimation-errors';
+
+/* Phase 7 — the shared document engine, Our Understanding and Feature Listing. */
+export * from './documents/document-type.contract';
+export * from './documents/document-status.contract';
+export * from './documents/document-dependency';
+export * from './documents/document-section.contract';
+export * from './documents/document-validation.contract';
+export * from './documents/understanding.contract';
+export * from './documents/feature-listing.contract';
+export * from './documents/feature-csv';
+export * from './documents/document-snapshot.contract';
+export * from './documents/document-blockers';
+export * from './documents/document-run.contract';
+export * from './documents/document-routes';
+export * from './documents/document-errors';
