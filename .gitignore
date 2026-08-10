@@ -79,6 +79,9 @@ mongodb-data/
 # storage adapter. A runtime-data rule must never be able to swallow source.
 /storage/
 apps/api/storage/
+# Uploaded-file scratch for a local test run, when UPLOAD_STORAGE_ROOT points here.
+# Twenty of these reached a Phase 7 commit before this line existed.
+apps/api/.local-storage/
 apps/*/uploads/
 /uploads/
 tmp/
