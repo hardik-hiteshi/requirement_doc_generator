@@ -6,6 +6,17 @@ import type { Config } from 'jest';
  * Requires a reachable MongoDB (`pnpm docker:up` locally, a service container in
  * CI). Kept separate from the unit suite so `pnpm test` never depends on
  * infrastructure.
+ *
+ * PDF extraction is **not** in this project. It runs under `jest.pdf.config.ts`,
+ * in a process of its own, for the reason documented there. Nothing in this
+ * project may touch a PDF, and `test/test-topology.e2e-spec.ts` fails if
+ * something starts to.
+ *
+ * The two configurations repeat the settings below rather than sharing a module.
+ * Jest reads a TypeScript config through its own loader, which does not resolve a
+ * relative import of a sibling source file — so a shared base would have to be
+ * compiled first, and a config file that needs a build step is worse than eight
+ * duplicated lines. Keep them in step by hand.
  */
 const config: Config = {
   rootDir: '.',
@@ -14,12 +25,14 @@ const config: Config = {
   // Before any import, because ConfigModule reads the environment when
   // app.module.ts is imported rather than when a test runs.
   setupFiles: ['<rootDir>/test/e2e-env.ts'],
-  testRegex: '.*\\.e2e-spec\\.ts$',
   transform: {
     '^.+\\.(t|j)s$': ['@swc/jest', {}],
   },
   moduleFileExtensions: ['js', 'json', 'ts'],
   testTimeout: 30_000,
+  clearMocks: true,
+  testRegex: '.*\\.e2e-spec\\.ts$',
+  testPathIgnorePatterns: ['pdf-extraction\\.e2e-spec\\.ts$'],
   /*
    * A process per pair of suites, and two things depend on this number.
    *
@@ -35,15 +48,18 @@ const config: Config = {
    * worker off, which removed the *polling* half of the problem but not the
    * queue itself.
    *
-   * Two is the number that has been green in hosted CI since Phase 4. With
-   * eleven suites it is tighter than it was; see the known limitations in the
-   * Phase 6 notes.
+   * Two is the number that has been green in hosted CI since Phase 4.
    */
   maxWorkers: 2,
-  // Fixed order, and the PDF suite has to be first in its worker process.
-  // The reason is in the file — it is not a preference.
+  /*
+   * Fixed order, for reproducibility only.
+   *
+   * No suite's correctness depends on it. It used to: the PDF suite had to run
+   * first, which is exactly the fragility a dedicated project removed. Ordering
+   * is pinned because these suites share one MongoDB, and a contention failure
+   * you can reproduce is worth more than one you cannot.
+   */
   testSequencer: '<rootDir>/test/sequencer.cjs',
-  clearMocks: true,
 };
 
 export default config;

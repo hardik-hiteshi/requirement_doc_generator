@@ -177,6 +177,20 @@ moment the user is told the truth — three times over.
 Both the UI and the API enforce this, and the attempt limit
 (`EXTRACTION_MAX_ATTEMPTS`) bounds the rest.
 
+## Testing PDF extraction
+
+pdfjs is ESM-only and is reached through `new Function('specifier', 'return
+import(specifier)')`, because the CommonJS build would rewrite a literal
+`import()` into a `require()` that cannot load an ES module. A function built that
+way has no module referrer, so under Jest the import binds to whichever runtime
+was registered most recently — the previous suite's, already torn down.
+
+So PDF extraction runs as its own Jest project, one test file in a process of its
+own: `jest.pdf.config.ts`, `pnpm --filter @wdrg/api test:e2e:pdf`, its own CI
+step. `test/test-topology.e2e-spec.ts` asserts the split holds, including that no
+shared-process suite references a `.pdf` fixture — an accepted PDF upload leaves a
+queued job in a database every suite shares. ADR-0032 has the full reasoning.
+
 ## Known limitations
 
 - **Storage is local disk only.** The S3 adapter is not implemented — ADR-0011.

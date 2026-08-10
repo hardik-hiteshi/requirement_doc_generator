@@ -1,36 +1,25 @@
 /**
  * Test order for the API integration suite.
  *
- * `requirement-sources.e2e-spec.ts` runs first, and that is a correctness
- * requirement rather than a preference.
+ * Ordering is by path, and it is for **reproducibility only** — no suite's
+ * correctness depends on where it lands in the run. It used to: PDF extraction
+ * had to be the first environment in its worker process, because pdfjs cannot be
+ * imported from a Jest runtime that has already been torn down. That suite now
+ * has a Jest project and a process of its own (`jest.pdf.config.ts`), which
+ * removed the dependency rather than scheduling around it.
  *
- * That suite is the only one that extracts PDFs, and pdfjs is ESM-only. The
- * extractor reaches it through `new Function('specifier', 'return import(specifier)')`,
- * because the transpiler rewrites a literal `import()` to `require()`, which
- * cannot load an ES module. A function built that way has no module referrer,
- * so Jest cannot attribute the import to the file that made it and falls back
- * to the runtime it registered most recently — which, for the second and later
- * suites in a worker process, is the *previous* suite's runtime. Jest has
- * already torn that environment down, and the import fails with
- * "You are trying to `import` a file after the Jest environment has been torn
- * down", leaving the extraction job unprocessed and the source stuck at QUEUED.
- *
- * Scheduling hands the first test file to the first idle worker, so putting
- * this suite at the head of the list makes it the first environment in its
- * process. Nothing has been torn down at that point, and the runtime Jest
- * falls back to is the suite's own. No other suite imports pdfjs, so no later
- * file in that process needs the import again.
- *
- * Everything else is ordered by path. These suites share one MongoDB and one
+ * What is left is worth keeping. These suites share one MongoDB and one
  * extraction queue, so a fixed order makes a contention failure reproducible
- * instead of dependent on a timing cache.
+ * instead of dependent on Jest's timing cache.
+ *
+ * Set `E2E_ORDER=reverse` to run them back to front. That is how the claim
+ * "order does not matter" gets tested rather than asserted.
  *
  * Plain CommonJS on purpose: Jest loads the sequencer before any transform is
  * available, so a `.ts` file here would not compile.
  */
 
-/** The suite that must own the pdfjs import. */
-const PDF_SUITE = 'requirement-sources.e2e-spec.ts';
+const REVERSED = process.env.E2E_ORDER === 'reverse';
 
 class ApiIntegrationSequencer {
   /**
@@ -38,19 +27,9 @@ class ApiIntegrationSequencer {
    * @returns {Array<{path: string}>}
    */
   sort(tests) {
-    return [...tests].sort((first, second) => {
-      const rank = this.rank(first) - this.rank(second);
+    const sorted = [...tests].sort((first, second) => first.path.localeCompare(second.path));
 
-      return rank === 0 ? first.path.localeCompare(second.path) : rank;
-    });
-  }
-
-  /**
-   * @param {{path: string}} test
-   * @returns {number}
-   */
-  rank(test) {
-    return test.path.endsWith(PDF_SUITE) ? 0 : 1;
+    return REVERSED ? sorted.reverse() : sorted;
   }
 
   /**

@@ -65,3 +65,4 @@ think is part of the value.
 | [0029](0029-stack-locking-and-downstream-authority.md) | Locking is separate from approval, and it is what later phases read | Accepted |
 | [0030](0030-effort-duration-capacity.md)               | Effort, duration and capacity are three numbers, never one          | Accepted |
 | [0031](0031-hybrid-estimation.md)                      | The model assesses; the application does the arithmetic             | Accepted |
+| [0032](0032-isolating-pdf-extraction-tests.md)         | PDF extraction tests get a process of their own                     | Accepted |
