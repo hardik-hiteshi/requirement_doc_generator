@@ -5,6 +5,7 @@ import {
   PROJECT_NOT_MODIFIABLE_MESSAGE,
   PROJECT_VERSION_CONFLICT_MESSAGE,
   validateDeadlineAgainst,
+  validateDeadlineAgainstStart,
   type AuditEventType,
   type OutputPreferences,
   type ProjectDetails,
@@ -91,6 +92,8 @@ export class ProjectsService {
       ]);
     }
 
+    await this.rejectContradictoryDates(context.projectId, { timeline }, 'timeline.deadline');
+
     return this.applyUpdate(
       context,
       (status) => toTimelineMutation(timeline, statusAfterEdit(status)),
@@ -103,12 +106,51 @@ export class ProjectsService {
     startDate: StartDate,
     context: SectionUpdateContext,
   ): Promise<ProjectResponse> {
+    await this.rejectContradictoryDates(context.projectId, { startDate }, 'startDate.date');
+
     return this.applyUpdate(
       context,
       (status) => toStartDateMutation(startDate, statusAfterEdit(status)),
       'START_DATE_UPDATED',
       { mode: startDate.mode },
     );
+  }
+
+  /**
+   * Refuses a delivery deadline that falls before the start date.
+   *
+   * Either write can create the contradiction, so both consult the value they
+   * are not setting. Rejecting here rather than downstream keeps the stored
+   * project internally consistent: a negative span makes every schedule,
+   * capacity and feasibility figure derived from it meaningless, and the
+   * application will not resolve it by moving one of the user's two dates.
+   *
+   * Only concrete start dates count. A deadline with `NOT_CONFIRMED` is
+   * incomplete rather than wrong, and the estimate reports that as missing
+   * information instead of refusing the write.
+   */
+  private async rejectContradictoryDates(
+    projectId: string,
+    change: { timeline?: Timeline; startDate?: StartDate },
+    path: string,
+  ): Promise<void> {
+    const record = await this.repository.findByProjectId(projectId);
+
+    if (!record) {
+      // Left to `applyUpdate`, which owns the access decision.
+      return;
+    }
+
+    const outcome = validateDeadlineAgainstStart(
+      change.timeline ?? (record.timeline as Timeline | undefined),
+      change.startDate ?? (record.startDate as StartDate | undefined),
+    );
+
+    if (!outcome.valid) {
+      throw new ValidationFailedException([
+        { path, message: outcome.reason, rule: 'deadline_before_start' },
+      ]);
+    }
   }
 
   async updateTeamCapacity(

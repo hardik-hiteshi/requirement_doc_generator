@@ -51,6 +51,14 @@ export const AI_TASK_IDS = [
    * `stack/recommendation-schema.ts`.
    */
   'stack.recommend',
+  /**
+   * Complexity and drivers for one requirement.
+   *
+   * Phase 6. Proposes *inputs* to the estimation arithmetic — a task category,
+   * a complexity, the drivers behind it — and never an hours figure. The
+   * application does the sums; see `estimation/estimation-engine.ts`.
+   */
+  'estimation.assess',
 ] as const;
 
 export type AiTaskId = (typeof AI_TASK_IDS)[number];
@@ -72,6 +80,7 @@ export const AI_TASK_LABELS: Readonly<Record<AiTaskId, string>> = {
   'baseline.validate': 'Validating the baseline',
   'baseline.crossSource': 'Checking consistency across sources',
   'stack.recommend': 'Suggesting technologies',
+  'estimation.assess': 'Assessing how hard each thing is',
 };
 
 /* ------------------------------------------------------------- failures */

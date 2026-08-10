@@ -67,3 +67,20 @@ export * from './stack/downstream-authority.contract';
 export * from './stack/recommendation-run.contract';
 export * from './stack/stack-routes';
 export * from './stack/stack-errors';
+
+/* Phase 6 — effort estimation, capacity and timeline planning. */
+export * from './estimation/role.contract';
+export * from './estimation/complexity.contract';
+export * from './estimation/productivity-model';
+export * from './estimation/effort-range';
+export * from './estimation/estimate-unit.contract';
+export * from './estimation/dependency.contract';
+export * from './estimation/calendar.contract';
+export * from './estimation/capacity.contract';
+export * from './estimation/scheduling';
+export * from './estimation/feasibility';
+export * from './estimation/estimate-snapshot.contract';
+export * from './estimation/estimate-blockers';
+export * from './estimation/estimation-run.contract';
+export * from './estimation/estimation-routes';
+export * from './estimation/estimation-errors';

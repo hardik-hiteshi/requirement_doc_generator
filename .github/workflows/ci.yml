@@ -110,7 +110,22 @@ jobs:
         run: bash infrastructure/scripts/wait-for-mongo.sh
 
       - name: Run API integration tests
-        run: pnpm --filter @wdrg/api test:e2e
+        run: pnpm --filter @wdrg/api test:e2e:main
+
+      # A separate step because it is a separate Jest project in a process of its
+      # own — pdfjs cannot be imported from a Jest environment another suite has
+      # torn down. See apps/api/jest.pdf.config.ts. Run on its own so a failure
+      # here is unambiguous, and so PDF verification is visibly present in CI.
+      - name: Run isolated PDF extraction verification
+        run: pnpm --filter @wdrg/api test:e2e:pdf
+
+      # Proof rather than assertion: the same suites back to front. Nothing in
+      # the main project may depend on where it lands in the order, and the PDF
+      # project is unaffected either way because it is not in this pool.
+      - name: Re-run API integration tests in reverse order
+        run: pnpm --filter @wdrg/api test:e2e:main
+        env:
+          E2E_ORDER: reverse
 
   # Self-hosted infrastructure, verified against the real thing.
   #
@@ -234,6 +249,14 @@ jobs:
         env:
           STORAGE_ADAPTER: s3
         run: pnpm --filter @wdrg/api exec node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.e2e.config.ts --runInBand test/requirement-sources
+
+      # PDFs live in their own Jest project, so they need their own invocation
+      # here too — otherwise moving them out of the main suite would have quietly
+      # dropped PDF extraction from the real-storage regression.
+      - name: Verify PDF extraction against real storage and scanning
+        env:
+          STORAGE_ADAPTER: s3
+        run: pnpm --filter @wdrg/api exec node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config jest.pdf.config.ts
 
       - name: Stop object storage
         if: always()

@@ -31,6 +31,46 @@ const importEsm =
     specifier: string,
   ) => Promise<Record<string, unknown>>;
 
+const PDFJS_SPECIFIER = 'pdfjs-dist/legacy/build/pdf.mjs';
+
+/**
+ * How many times this process has had to reload pdfjs.
+ *
+ * The module lives in Node's own ESM registry, which is **process-level** and
+ * outside any module isolation a test framework provides. That is harmless in
+ * production, where one process serves one application for its lifetime. It is
+ * not harmless in a process that builds an application and tears it down again:
+ * pdfjs is left holding state that has been disposed, and the next document
+ * fails with an internal error about a property of `undefined` — which looks
+ * exactly like a corrupt file and is not.
+ *
+ * Appending a query string makes the specifier distinct, so Node loads a fresh
+ * copy. The counter advances only on a real failure, so the ordinary path pays
+ * nothing for this.
+ */
+let pdfjsGeneration = 0;
+
+function loadPdfjs(): Promise<Record<string, unknown>> {
+  return importEsm(
+    pdfjsGeneration === 0 ? PDFJS_SPECIFIER : `${PDFJS_SPECIFIER}?generation=${pdfjsGeneration}`,
+  );
+}
+
+/**
+ * Whether a failure is a disposed pdfjs rather than a bad PDF.
+ *
+ * Deliberately narrow. A corrupt file must still be reported as a corrupt file:
+ * reloading the library and retrying on every failure would turn one honest
+ * rejection into two slow ones.
+ */
+function isDisposedModuleFailure(cause: unknown): boolean {
+  const message = cause instanceof Error ? cause.message : String(cause);
+
+  return /Cannot read properties of undefined \(reading '(identifier|workerPort|_capability)'\)/.test(
+    message,
+  );
+}
+
 /** The one canvas function this needs, so the native binding stays lazy. */
 type CreateCanvas = (
   width: number,
@@ -104,46 +144,69 @@ export class PdfExtractor implements FormatExtractor {
 
   async extract(context: ExtractorContext): Promise<ExtractedContent> {
     const builder = new BlockBuilder(this.config.extraction.maxBlocks);
-    const pdfjs = await importEsm('pdfjs-dist/legacy/build/pdf.mjs');
 
-    const getDocument = pdfjs.getDocument as (options: unknown) => PdfLoadingTask;
+    const openOptions = (): unknown => ({
+      // A copy: pdfjs transfers ownership of the buffer it is given and
+      // detaches it, which would corrupt the caller's content on retry.
+      data: new Uint8Array(context.content),
+      // No network, ever. A PDF that references an external font or an XFA
+      // form must not become an outbound request from the server.
+      isEvalSupported: false,
+      disableFontFace: true,
+      useSystemFonts: false,
+      // Resolved on disk from the installed package. Left unset, pdfjs warns
+      // on every document and falls back to approximate metrics, which shifts
+      // the text positions this extractor groups lines by.
+      standardFontDataUrl: standardFontsDirectory(),
+    });
+
+    const open = async (): Promise<{ task: PdfLoadingTask; document: PdfDocument }> => {
+      const pdfjs = await loadPdfjs();
+      const getDocument = pdfjs.getDocument as (options: unknown) => PdfLoadingTask;
+      const loading = getDocument(openOptions());
+
+      return { task: loading, document: await loading.promise };
+    };
 
     let task: PdfLoadingTask;
     let document: PdfDocument;
 
     try {
-      task = getDocument({
-        // A copy: pdfjs transfers ownership of the buffer it is given and
-        // detaches it, which would corrupt the caller's content on retry.
-        data: new Uint8Array(context.content),
-        // No network, ever. A PDF that references an external font or an XFA
-        // form must not become an outbound request from the server.
-        isEvalSupported: false,
-        disableFontFace: true,
-        useSystemFonts: false,
-        // Resolved on disk from the installed package. Left unset, pdfjs warns
-        // on every document and falls back to approximate metrics, which shifts
-        // the text positions this extractor groups lines by.
-        standardFontDataUrl: standardFontsDirectory(),
-      });
-
-      document = await task.promise;
+      ({ task, document } = await open());
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
+      /*
+       * One retry, and only for a disposed library. This is our own process
+       * state, not the user's file, and reporting it as a corrupt PDF would
+       * blame them for it.
+       */
+      if (!isDisposedModuleFailure(cause)) {
+        const message = cause instanceof Error ? cause.message : String(cause);
 
-      if (/password/i.test(message) || (cause as { name?: string })?.name === 'PasswordException') {
-        throw new FileExtractionError(
-          'password_protected',
-          'This PDF is password-protected.',
-          false,
-          { cause },
-        );
+        if (
+          /password/i.test(message) ||
+          (cause as { name?: string })?.name === 'PasswordException'
+        ) {
+          throw new FileExtractionError(
+            'password_protected',
+            'This PDF is password-protected.',
+            false,
+            { cause },
+          );
+        }
+
+        this.logger.warn({ cause, sourceId: context.sourceId }, 'PDF could not be opened');
+        throw new FileExtractionError('corrupted_file', 'This PDF could not be opened.', false, {
+          cause,
+        });
       }
 
-      this.logger.warn({ cause, sourceId: context.sourceId }, 'PDF could not be opened');
-      throw new FileExtractionError('corrupted_file', 'This PDF could not be opened.', false, {
-        cause,
-      });
+      this.logger.warn(
+        { sourceId: context.sourceId },
+        'Reloaded the PDF library after a disposed-module failure',
+      );
+
+      pdfjsGeneration += 1;
+      ({ task, document } = await open());
     }
 
     try {

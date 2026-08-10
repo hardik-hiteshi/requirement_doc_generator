@@ -13,7 +13,11 @@ import {
 } from './project-identifiers';
 import { canTransition, isDeleted, isMutable, PROJECT_STATUSES } from './project-status';
 import { MAX_PROJECT_TYPES, projectTypeSelectionSchema } from './project-type.contract';
-import { startDateSchema, supportsCalendarScheduling } from './start-date.contract';
+import {
+  startDateSchema,
+  supportsCalendarScheduling,
+  validateDeadlineAgainstStart,
+} from './start-date.contract';
 import { customRoleKey, teamCapacitySchema } from './team-capacity.contract';
 import { timelineSchema, validateDeadlineAgainst } from './timeline.contract';
 
@@ -156,6 +160,52 @@ describe('start date', () => {
     expect(supportsCalendarScheduling({ mode: 'NOT_CONFIRMED' })).toBe(false);
     expect(supportsCalendarScheduling({ mode: 'IMMEDIATELY_AFTER_APPROVAL' })).toBe(false);
     expect(supportsCalendarScheduling({ mode: 'TENTATIVE_DATE', date: '2026-09-01' })).toBe(true);
+  });
+});
+
+describe('a deadline against a start date', () => {
+  const deadline = { mode: 'FIXED_DEADLINE', deadline: '2026-11-30' } as const;
+
+  it('refuses a deadline that falls before a concrete start', () => {
+    for (const mode of ['CONFIRMED_DATE', 'TENTATIVE_DATE'] as const) {
+      const result = validateDeadlineAgainstStart(deadline, { mode, date: '2027-01-15' });
+
+      expect(result.valid).toBe(false);
+      expect(result.valid ? '' : result.reason).toContain('2026-11-30');
+    }
+  });
+
+  it('accepts a start on the deadline itself — one day is a span', () => {
+    expect(
+      validateDeadlineAgainstStart(deadline, { mode: 'CONFIRMED_DATE', date: '2026-11-30' }).valid,
+    ).toBe(true);
+  });
+
+  it('accepts a start before the deadline', () => {
+    expect(
+      validateDeadlineAgainstStart(deadline, { mode: 'CONFIRMED_DATE', date: '2026-09-01' }).valid,
+    ).toBe(true);
+  });
+
+  /* Incomplete is not the same as contradictory, and only one of them is an error. */
+  it('says nothing about the undated modes', () => {
+    expect(validateDeadlineAgainstStart(deadline, { mode: 'NOT_CONFIRMED' }).valid).toBe(true);
+    expect(
+      validateDeadlineAgainstStart(deadline, { mode: 'IMMEDIATELY_AFTER_APPROVAL' }).valid,
+    ).toBe(true);
+    expect(validateDeadlineAgainstStart(deadline, undefined).valid).toBe(true);
+  });
+
+  it('applies only to a fixed deadline', () => {
+    expect(
+      validateDeadlineAgainstStart(
+        { mode: 'WEEKS' },
+        { mode: 'CONFIRMED_DATE', date: '2030-01-01' },
+      ).valid,
+    ).toBe(true);
+    expect(
+      validateDeadlineAgainstStart(undefined, { mode: 'CONFIRMED_DATE', date: '2030-01-01' }).valid,
+    ).toBe(true);
   });
 });
 
