@@ -284,6 +284,23 @@ describe('columnLetter', () => {
 describe('PdfExtractor', () => {
   const extractor = new PdfExtractor(config, fakeOcr);
 
+  /*
+   * The first PDF in a process pays for the whole of pdfjs: a dynamic ESM import
+   * of a multi-megabyte module, then the standard font data from disk. That cost
+   * is real, one-off, and nothing to do with the document being read — and on a
+   * shared CI runner it exceeded Jest's five-second default, failing the first
+   * test in this block on main while the extractor was working correctly.
+   *
+   * Paying it here, once, against a budget that matches the work, leaves every
+   * assertion below on the default timeout. No test is retried and no test's own
+   * budget is inflated to cover somebody else's startup.
+   */
+  beforeAll(async () => {
+    await extractor.extract(
+      context('requirements-digital.pdf', fixture('requirements-digital.pdf')),
+    );
+  }, 60_000);
+
   it('reads a digital text layer with page numbers', async () => {
     const result = await extractor.extract(
       context('requirements-digital.pdf', fixture('requirements-digital.pdf')),
