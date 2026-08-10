@@ -164,16 +164,16 @@ export class UnderstandingComposer implements DocumentComposer {
 
     if (key === 'open-items') {
       return requirements
-        .map(
-          (requirement) =>
-            `${requirement.key}: ${requirement.title} — this has changed since it was last checked.`,
-        )
+        .map((requirement) => `${requirement.title} — this has changed since it was last checked.`)
         .join('\n');
     }
 
-    return requirements
-      .map((requirement) => `${requirement.key}: ${requirement.statement}`)
-      .join('\n');
+    /*
+     * Statements only. The requirement ids are on the section's `references`, where
+     * the interface shows them under "Where this comes from" — putting them in the
+     * prose would mean a client-facing copy carried our identifiers.
+     */
+    return requirements.map((requirement) => requirement.statement).join('\n');
   }
 
   /**
@@ -189,19 +189,30 @@ export class UnderstandingComposer implements DocumentComposer {
       input.context.requirements.map((requirement) => [requirement.key, requirement]),
     );
 
-    /* 1. Every cited requirement exists, and none of them is one we rejected. */
-    const cited = new Set(
+    /*
+     * 1. Every cited requirement exists, and none of them is one we rejected.
+     *
+     * `cited` is what the application recorded. `mentioned` is what appears in the
+     * prose — the two are checked for different things: coverage against the first,
+     * fabricated ids against the second.
+     */
+    const cited = new Set(input.sections.flatMap((section) => section.references));
+    const mentioned = new Set(
       input.sections.flatMap((section) =>
         [...section.body.matchAll(/\bREQ-\d{3,5}\b/g)].map((match) => match[0]),
       ),
     );
 
-    const unknown = [...cited].filter((key) => !approved.has(key));
+    const unknown = [...new Set([...cited, ...mentioned])].filter((key) => !approved.has(key));
     const rejected = input.context.allRequirements.filter(
-      (requirement) => cited.has(requirement.key) && requirement.status === 'rejected',
+      (requirement) =>
+        (cited.has(requirement.key) || mentioned.has(requirement.key)) &&
+        requirement.status === 'rejected',
     );
     const superseded = input.context.allRequirements.filter(
-      (requirement) => cited.has(requirement.key) && requirement.status === 'superseded',
+      (requirement) =>
+        (cited.has(requirement.key) || mentioned.has(requirement.key)) &&
+        requirement.status === 'superseded',
     );
 
     if (unknown.length > 0) {
@@ -253,7 +264,9 @@ export class UnderstandingComposer implements DocumentComposer {
     /* 3. Coverage: every approved requirement is acknowledged somewhere. */
     const applicable = this.applicableRequirementIds(input.context);
     const excluded = new Set(input.excludedRequirementIds);
-    const uncovered = applicable.filter((key) => !cited.has(key) && !excluded.has(key));
+    const uncovered = applicable.filter(
+      (key) => !cited.has(key) && !mentioned.has(key) && !excluded.has(key),
+    );
 
     findings.push(
       uncovered.length === 0
@@ -303,8 +316,8 @@ export class UnderstandingComposer implements DocumentComposer {
     }
 
     /* 6. Scope and out-of-scope do not contradict each other. */
-    const scope = input.sections.find((section) => section.key === 'functional-scope')?.body ?? '';
-    const outOfScope = input.sections.find((section) => section.key === 'out-of-scope')?.body ?? '';
+    const scope = input.sections.find((section) => section.key === 'functional-scope');
+    const outOfScope = input.sections.find((section) => section.key === 'out-of-scope');
     const contradictions = this.contradictions(scope, outOfScope);
 
     if (contradictions.length > 0) {
@@ -345,9 +358,17 @@ export class UnderstandingComposer implements DocumentComposer {
    * similar are a judgement, and judgement belongs to the model's half of
    * validation.
    */
-  private contradictions(scope: string, outOfScope: string): readonly string[] {
-    const keys = (body: string): Set<string> =>
-      new Set([...body.matchAll(/\bREQ-\d{3,5}\b/g)].map((match) => match[0]));
+  private contradictions(
+    scope: { readonly body: string; readonly references: readonly string[] } | undefined,
+    outOfScope: { readonly body: string; readonly references: readonly string[] } | undefined,
+  ): readonly string[] {
+    const keys = (
+      section: { readonly body: string; readonly references: readonly string[] } | undefined,
+    ): Set<string> =>
+      new Set([
+        ...(section?.references ?? []),
+        ...[...(section?.body ?? '').matchAll(/\bREQ-\d{3,5}\b/g)].map((match) => match[0]),
+      ]);
 
     const inScope = keys(scope);
 

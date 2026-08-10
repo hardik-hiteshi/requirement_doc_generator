@@ -93,6 +93,8 @@ export * from './documents/document-section.contract';
 export * from './documents/document-validation.contract';
 export * from './documents/understanding.contract';
 export * from './documents/feature-listing.contract';
+export * from './documents/document-correction.contract';
+export * from './documents/document-clipboard';
 export * from './documents/feature-csv';
 export * from './documents/document-snapshot.contract';
 export * from './documents/document-blockers';

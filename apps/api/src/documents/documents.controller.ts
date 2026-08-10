@@ -22,6 +22,7 @@ import {
 } from '@nestjs/swagger';
 import {
   acknowledgeFindingSchema,
+  applyCorrectionSchema,
   approveDocumentSchema,
   attemptsEffortEdit,
   DOCUMENT_ERROR_CODES,
@@ -31,12 +32,15 @@ import {
   markFinalSchema,
   regenerateSectionSchema,
   reopenDocumentSchema,
+  resolveFeatureProposalSchema,
   resolveSectionProposalSchema,
   restoreVersionSchema,
   updateFeatureRowSchema,
   updateSectionSchema,
   type AcknowledgeFinding,
+  type ApplyCorrection,
   type ApproveDocument,
+  type CorrectionInstruction,
   type DocumentDiff,
   type DocumentRun,
   type DocumentSnapshot,
@@ -48,6 +52,7 @@ import {
   type MarkFinal,
   type RegenerateSection,
   type ReopenDocument,
+  type ResolveFeatureProposal,
   type ResolveSectionProposal,
   type RestoreVersion,
   type UpdateSection,
@@ -74,6 +79,17 @@ const excludeRequirementSchema = z
   .strict();
 
 type ExcludeRequirement = z.infer<typeof excludeRequirementSchema>;
+
+const regenerateModuleSchema = z
+  .object({
+    module: z.string().min(1).max(200),
+    instruction: z.string().max(2_000).optional(),
+    useAi: z.boolean(),
+    expectedVersion: z.number().int().nonnegative(),
+  })
+  .strict();
+
+type RegenerateModule = z.infer<typeof regenerateModuleSchema>;
 
 /**
  * The documents for the project the caller's session is bound to.
@@ -275,6 +291,102 @@ export class DocumentsController {
     };
   }
 
+  @Post(':type/corrections')
+  @ApiOperation({
+    summary: 'Apply a correction instruction',
+    description:
+      'What you want different, and where — the whole document, one section, one feature or one module. Treated as a request about wording: it travels as evidence rather than as an instruction, and it cannot add scope, change a technology or change an hours figure. The request is recorded with what it targeted and what came of it.',
+  })
+  @ApiCreatedResponse({ description: 'The document, and anything the correction could not do.' })
+  async applyCorrection(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(applyCorrectionSchema)) body: ApplyCorrection,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot; limits: readonly string[] }> {
+    const result = await this.ai.applyCorrection(context(request), documentType(type), body);
+
+    return { document: result.snapshot, limits: result.limits };
+  }
+
+  @Get(':type/corrections')
+  @ApiOperation({ summary: 'Every correction asked for on this document, newest first' })
+  @ApiOkResponse({ description: 'The correction history.' })
+  async corrections(
+    @Param('type') type: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ corrections: readonly CorrectionInstruction[] }> {
+    return {
+      corrections: await this.documents.listCorrections(context(request), documentType(type)),
+    };
+  }
+
+  @Post(':type/features/:featureId/regenerate')
+  @ApiOperation({
+    summary: 'Rewrite one feature row’s wording',
+    description:
+      'Every other row is carried forward unchanged. Hours are never touched — they come from the estimate you approved, and the generation schema has nowhere to put one.',
+  })
+  @ApiCreatedResponse({ description: 'The document, with that row rewritten or proposed.' })
+  async regenerateFeature(
+    @Param('type') type: string,
+    @Param('featureId') featureId: string,
+    @Body(new ZodValidationPipe(regenerateSectionSchema)) body: RegenerateSection,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    const result = await this.ai.regenerateFeatures(
+      context(request),
+      documentType(type),
+      { featureIds: [featureId] },
+      body.expectedVersion,
+      body.useAi,
+      body.instruction,
+    );
+
+    return { document: result.snapshot };
+  }
+
+  @Post(':type/features/regenerate-module')
+  @ApiOperation({
+    summary: 'Rewrite every row in one module',
+    description: 'Rows in other modules are carried forward unchanged, hours included.',
+  })
+  @ApiCreatedResponse({ description: 'The document, with that module rewritten or proposed.' })
+  async regenerateModule(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(regenerateModuleSchema)) body: RegenerateModule,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    const result = await this.ai.regenerateFeatures(
+      context(request),
+      documentType(type),
+      { module: body.module },
+      body.expectedVersion,
+      body.useAi,
+      body.instruction,
+    );
+
+    return { document: result.snapshot };
+  }
+
+  @Post(':type/features/:featureId/proposal')
+  @ApiOperation({ summary: 'Decide what happens to a row’s suggested rewrite' })
+  @ApiCreatedResponse({ description: 'The document with the decision applied.' })
+  async resolveFeatureProposal(
+    @Param('type') type: string,
+    @Param('featureId') featureId: string,
+    @Body(new ZodValidationPipe(resolveFeatureProposalSchema)) body: ResolveFeatureProposal,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.resolveFeatureProposal(
+        context(request),
+        documentType(type),
+        featureId,
+        body,
+      ),
+    };
+  }
+
   @Get(':type/features')
   @ApiOperation({ summary: 'The feature rows' })
   @ApiOkResponse({ description: 'The rows, in display order.' })
@@ -420,6 +532,21 @@ export class DocumentsController {
     @Req() request: AuthenticatedRequest,
   ): Promise<{ document: DocumentSnapshot }> {
     return { document: await this.documents.reopen(context(request), documentType(type), body) };
+  }
+
+  @Post(':type/revise')
+  @ApiOperation({
+    summary: 'Start a new working version from an issued document',
+    description:
+      'The issued version is untouched and stays on the record as what was sent. A copy becomes the new working version, with every section marked as yours — somebody chose that text when they issued it.',
+  })
+  @ApiCreatedResponse({ description: 'The new working version.' })
+  async revise(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(reopenDocumentSchema)) body: ReopenDocument,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return { document: await this.documents.revise(context(request), documentType(type), body) };
   }
 
   @Post(':type/final')

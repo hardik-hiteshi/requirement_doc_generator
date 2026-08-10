@@ -1,6 +1,6 @@
 # Documents
 
-Phase 7. One engine, a composer per document, and five collections.
+Phase 7. One engine, a composer per document, and six collections.
 
 ## The shape
 
@@ -93,15 +93,118 @@ Feature rows are matched across regenerations on the estimate unit behind them,
 which is a row's identity. Descriptive edits carry forward; hours always come from
 the new composition, because they come from the estimate.
 
+## Correction instructions
+
+A correction is a recorded event, not a parameter. `document_corrections` holds the
+instruction, what it targeted (`DOCUMENT`, `SECTION`, `FEATURE`, `MODULE`), the
+version it was made against, the run that carried it out, the version it produced
+and its outcome (`APPLIED`, `PROPOSED`, `NOT_APPLIED`). The record is written
+_before_ the run, so a failed attempt still leaves the request on the record.
+
+The instruction travels in the **evidence** channel, wrapped in the same delimiters
+as a client's requirement text, and is never interpolated into a system prompt. The
+reasons it cannot reach upstream authority are structural rather than behavioural:
+
+- a section may cite only requirement ids the run was handed, and the citation
+  check rejects the rest before storage;
+- a technology outside the locked stack is a BLOCKING validation finding;
+- no generation schema has an effort field, so no instruction can produce hours;
+- nothing in the document engine writes to the baseline, the stack or the estimate.
+
+`correctionLimits` reports which parts of a request cannot have the effect the user
+expects — advisory, and deliberately not a filter: a request that mentions a
+technology in passing is legitimate, and refusing it would be worse than explaining
+the limit.
+
+`correctionAuditMetadata` carries the target, the instruction _length_ and the
+outcome. Never the text: a correction can quote a client or describe commercially
+sensitive scope, and an audit record has to be safe to hand over.
+
+## Targeted regeneration
+
+`regenerateFeatures` takes either feature ids or a module name. Rows outside the
+selection are carried forward field for field — wording, review status, hours. The
+model is asked for wording only, through the same `document.features` schema that
+has no effort field, and the engine copies effort, estimate-unit references and
+technologies from the row rather than from the response. A response that tries to
+return hours fails `.strict()` as a whole and the rows keep what they had.
+
+A row whose `reviewStatus` is not `GENERATED` gets a `proposed` object instead of a
+replacement, and a pending row proposal is an approval blocker exactly as a pending
+section proposal is.
+
+## The issued lifecycle
+
+`APPROVED` means agreed and unlocks dependents. `FINAL` means issued — the document
+left the building — and this project uses "issued" in the interface for exactly that
+reason. `DOCUMENT_TRANSITIONS.FINAL` is empty: an issued _version_ has no exits, and
+edits, regeneration, restoration and re-issuing are all refused against one.
+
+Revising an issued document creates a **new version**. The issued version keeps its
+`FINAL` status and its content in `document_versions`, which is what makes "what did
+the client receive?" answerable; the new version starts as a copy in `DRAFT` with
+every section marked `USER_EDITED`, because somebody chose that text when they
+issued it. `reopen` on an issued document routes to `revise`, so there is one
+mental model rather than two.
+
+An issued document is **not** relabelled `OUTDATED` when its inputs move. It is a
+record of what was sent, and it did not stop being that; the reasons are reported
+beside it so a reader can see the world moved on.
+
+Approval and issuing both refuse against stale upstream authority with
+`DOCUMENT_UPSTREAM_STALE`, checked before the transition table so the message names
+the real cause. Regeneration, by contrast, is _allowed_ on a stale approved
+document — it is the action the screen tells the user to take.
+
+## Traceability lives in the citation, not in the prose
+
+A section's body reads as a document a client could be sent. The requirement it came
+from is on `section.references`, which is what the interface shows under "Where this
+comes from" and what `technicalDocumentText` appends. Nothing writes `REQ-014:` into
+a sentence.
+
+Validation follows from that. Coverage is computed against the recorded citations,
+not against ids scraped out of the text — a scrape would report every requirement as
+uncovered the moment a model rewrote a section, since model prose carries no ids at
+all. The prose is still read, for the opposite question: an id that appears in it and
+is not in the baseline is a fabricated citation, and that is caught wherever it
+turns up.
+
+## Clipboard
+
+`clientDocumentText` builds the copy from titles and bodies, and nothing else — no
+requirement ids, no source references, no confidence figures, no section keys, no
+statuses. Empty sections are dropped rather than pasted with our own explanation
+underneath. A line opening with a citation prefix (`REQ-014: Staff must sign in.`)
+loses the prefix and keeps the sentence; an id written _inside_ a reviewer's own
+sentence is left alone and reported, because rewriting what somebody wrote to hide an
+identifier would change what the document says. `technicalDocumentText` adds requirement keys and is reached by a
+separate control, so the client-facing copy cannot accidentally become the technical
+one. `leaksInternalData` checks for the _shapes_ of our identifiers and is asserted
+by both the contract tests and the browser suite.
+
+Feature Listing copies the strict CSV verbatim from the same serialiser the export
+uses, so there is no second formatting path to drift.
+
+## Adding a source during review
+
+There is no uploader in the document engine, and no route that would accept one. The
+documents step offers "Add supporting source", which navigates to the
+requirement-input step — Phase 3's uploader, Phase 4's analysis, a re-approved
+baseline, and then Phase 7's outdated propagation. A document-local evidence source
+would be evidence nothing else in the application had agreed to.
+
 ## Storage
 
-Five collections. `documents` holds current state and the assessment approval reads.
+Six collections. `documents` holds current state and the assessment approval reads.
 `document_sections` and `document_features` are per-row, so editing one paragraph is
 a small write with its own optimistic concurrency. `document_versions` holds
 immutable snapshots — the one place content is denormalised, and the place where
 that is correct. `document_generation_runs` and `document_validation_results` are
 records: sizes, timings, prompt versions, severities. Never requirement text, never
-a prompt, never document prose.
+a prompt, never document prose. `document_corrections` holds what a reviewer asked
+for — project content under the same session authority as a requirement, and never
+copied into an audit record.
 
 A document is never embedded in the project record. Seven documents with fifteen
 sections and up to two thousand rows would make every unrelated project read

@@ -3,12 +3,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AcknowledgeFinding,
+  ApplyCorrection,
   ApproveDocument,
   DocumentType,
   GenerateDocument,
   MarkFinal,
   RegenerateSection,
   ReopenDocument,
+  ResolveFeatureProposal,
   ResolveSectionProposal,
   RestoreVersion,
   UpdateFeatureRow,
@@ -18,6 +20,7 @@ import { useCallback } from 'react';
 
 import {
   acknowledgeDocumentFinding,
+  applyCorrection,
   approveDocument,
   excludeRequirement,
   generateDocument,
@@ -27,8 +30,13 @@ import {
   readDocumentRun,
   readDocuments,
   readDocumentVersions,
+  readCorrections,
   readFeatureCsv,
   regenerateDocumentSection,
+  regenerateFeature,
+  regenerateModule,
+  resolveFeatureProposal,
+  reviseDocument,
   reopenDocument,
   resolveSectionProposal,
   restoreDocumentVersion,
@@ -195,6 +203,64 @@ export function useReopenDocument(type: DocumentType) {
 
 export function useMarkFinal(type: DocumentType) {
   return useDocumentMutation(type, (request: MarkFinal) => markDocumentFinal(type, request));
+}
+
+export function useCorrections(type: DocumentType) {
+  return useQuery({
+    queryKey: queryKeys.documentCorrections(type),
+    queryFn: () => readCorrections(type),
+    staleTime: 0,
+  });
+}
+
+/**
+ * Applying a correction.
+ *
+ * Returns the document *and* anything the correction could not do, so the screen
+ * can say "this part of what you asked cannot be done here, and here is where it
+ * is done" rather than quietly applying half of it.
+ */
+export function useApplyCorrection(type: DocumentType) {
+  const client = useQueryClient();
+
+  return useMutation({
+    mutationFn: (request: ApplyCorrection) => applyCorrection(type, request),
+    onSuccess: (view) => {
+      client.setQueryData(queryKeys.document(type), { document: view.document });
+      void client.invalidateQueries({ queryKey: queryKeys.documents });
+      void client.invalidateQueries({ queryKey: queryKeys.documentVersions(type) });
+      void client.invalidateQueries({ queryKey: queryKeys.documentCorrections(type) });
+      void client.invalidateQueries({ queryKey: queryKeys.documentCsv(type) });
+    },
+  });
+}
+
+export function useRegenerateFeature(type: DocumentType) {
+  return useDocumentMutation(
+    type,
+    ({ featureId, ...request }: RegenerateSection & { featureId: string }) =>
+      regenerateFeature(type, featureId, request),
+  );
+}
+
+export function useRegenerateModule(type: DocumentType) {
+  return useDocumentMutation(
+    type,
+    (request: { module: string; instruction?: string; useAi: boolean; expectedVersion: number }) =>
+      regenerateModule(type, request),
+  );
+}
+
+export function useResolveFeatureProposal(type: DocumentType) {
+  return useDocumentMutation(
+    type,
+    ({ featureId, ...request }: ResolveFeatureProposal & { featureId: string }) =>
+      resolveFeatureProposal(type, featureId, request),
+  );
+}
+
+export function useReviseDocument(type: DocumentType) {
+  return useDocumentMutation(type, (request: ReopenDocument) => reviseDocument(type, request));
 }
 
 export function useRestoreVersion(type: DocumentType) {

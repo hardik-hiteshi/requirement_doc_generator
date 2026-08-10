@@ -33,6 +33,9 @@ export const DOCUMENT_ERROR_CODES = {
   WRONG_DOCUMENT_SHAPE: 'WRONG_DOCUMENT_SHAPE',
   NO_FINDING_TO_ACKNOWLEDGE: 'NO_FINDING_TO_ACKNOWLEDGE',
   DOCUMENT_GENERATION_NOT_CONFIGURED: 'DOCUMENT_GENERATION_NOT_CONFIGURED',
+  DOCUMENT_UPSTREAM_STALE: 'DOCUMENT_UPSTREAM_STALE',
+  MODULE_NOT_FOUND: 'MODULE_NOT_FOUND',
+  NO_FEATURE_PROPOSAL: 'NO_FEATURE_PROPOSAL',
 } as const;
 
 export type DocumentErrorCode = (typeof DOCUMENT_ERROR_CODES)[keyof typeof DOCUMENT_ERROR_CODES];
@@ -68,4 +71,8 @@ export const DOCUMENT_ERROR_MESSAGES: Readonly<Record<DocumentErrorCode, string>
   NO_FINDING_TO_ACKNOWLEDGE: 'There is no warning of that kind to acknowledge.',
   DOCUMENT_GENERATION_NOT_CONFIGURED:
     'AI document writing is not switched on for this deployment. You can still write and edit every section yourself, validate it and approve it.',
+  DOCUMENT_UPSTREAM_STALE:
+    'Something this document is built on has changed since it was written, so it cannot be approved or issued as it stands. Read what changed, then regenerate or edit it — nothing has been altered for you.',
+  MODULE_NOT_FOUND: 'No features in this document belong to that module.',
+  NO_FEATURE_PROPOSAL: 'That feature has no suggested rewrite waiting.',
 };

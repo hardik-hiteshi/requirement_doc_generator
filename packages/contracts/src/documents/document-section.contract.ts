@@ -179,12 +179,10 @@ export type ResolveSectionProposal = z.infer<typeof resolveSectionProposalSchema
  * figure or reach an upstream artifact — those are all decisions with their own
  * authority, and a sentence in a text box does not carry it.
  */
-export const CORRECTION_LIMITS = { instruction: { max: 2_000 } } as const;
-
 export const regenerateSectionSchema = z
   .object({
     /** What the user wants different. Optional; regeneration works without it. */
-    instruction: z.string().max(CORRECTION_LIMITS.instruction.max).optional(),
+    instruction: z.string().max(2_000).optional(),
     useAi: z.boolean(),
     expectedVersion: z.number().int().nonnegative(),
   })

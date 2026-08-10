@@ -42,6 +42,19 @@ export const DOCUMENT_ROUTES = {
   resolveProposal: (type: string, sectionId: string) =>
     buildApiPath('projects/current/documents', type, 'sections', sectionId, 'proposal'),
 
+  /** POST — a correction instruction: what to change, and where. */
+  corrections: (type: string) => buildApiPath('projects/current/documents', type, 'corrections'),
+
+  /** POST — rewrite one feature row's wording. Effort is never touched. */
+  regenerateFeature: (type: string, featureId: string) =>
+    buildApiPath('projects/current/documents', type, 'features', featureId, 'regenerate'),
+  /** POST — rewrite every row in one module, and nothing else. */
+  regenerateModule: (type: string) =>
+    buildApiPath('projects/current/documents', type, 'features/regenerate-module'),
+  /** POST — decide what happens to a row's suggested rewrite. */
+  resolveFeatureProposal: (type: string, featureId: string) =>
+    buildApiPath('projects/current/documents', type, 'features', featureId, 'proposal'),
+
   /** GET — the feature rows, for a table view. */
   features: (type: string) => buildApiPath('projects/current/documents', type, 'features'),
   /** PATCH — edit a row's descriptive fields. Effort is not one of them. */
@@ -63,8 +76,16 @@ export const DOCUMENT_ROUTES = {
   approve: (type: string) => buildApiPath('projects/current/documents', type, 'approve'),
   /** POST — withdraw approval. Dependent documents go out of date. */
   reopen: (type: string) => buildApiPath('projects/current/documents', type, 'reopen'),
-  /** POST — mark issued. Irreversible; a revision means a new version. */
+  /** POST — mark issued. The issued version is immutable from then on. */
   markFinal: (type: string) => buildApiPath('projects/current/documents', type, 'final'),
+  /**
+   * POST — start a new working version from an issued document.
+   *
+   * The issued version is not touched. This is what "reopening" means once a
+   * document has left the building: a new version to work on, beside the record of
+   * what was sent.
+   */
+  revise: (type: string) => buildApiPath('projects/current/documents', type, 'revise'),
 
   /** GET — the current or most recent generation run. */
   currentRun: (type: string) => buildApiPath('projects/current/documents', type, 'run/current'),

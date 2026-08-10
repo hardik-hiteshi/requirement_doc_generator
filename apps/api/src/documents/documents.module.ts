@@ -16,6 +16,8 @@ import { UpstreamReader } from './upstream.reader';
 import { FeatureListingComposer } from './composers/feature-listing.composer';
 import { UnderstandingComposer } from './composers/understanding.composer';
 import {
+  DocumentCorrectionRecord,
+  DocumentCorrectionSchema,
   DocumentFeatureRecord,
   DocumentFeatureSchema,
   DocumentRecord,
@@ -62,6 +64,7 @@ import {
       { name: DocumentVersionRecord.name, schema: DocumentVersionSchema },
       { name: DocumentRunRecord.name, schema: DocumentRunSchema },
       { name: DocumentValidationRecord.name, schema: DocumentValidationSchema },
+      { name: DocumentCorrectionRecord.name, schema: DocumentCorrectionSchema },
     ]),
   ],
   controllers: [DocumentsController],

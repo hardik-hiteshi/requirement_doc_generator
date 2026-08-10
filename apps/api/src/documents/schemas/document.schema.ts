@@ -1,5 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import {
+  CORRECTION_OUTCOMES,
+  CORRECTION_TARGET_KINDS,
   DOCUMENT_RUN_KINDS,
   DOCUMENT_RUN_STATUSES,
   DOCUMENT_STATUSES,
@@ -280,6 +282,18 @@ export class DocumentFeatureRecord {
   @Prop({ type: Number, required: true, default: 0 })
   order!: number;
 
+  /**
+   * A suggested rewrite of the descriptive fields, waiting for a decision.
+   *
+   * Descriptive only. There is deliberately no proposed effort: hours come from
+   * the approved estimate, and a document has nothing to propose about them.
+   */
+  @Prop({ type: Object, required: false, default: null })
+  proposed!: Record<string, string> | null;
+
+  @Prop({ type: Date, required: false })
+  proposedAt?: Date;
+
   createdAt!: Date;
   updatedAt!: Date;
 }
@@ -436,6 +450,70 @@ export class DocumentRunRecord {
 export type DocumentRunDocument = HydratedDocument<DocumentRunRecord>;
 export const DocumentRunSchema = SchemaFactory.createForClass(DocumentRunRecord);
 DocumentRunSchema.index({ projectId: 1, type: 1, startedAt: -1 });
+
+/* ------------------------------------------------------------ corrections */
+
+/**
+ * What a reviewer asked to be changed, and what came of it.
+ *
+ * The instruction text lives here because it is the user's own request and the
+ * version history is unreadable without it — "why does version 4 differ from
+ * version 3?" is answered by this row. It is project content, held under the same
+ * session authority as a requirement, and it never reaches an audit record or a
+ * log: `correctionAuditMetadata` carries a length and an outcome instead.
+ */
+@Schema({
+  collection: 'document_corrections',
+  timestamps: { createdAt: 'createdAt', updatedAt: false },
+  id: false,
+  versionKey: false,
+})
+export class DocumentCorrectionRecord {
+  @Prop({ type: String, required: true, unique: true, index: true })
+  correctionId!: string;
+
+  @Prop({ type: String, required: true, index: true })
+  projectId!: string;
+
+  @Prop({ type: String, required: true, enum: DOCUMENT_TYPES, index: true })
+  type!: string;
+
+  @Prop({ type: String, required: true, enum: CORRECTION_TARGET_KINDS })
+  targetKind!: string;
+
+  @Prop({ type: String, required: false, default: '' })
+  targetKey!: string;
+
+  @Prop({ type: String, required: true })
+  instruction!: string;
+
+  @Prop({ type: String, required: true, default: 'USER' })
+  actor!: string;
+
+  @Prop({ type: Number, required: true })
+  documentVersion!: number;
+
+  @Prop({ type: Number, required: false })
+  resultingVersion?: number;
+
+  @Prop({ type: String, required: false, default: '' })
+  runId!: string;
+
+  @Prop({ type: String, required: true, enum: CORRECTION_OUTCOMES })
+  outcome!: string;
+
+  @Prop({ type: Boolean, required: true, default: false })
+  producedProposal!: boolean;
+
+  @Prop({ type: Boolean, required: true, default: false })
+  usedAi!: boolean;
+
+  createdAt!: Date;
+}
+
+export type DocumentCorrectionDocument = HydratedDocument<DocumentCorrectionRecord>;
+export const DocumentCorrectionSchema = SchemaFactory.createForClass(DocumentCorrectionRecord);
+DocumentCorrectionSchema.index({ projectId: 1, type: 1, createdAt: -1 });
 
 /* ---------------------------------------------------- validation results */
 

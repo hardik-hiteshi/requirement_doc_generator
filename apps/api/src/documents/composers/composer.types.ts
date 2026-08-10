@@ -102,7 +102,23 @@ export interface ComposedContent {
 
 export interface ValidationInput {
   readonly context: UpstreamContext;
-  readonly sections: readonly { readonly key: string; readonly body: string }[];
+  /**
+   * Sections with the citations the application recorded for them.
+   *
+   * Coverage is checked against `references`, not against ids scraped from the
+   * prose. A client-facing document does not carry requirement ids in its text —
+   * and once a model has rewritten a section, there are none there to find, so a
+   * scrape would report every requirement as uncovered.
+   *
+   * The prose is still read, for the opposite purpose: an id that appears in it and
+   * is *not* in the baseline is a fabricated citation, and that has to be caught
+   * wherever it turns up.
+   */
+  readonly sections: readonly {
+    readonly key: string;
+    readonly body: string;
+    readonly references: readonly string[];
+  }[];
   readonly features: readonly FeatureRow[];
   /** Requirements a person deliberately left out of this document. */
   readonly excludedRequirementIds: readonly string[];

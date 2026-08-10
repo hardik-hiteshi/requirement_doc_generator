@@ -103,10 +103,38 @@ export const featureRowSchema = z
     mappingConfidence: z.number().min(0).max(1),
     notes: z.string().max(FEATURE_LIMITS.notes.max),
     order: z.number().int().nonnegative(),
+    /**
+     * A rewrite waiting for a decision, on a row somebody edited.
+     *
+     * The same rule as a prose section: a regeneration that would replace a
+     * description a person wrote produces a proposal instead. Only the
+     * descriptive fields can ever appear here — there is no proposed effort,
+     * because effort is not this document's to propose.
+     */
+    proposed: z
+      .object({
+        module: z.string().max(FEATURE_LIMITS.module.max),
+        submodule: z.string().max(FEATURE_LIMITS.submodule.max),
+        screen: z.string().max(FEATURE_LIMITS.screen.max),
+        description: z.string().max(FEATURE_LIMITS.description.max),
+      })
+      .strict()
+      .optional(),
+    proposedAt: z.string().datetime().optional(),
   })
   .strict();
 
 export type FeatureRow = z.infer<typeof featureRowSchema>;
+
+/** Whether a row is waiting for a decision about a suggested rewrite. */
+export function hasFeatureProposal(row: Pick<FeatureRow, 'proposed'>): boolean {
+  return row.proposed !== undefined;
+}
+
+/** Whether a regeneration may overwrite this row's wording without asking. */
+export function mayReplaceFeatureDirectly(row: Pick<FeatureRow, 'reviewStatus'>): boolean {
+  return row.reviewStatus === 'GENERATED';
+}
 
 /** Hours across every role on a row, rounded the way the estimate rounds. */
 export function featureTotalHours(effort: Readonly<Record<string, number>>): number {
@@ -359,6 +387,19 @@ export const EDITABLE_FEATURE_FIELDS = [
 ] as const;
 
 export type EditableFeatureField = (typeof EDITABLE_FEATURE_FIELDS)[number];
+
+export const resolveFeatureProposalSchema = z
+  .object({
+    decision: z.enum(['KEEP_CURRENT', 'ACCEPT_GENERATED_REVISION', 'EDIT_GENERATED_REVISION']),
+    module: z.string().max(FEATURE_LIMITS.module.max).optional(),
+    submodule: z.string().max(FEATURE_LIMITS.submodule.max).optional(),
+    screen: z.string().max(FEATURE_LIMITS.screen.max).optional(),
+    description: z.string().max(FEATURE_LIMITS.description.max).optional(),
+    expectedVersion: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type ResolveFeatureProposal = z.infer<typeof resolveFeatureProposalSchema>;
 
 export const updateFeatureRowSchema = z
   .object({

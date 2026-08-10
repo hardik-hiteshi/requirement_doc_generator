@@ -85,6 +85,47 @@ export function toFeatureRow(record: DocumentFeatureDocument): FeatureRow {
     mappingConfidence: record.mappingConfidence,
     notes: record.notes,
     order: record.order,
+    ...(record.proposed ? { proposed: record.proposed as FeatureRow['proposed'] } : {}),
+    ...(record.proposedAt ? { proposedAt: record.proposedAt.toISOString() } : {}),
+  };
+}
+
+/**
+ * A wire row back into a storable record.
+ *
+ * Explicit rather than a spread, because the two shapes disagree about time: the
+ * wire carries `proposedAt` as an ISO string and the record as a `Date`. Spreading
+ * one into the other type-checks nowhere and, worse, would store a string in a
+ * date field if the types were loose.
+ */
+export function toFeatureRecord(
+  row: FeatureRow,
+  documentVersion: number,
+  overrides: {
+    readonly featureId?: string;
+    readonly proposed?: Record<string, string> | null;
+    readonly proposedAt?: Date;
+  } = {},
+): Record<string, unknown> {
+  return {
+    featureId: overrides.featureId ?? row.featureId,
+    documentVersion,
+    requirementIds: [...row.requirementIds],
+    module: row.module,
+    submodule: row.submodule,
+    screen: row.screen,
+    description: row.description,
+    effort: { ...row.effort },
+    totalHours: row.totalHours,
+    estimateUnitIds: [...row.estimateUnitIds],
+    technologyIds: [...row.technologyIds],
+    references: row.references,
+    reviewStatus: row.reviewStatus,
+    mappingConfidence: row.mappingConfidence,
+    notes: row.notes,
+    order: row.order,
+    proposed: overrides.proposed ?? null,
+    ...(overrides.proposedAt ? { proposedAt: overrides.proposedAt } : {}),
   };
 }
 

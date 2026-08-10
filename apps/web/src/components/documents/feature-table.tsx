@@ -12,7 +12,13 @@ import {
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@wdrg/ui';
 import { useState } from 'react';
 
-import { useFeatureCsv, useUpdateFeature } from '@/hooks/use-documents';
+import {
+  useFeatureCsv,
+  useRegenerateFeature,
+  useRegenerateModule,
+  useResolveFeatureProposal,
+  useUpdateFeature,
+} from '@/hooks/use-documents';
 
 /**
  * The Feature Listing as a table, which is how anybody actually reviews one.
@@ -37,10 +43,16 @@ export function FeatureTable({
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const [showCsv, setShowCsv] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [module, setModule] = useState('');
   const update = useUpdateFeature(type);
+  const regenerateFeature = useRegenerateFeature(type);
+  const regenerateModule = useRegenerateModule(type);
+  const resolve = useResolveFeatureProposal(type);
   const csv = useFeatureCsv(type, showCsv);
 
   const coverage = document.coverage;
+  const modules = [...new Set(document.features.map((row) => row.module))].sort();
 
   return (
     <Card role="region" aria-label="Feature listing">
@@ -120,7 +132,21 @@ export function FeatureTable({
                       { onSuccess: () => setEditing(null) },
                     )
                   }
-                  saving={update.isPending}
+                  onRegenerate={() =>
+                    regenerateFeature.mutate({
+                      featureId: row.featureId,
+                      useAi: true,
+                      expectedVersion: document.recordVersion,
+                    })
+                  }
+                  onResolve={(decision) =>
+                    resolve.mutate({
+                      featureId: row.featureId,
+                      decision,
+                      expectedVersion: document.recordVersion,
+                    })
+                  }
+                  saving={update.isPending || regenerateFeature.isPending || resolve.isPending}
                 />
               ))}
             </tbody>
@@ -135,6 +161,51 @@ export function FeatureTable({
           <p role="alert" className="text-sm text-danger" data-testid="feature-error">
             {update.error.message}
           </p>
+        ) : null}
+
+        {modules.length > 0 ? (
+          <div className="flex flex-col gap-2 rounded-md border border-border p-3">
+            <label className="flex flex-col gap-1 text-xs">
+              <span className="font-medium">Rewrite one module</span>
+              <span className="text-muted">
+                Only that module’s rows are rewritten. Everything else — wording, review state and
+                every hours figure — is carried forward exactly as it is.
+              </span>
+              <select
+                value={module}
+                onChange={(event) => setModule(event.target.value)}
+                className="rounded-md border border-border px-2 py-1 text-sm"
+                aria-label="Module to rewrite"
+                data-testid="module-select"
+              >
+                <option value="">Choose a module</option>
+                {modules.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <Button
+              variant="secondary"
+              className="self-start"
+              disabled={module.length === 0 || regenerateModule.isPending}
+              data-testid="regenerate-module"
+              onClick={() =>
+                regenerateModule.mutate(
+                  { module, useAi: true, expectedVersion: document.recordVersion },
+                  { onSuccess: () => setModule('') },
+                )
+              }
+            >
+              Rewrite this module
+            </Button>
+            {regenerateModule.isError ? (
+              <p role="alert" className="text-xs text-danger" data-testid="module-error">
+                {regenerateModule.error.message}
+              </p>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="flex flex-col gap-2">
@@ -156,16 +227,23 @@ export function FeatureTable({
                 {csv.data?.csv ?? 'Loading…'}
               </pre>
               {csv.data ? (
-                <Button
-                  variant="secondary"
-                  className="self-start"
-                  data-testid="copy-csv"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(csv.data.csv);
-                  }}
-                >
-                  Copy to clipboard
-                </Button>
+                <>
+                  <Button
+                    variant="secondary"
+                    className="self-start"
+                    data-testid="copy-csv"
+                    onClick={() => {
+                      void navigator.clipboard?.writeText(csv.data.csv).then(() => setCopied(true));
+                    }}
+                  >
+                    Copy to clipboard
+                  </Button>
+                  <p className="text-xs text-muted" data-testid="csv-copy-note">
+                    {copied
+                      ? 'Copied — the eight columns exactly, every value quoted.'
+                      : 'Copies the export exactly: eight columns, in order, every value quoted.'}
+                  </p>
+                </>
               ) : null}
             </div>
           ) : null}
@@ -181,6 +259,8 @@ function FeatureRowView({
   onEdit,
   onCancel,
   onSave,
+  onRegenerate,
+  onResolve,
   saving,
 }: {
   readonly row: FeatureRow;
@@ -193,6 +273,10 @@ function FeatureRowView({
     screen: string;
     description: string;
   }) => void;
+  readonly onRegenerate: () => void;
+  readonly onResolve: (
+    decision: 'KEEP_CURRENT' | 'ACCEPT_GENERATED_REVISION' | 'EDIT_GENERATED_REVISION',
+  ) => void;
   readonly saving: boolean;
 }) {
   const [module, setModule] = useState(row.module);
@@ -281,13 +365,51 @@ function FeatureRowView({
       </td>
       <td className="p-2 text-xs text-muted">{row.requirementIds.join(', ')}</td>
       <td className="p-2">
-        <Button
-          variant="secondary"
-          onClick={onEdit}
-          data-testid={`feature-edit-button-${row.featureId}`}
-        >
-          Edit
-        </Button>
+        <div className="flex flex-col gap-1">
+          <Button
+            variant="secondary"
+            onClick={onEdit}
+            data-testid={`feature-edit-button-${row.featureId}`}
+          >
+            Edit
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={onRegenerate}
+            disabled={saving}
+            data-testid={`feature-regenerate-${row.featureId}`}
+          >
+            Rewrite
+          </Button>
+          {row.proposed ? (
+            <div
+              className="flex flex-col gap-1 rounded-md border border-warning p-2"
+              data-testid={`feature-proposal-${row.featureId}`}
+            >
+              <p className="text-xs font-medium">Suggested wording</p>
+              <p className="text-xs text-muted">
+                {row.proposed.module} — {row.proposed.screen || 'no screen'}
+              </p>
+              <p className="text-xs text-muted">{row.proposed.description}</p>
+              <Button
+                variant="secondary"
+                disabled={saving}
+                data-testid={`feature-keep-${row.featureId}`}
+                onClick={() => onResolve('KEEP_CURRENT')}
+              >
+                Keep mine
+              </Button>
+              <Button
+                variant="secondary"
+                disabled={saving}
+                data-testid={`feature-accept-${row.featureId}`}
+                onClick={() => onResolve('ACCEPT_GENERATED_REVISION')}
+              >
+                Use the suggestion
+              </Button>
+            </div>
+          ) : null}
+        </div>
       </td>
     </tr>
   );

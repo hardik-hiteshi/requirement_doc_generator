@@ -331,3 +331,52 @@ export function registerInventedContent(
     }),
   );
 }
+
+/**
+ * A model that tries to set hours.
+ *
+ * `document.features` has no effort field, so this response fails validation and
+ * the run falls back to the wording already on the rows. Registered by the test
+ * that proves an attempted effort mutation cannot land.
+ */
+export function registerEffortMutatingFeatures(
+  provider: DeterministicProvider,
+  requirementKeys: readonly string[],
+): void {
+  provider.register(
+    'document.features',
+    JSON.stringify({
+      features: requirementKeys.map((key) => ({
+        module: 'Hijacked',
+        submodule: '',
+        screen: '',
+        description: 'Rewritten by a model that also tried to reprice the work.',
+        requirementIds: [key],
+        /* None of these exist in the schema. All of them are refused. */
+        effort: { BACKEND: 999, FRONTEND: 999, QA: 999 },
+        totalHours: 2997,
+        estimatedHours: 2997,
+      })),
+    }),
+  );
+}
+
+/** A model that renames a module, which is a legitimate correction outcome. */
+export function registerRenamedModule(
+  provider: DeterministicProvider,
+  requirementKeys: readonly string[],
+  module: string,
+): void {
+  provider.register(
+    'document.features',
+    JSON.stringify({
+      features: requirementKeys.map((key) => ({
+        module,
+        submodule: '',
+        screen: '',
+        description: 'A user performs the action | The system records what happened',
+        requirementIds: [key],
+      })),
+    }),
+  );
+}

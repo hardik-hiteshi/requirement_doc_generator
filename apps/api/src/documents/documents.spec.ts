@@ -122,11 +122,17 @@ describe('UnderstandingComposer', () => {
     expect(integrations.references).toEqual([]);
   });
 
-  it('cites the requirement key and carries its source location', () => {
+  /*
+   * The citation is a reference, not a string in the prose. A client-facing copy of
+   * this document must not carry our identifiers, so the id lives here and the body
+   * reads as a sentence.
+   */
+  it('records the requirement as a citation and keeps it out of the prose', () => {
     const { sections } = composer.compose(context());
     const scope = sections.find((section) => section.key === 'functional-scope')!;
 
-    expect(scope.body).toContain('REQ-001');
+    expect(scope.body).toContain('Staff must record their weekly timesheets.');
+    expect(scope.body).not.toContain('REQ-001');
     expect(scope.references[0]).toMatchObject({
       kind: 'REQUIREMENT',
       id: 'REQ-001',
@@ -151,8 +157,19 @@ describe('UnderstandingComposer', () => {
   });
 
   describe('validation', () => {
+    /**
+     * A section as the engine passes it: the prose, plus the citations the
+     * application recorded for it. Defaulted from any ids in the body, so a test
+     * that writes `REQ-001` in the text gets the citation too.
+     */
+    const section = (key: string, body: string, references?: string[]) => ({
+      key,
+      body,
+      references: references ?? [...body.matchAll(/\bREQ-\d{3,5}\b/g)].map((match) => match[0]),
+    });
+
     const validate = (
-      sections: { key: string; body: string }[],
+      sections: { key: string; body: string; references: readonly string[] }[],
       overrides: Partial<UpstreamContext> = {},
       baselineCurrent = true,
     ) =>
@@ -166,8 +183,8 @@ describe('UnderstandingComposer', () => {
 
     it('passes a document that cites only approved requirements', () => {
       const findings = validate([
-        { key: 'project-overview', body: 'A timesheet system.' },
-        { key: 'functional-scope', body: 'REQ-001: Staff must record their weekly timesheets.' },
+        section('project-overview', 'A timesheet system.'),
+        section('functional-scope', 'REQ-001: Staff must record their weekly timesheets.'),
       ]);
 
       expect(findings.filter((finding) => finding.severity === 'BLOCKING')).toEqual([]);
@@ -178,8 +195,8 @@ describe('UnderstandingComposer', () => {
 
     it('blocks a citation to a requirement that does not exist', () => {
       const findings = validate([
-        { key: 'project-overview', body: 'A timesheet system.' },
-        { key: 'functional-scope', body: 'REQ-999: Something nobody asked for.' },
+        section('project-overview', 'A timesheet system.'),
+        section('functional-scope', 'REQ-999: Something nobody asked for.'),
       ]);
 
       expect(
@@ -194,8 +211,8 @@ describe('UnderstandingComposer', () => {
 
       const findings = validate(
         [
-          { key: 'project-overview', body: 'A timesheet system.' },
-          { key: 'functional-scope', body: 'REQ-001 and REQ-002.' },
+          section('project-overview', 'A timesheet system.'),
+          section('functional-scope', 'REQ-001 and REQ-002.'),
         ],
         { allRequirements: [requirement(), rejected] },
       );
@@ -211,8 +228,8 @@ describe('UnderstandingComposer', () => {
     it('blocks a stale baseline', () => {
       const findings = validate(
         [
-          { key: 'project-overview', body: 'A timesheet system.' },
-          { key: 'functional-scope', body: 'REQ-001.' },
+          section('project-overview', 'A timesheet system.'),
+          section('functional-scope', 'REQ-001.'),
         ],
         {},
         false,
@@ -228,8 +245,8 @@ describe('UnderstandingComposer', () => {
       ['built with AI-assisted development', 'methodology'],
     ])('blocks an invented commitment: %s', (phrase) => {
       const findings = validate([
-        { key: 'project-overview', body: `A timesheet system that is ${phrase}.` },
-        { key: 'functional-scope', body: 'REQ-001.' },
+        section('project-overview', `A timesheet system that is ${phrase}.`),
+        section('functional-scope', 'REQ-001.'),
       ]);
 
       expect(
@@ -241,9 +258,9 @@ describe('UnderstandingComposer', () => {
 
     it('blocks a requirement claimed as both in scope and out of scope', () => {
       const findings = validate([
-        { key: 'project-overview', body: 'A timesheet system.' },
-        { key: 'functional-scope', body: 'REQ-001 is included.' },
-        { key: 'out-of-scope', body: 'REQ-001 is not included.' },
+        section('project-overview', 'A timesheet system.'),
+        section('functional-scope', 'REQ-001 is included.'),
+        section('out-of-scope', 'REQ-001 is not included.'),
       ]);
 
       expect(
@@ -255,8 +272,8 @@ describe('UnderstandingComposer', () => {
 
     it('blocks an empty required section', () => {
       const findings = validate([
-        { key: 'project-overview', body: '  ' },
-        { key: 'functional-scope', body: 'REQ-001.' },
+        section('project-overview', '  '),
+        section('functional-scope', 'REQ-001.'),
       ]);
 
       expect(
@@ -272,8 +289,8 @@ describe('UnderstandingComposer', () => {
           requirements: [requirement(), requirement({ id: 'req_2', key: 'REQ-002' })],
         }),
         sections: [
-          { key: 'project-overview', body: 'A timesheet system.' },
-          { key: 'functional-scope', body: 'REQ-001 only.' },
+          section('project-overview', 'A timesheet system.'),
+          section('functional-scope', 'REQ-001 only.'),
         ],
         features: [],
         excludedRequirementIds: [],

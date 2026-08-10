@@ -1,7 +1,9 @@
 import {
   DOCUMENT_ROUTES,
   type AcknowledgeFinding,
+  type ApplyCorrection,
   type ApproveDocument,
+  type CorrectionInstruction,
   type DocumentDiff,
   type DocumentRun,
   type DocumentSnapshot,
@@ -13,6 +15,7 @@ import {
   type MarkFinal,
   type RegenerateSection,
   type ReopenDocument,
+  type ResolveFeatureProposal,
   type ResolveSectionProposal,
   type RestoreVersion,
   type UpdateFeatureRow,
@@ -113,6 +116,69 @@ export async function resolveSectionProposal(
   request: ResolveSectionProposal,
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.resolveProposal(type, sectionId), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function applyCorrection(
+  type: DocumentType,
+  request: ApplyCorrection,
+): Promise<DocumentView & { limits: string[] }> {
+  return apiFetch<DocumentView & { limits: string[] }>(DOCUMENT_ROUTES.corrections(type), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function readCorrections(
+  type: DocumentType,
+): Promise<{ corrections: CorrectionInstruction[] }> {
+  return apiFetch<{ corrections: CorrectionInstruction[] }>(DOCUMENT_ROUTES.corrections(type));
+}
+
+export async function regenerateFeature(
+  type: DocumentType,
+  featureId: string,
+  request: RegenerateSection,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.regenerateFeature(type, featureId), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function regenerateModule(
+  type: DocumentType,
+  request: { module: string; instruction?: string; useAi: boolean; expectedVersion: number },
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.regenerateModule(type), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function resolveFeatureProposal(
+  type: DocumentType,
+  featureId: string,
+  request: ResolveFeatureProposal,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.resolveFeatureProposal(type, featureId), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function reviseDocument(
+  type: DocumentType,
+  request: ReopenDocument,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.revise(type), {
     method: 'POST',
     body: request,
     headers: mutationHeaders(),

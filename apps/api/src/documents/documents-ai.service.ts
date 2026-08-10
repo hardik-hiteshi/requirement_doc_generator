@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
+  correctionLimits,
   DOCUMENT_ERROR_CODES,
   DOCUMENT_SHAPE_BY_TYPE,
   EVIDENCE_NOTICE,
@@ -12,6 +13,7 @@ import {
   type DocumentSnapshot,
   type DocumentType,
   type FeatureRow,
+  type ApplyCorrection,
   type GenerateDocument,
   type RequirementItem,
   type ValidationFinding,
@@ -96,6 +98,7 @@ export class DocumentsAiService {
     context: DocumentContext,
     type: DocumentType,
     request: GenerateDocument,
+    instruction?: string,
   ): Promise<DocumentSnapshot> {
     if (request.useAi && !this.provider) {
       throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_GENERATION_NOT_CONFIGURED, 503);
@@ -140,8 +143,8 @@ export class DocumentsAiService {
       try {
         const written =
           DOCUMENT_SHAPE_BY_TYPE[type] === 'ROWS'
-            ? await this.writeFeatures(context, upstream, deterministic, model)
-            : await this.writeSections(context, upstream, deterministic, model);
+            ? await this.writeFeatures(context, upstream, deterministic, model, instruction)
+            : await this.writeSections(context, upstream, deterministic, model, instruction);
 
         content = written.content;
         outputCharacters = written.outputCharacters;
@@ -330,6 +333,238 @@ export class DocumentsAiService {
     return this.documents.validate(context, type, findings, true);
   }
 
+  /**
+   * Rewrite the wording of selected feature rows.
+   *
+   * The model is asked for module, submodule, screen and description for the
+   * requirements behind the selected rows — nothing else, because its schema has
+   * nothing else. Hours, estimate units and technologies are not sent to it and are
+   * not read back from it; the engine carries them forward from the row.
+   *
+   * So a model response that tries to return effort fails `.strict()` validation
+   * and the run falls back to the wording the rows already had. There is no path in
+   * which a document rewrite changes an approved figure.
+   */
+  async regenerateFeatures(
+    context: DocumentContext,
+    type: DocumentType,
+    selection: { readonly featureIds?: readonly string[]; readonly module?: string },
+    expectedVersion: number,
+    useAi: boolean,
+    instruction?: string,
+  ): Promise<{ snapshot: DocumentSnapshot; proposed: boolean; runId: string }> {
+    if (useAi && !this.provider) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_GENERATION_NOT_CONFIGURED, 503);
+    }
+
+    const upstream = await this.documents.readUpstream(context);
+    const runId = DocumentsRepository.newId('drun');
+
+    await this.repository.createRun({
+      runId,
+      projectId: context.projectId,
+      type,
+      kind: 'SECTION_REGENERATION',
+      status: 'RUNNING',
+      provider: useAi && this.provider ? this.provider.name : 'none',
+      modelName: useAi ? this.modelName() : 'none',
+      promptVersions: useAi ? { 'document.features': 'v1' } : {},
+      sectionKeys: selection.module ? [selection.module] : [...(selection.featureIds ?? [])],
+      startedAt: new Date(),
+      deterministicOnly: !useAi,
+    });
+
+    const named = new Map<
+      string,
+      { module: string; submodule: string; screen: string; description: string }
+    >();
+
+    if (useAi && this.provider) {
+      const known = new Set(upstream.context.requirements.map((requirement) => requirement.key));
+
+      const outcome = await this.runner.run(this.provider, {
+        taskId: 'document.features',
+        profile: resolveModelProfile(this.config),
+        model: this.modelName(),
+        evidence: [
+          ...upstream.context.requirements.map((requirement) => ({
+            blockId: requirement.key,
+            text: `${requirement.title}\n${requirement.statement}`,
+          })),
+          ...(instruction
+            ? [
+                {
+                  blockId: 'user-correction',
+                  text: `A note from the person reviewing this document about how they would like these features worded. ${EVIDENCE_NOTICE}\n\n${instruction}`,
+                },
+              ]
+            : []),
+        ],
+        priorResults: [
+          `Project type: ${upstream.context.projectTypes.join(', ') || 'unspecified'}`,
+          `This project ${this.hasInterface(upstream) ? 'has a user interface' : 'has no user interface, so every Screen must be empty'}.`,
+          'Return wording only. Hours are not yours to set and there is nowhere to put them.',
+        ].join('\n'),
+        schema: documentFeaturesSchema,
+        semantic: {
+          validate: (value) =>
+            value.features
+              .flatMap((feature) => feature.requirementIds)
+              .filter((id) => !known.has(id))
+              .map((id) => ({
+                path: `features.${id}`,
+                message: `"${id}" is not a requirement you were given.`,
+                reason: 'hallucinated_source_reference' as const,
+              })),
+        },
+        correlationId: context.correlationId,
+      });
+
+      if (outcome.ok) {
+        /*
+         * Joined on the estimate units behind a row, which is a row's identity.
+         * A wording suggestion for requirements with no row is simply unused —
+         * it would otherwise be a feature with no hours, which is scope with no
+         * price.
+         */
+        const unitsByRequirement = new Map<string, string>();
+
+        for (const row of await this.documents.currentFeatures(context, type)) {
+          for (const requirementId of row.requirementIds) {
+            unitsByRequirement.set(requirementId, row.estimateUnitIds.join('|'));
+          }
+        }
+
+        for (const feature of outcome.value.features) {
+          for (const requirementId of feature.requirementIds) {
+            const unitKey = unitsByRequirement.get(requirementId);
+
+            if (unitKey) {
+              named.set(unitKey, {
+                module: feature.module,
+                submodule: feature.submodule,
+                screen: this.hasInterface(upstream) ? feature.screen : '',
+                description: feature.description.includes('|')
+                  ? feature.description
+                  : joinDetailPoints([feature.description]),
+              });
+            }
+          }
+        }
+      }
+    }
+
+    const result = await this.documents.regenerateFeatures(
+      context,
+      type,
+      selection,
+      expectedVersion,
+      named,
+      instruction,
+    );
+
+    await this.repository.finishRun(runId, { status: 'COMPLETED', completedAt: new Date() });
+
+    return { snapshot: result.snapshot, proposed: result.proposed, runId };
+  }
+
+  /**
+   * Applies a correction instruction, whatever it targets.
+   *
+   * One entry point for all four target kinds, because a correction is one kind of
+   * event: a person asked for something different, it was recorded, a run carried
+   * it out, and the outcome went back on the record. The routing below is about
+   * *what* to regenerate, not about what a correction is.
+   */
+  async applyCorrection(
+    context: DocumentContext,
+    type: DocumentType,
+    request: ApplyCorrection,
+  ): Promise<{ snapshot: DocumentSnapshot; limits: readonly string[] }> {
+    const current = await this.documents.currentDocument(context, type);
+
+    if (!current) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_NOT_GENERATED, 422);
+    }
+
+    const correctionId = await this.documents.openCorrection(
+      context,
+      type,
+      request,
+      current.version,
+    );
+
+    /*
+     * Reported, never enforced by filtering. The structural defences are elsewhere;
+     * this tells the user which part of their request will not have the effect they
+     * expect, instead of silently doing half of it.
+     */
+    const limits = correctionLimits(request.instruction);
+
+    try {
+      let snapshot: DocumentSnapshot;
+      let proposed = false;
+      let runId: string | undefined;
+
+      if (request.targetKind === 'SECTION') {
+        const sections = await this.documents.currentSections(context, type);
+        const section = sections.find((candidate) => candidate.key === request.targetKey);
+
+        if (!section) {
+          throw new DocumentError(DOCUMENT_ERROR_CODES.SECTION_NOT_FOUND, 404);
+        }
+
+        proposed = isSectionProtected(section.origin);
+        snapshot = await this.regenerateSection(
+          context,
+          type,
+          section.sectionId,
+          request.expectedVersion,
+          request.useAi,
+          request.instruction,
+        );
+      } else if (request.targetKind === 'FEATURE' || request.targetKind === 'MODULE') {
+        const result = await this.regenerateFeatures(
+          context,
+          type,
+          request.targetKind === 'MODULE'
+            ? { module: request.targetKey }
+            : { featureIds: [request.targetKey!] },
+          request.expectedVersion,
+          request.useAi,
+          request.instruction,
+        );
+
+        snapshot = result.snapshot;
+        proposed = result.proposed;
+        runId = result.runId;
+      } else {
+        snapshot = await this.generate(
+          context,
+          type,
+          {
+            useAi: request.useAi,
+            reason: 'A correction was applied',
+            expectedVersion: request.expectedVersion,
+          },
+          request.instruction,
+        );
+        proposed = snapshot.sections.some((section) => section.proposedBody !== undefined);
+      }
+
+      await this.documents.closeCorrection(correctionId, proposed ? 'PROPOSED' : 'APPLIED', {
+        resultingVersion: snapshot.version,
+        ...(runId ? { runId } : {}),
+      });
+
+      return { snapshot, limits };
+    } catch (cause) {
+      /* The request stays on the record as not applied, which is the useful fact. */
+      await this.documents.closeCorrection(correctionId, 'NOT_APPLIED', {});
+      throw cause;
+    }
+  }
+
   /* ------------------------------------------------------------ internals */
 
   /** Prose for each section, one task per section. */
@@ -338,6 +573,7 @@ export class DocumentsAiService {
     upstream: UpstreamSnapshot,
     deterministic: ComposedContent,
     model: string,
+    instruction?: string,
   ): Promise<{ content: ComposedContent; outputCharacters: number }> {
     const provider = this.provider;
 
@@ -374,10 +610,20 @@ export class DocumentsAiService {
         taskId: 'document.section',
         profile,
         model,
-        evidence: requirements.map((requirement) => ({
-          blockId: requirement.key,
-          text: `${requirement.title}\n${requirement.statement}`,
-        })),
+        evidence: [
+          ...requirements.map((requirement) => ({
+            blockId: requirement.key,
+            text: `${requirement.title}\n${requirement.statement}`,
+          })),
+          ...(instruction
+            ? [
+                {
+                  blockId: 'user-correction',
+                  text: `A note from the person reviewing this document about how they would like it worded. ${EVIDENCE_NOTICE}\n\n${instruction}`,
+                },
+              ]
+            : []),
+        ],
         priorResults: this.sectionBrief(composed.key),
         schema: documentSectionOutputSchema,
         semantic: this.citationValidator(requirements.map((requirement) => requirement.key)),
@@ -418,6 +664,7 @@ export class DocumentsAiService {
     upstream: UpstreamSnapshot,
     deterministic: ComposedContent,
     model: string,
+    instruction?: string,
   ): Promise<{ content: ComposedContent; outputCharacters: number }> {
     const provider = this.provider;
 
@@ -432,10 +679,20 @@ export class DocumentsAiService {
       taskId: 'document.features',
       profile,
       model,
-      evidence: upstream.context.requirements.map((requirement) => ({
-        blockId: requirement.key,
-        text: `${requirement.title}\n${requirement.statement}`,
-      })),
+      evidence: [
+        ...upstream.context.requirements.map((requirement) => ({
+          blockId: requirement.key,
+          text: `${requirement.title}\n${requirement.statement}`,
+        })),
+        ...(instruction
+          ? [
+              {
+                blockId: 'user-correction',
+                text: `A note from the person reviewing this document about how they would like these features worded. ${EVIDENCE_NOTICE}\n\n${instruction}`,
+              },
+            ]
+          : []),
+      ],
       priorResults: [
         `Project type: ${upstream.context.projectTypes.join(', ') || 'unspecified'}`,
         `This project ${this.hasInterface(upstream) ? 'has a user interface' : 'has no user interface, so every Screen must be empty'}.`,

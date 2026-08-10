@@ -5,6 +5,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 
 import {
+  DocumentCorrectionRecord,
   DocumentFeatureRecord,
   DocumentRecord,
   DocumentRunRecord,
@@ -16,6 +17,7 @@ import {
   type DocumentRunDocument,
   type DocumentSectionDocument,
   type DocumentVersionDocument,
+  type DocumentCorrectionDocument,
 } from './schemas/document.schema';
 
 /**
@@ -51,6 +53,8 @@ export class DocumentsRepository {
     private readonly runs: Model<DocumentRunRecord>,
     @InjectModel(DocumentValidationRecord.name)
     private readonly validations: Model<DocumentValidationRecord>,
+    @InjectModel(DocumentCorrectionRecord.name)
+    private readonly corrections: Model<DocumentCorrectionRecord>,
   ) {}
 
   /** Crockford base32, matching the ids used everywhere else. */
@@ -261,6 +265,22 @@ export class DocumentsRepository {
     record: Partial<DocumentValidationRecord>,
   ): Promise<DocumentValidationRecord> {
     return this.validations.create(record);
+  }
+
+  /* ------------------------------------------------------ corrections */
+
+  async recordCorrection(
+    record: Partial<DocumentCorrectionRecord>,
+  ): Promise<DocumentCorrectionDocument> {
+    return this.corrections.create(record);
+  }
+
+  async completeCorrection(correctionId: string, changes: Record<string, unknown>): Promise<void> {
+    await this.corrections.updateOne({ correctionId }, { $set: changes }).exec();
+  }
+
+  async listCorrections(projectId: string, type: string): Promise<DocumentCorrectionDocument[]> {
+    return this.corrections.find({ projectId, type }).sort({ createdAt: -1 }).exec();
   }
 
   async latestValidation(

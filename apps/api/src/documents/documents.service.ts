@@ -15,6 +15,8 @@ import {
   documentOutdatedReasons,
   documentsDependingOn,
   featureListingCsv,
+  correctionAuditMetadata,
+  hasFeatureProposal,
   hasProposal,
   IMPLEMENTED_DOCUMENT_TYPES,
   isDocumentAuthoritative,
@@ -24,11 +26,15 @@ import {
   isSectionProtected,
   lockFor,
   mayReplaceDirectly,
+  mayReplaceFeatureDirectly,
   validationIsCurrent,
   validationPermitsApproval,
   worstSeverity,
+  type ApplyCorrection,
   type ApproveDocument,
   type ContentEntry,
+  type CorrectionInstruction,
+  type CorrectionOutcome,
   type DocumentDiff,
   type DocumentSection,
   type DocumentSnapshot,
@@ -40,6 +46,7 @@ import {
   type GenerateDocument,
   type MarkFinal,
   type ReopenDocument,
+  type ResolveFeatureProposal,
   type ResolveSectionProposal,
   type RestoreVersion,
   type UpdateFeatureRow,
@@ -57,6 +64,7 @@ import { UnderstandingComposer } from './composers/understanding.composer';
 import type { ComposedContent, DocumentComposer } from './composers/composer.types';
 import {
   toDocumentSnapshot,
+  toFeatureRecord,
   toFeatureRow,
   toSection,
   toVersionSummary,
@@ -274,7 +282,19 @@ export class DocumentsService {
       throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_FINAL, 409);
     }
 
-    if (existing && !canGenerateDocument(existing.status as DocumentSnapshot['status'])) {
+    /*
+     * Checked against the *derived* status, not the stored one. An approved
+     * document whose inputs have moved reads as OUTDATED on screen, and
+     * regenerating is precisely what the screen tells the user to do — refusing it
+     * because the stored status still says APPROVED would make the advice
+     * unfollowable.
+     */
+    const effectiveStatus =
+      existing && this.outdatedFor(existing, upstream).length > 0 && existing.status === 'APPROVED'
+        ? ('OUTDATED' as const)
+        : (existing?.status as DocumentSnapshot['status'] | undefined);
+
+    if (effectiveStatus && !canGenerateDocument(effectiveStatus)) {
       throw new DocumentError(DOCUMENT_ERROR_CODES.INVALID_STATUS_TRANSITION, 409);
     }
 
@@ -580,7 +600,11 @@ export class DocumentsService {
     const findings = [
       ...composer.validate({
         context: upstream.context,
-        sections: content.sections.map((section) => ({ key: section.key, body: section.body })),
+        sections: content.sections.map((section) => ({
+          key: section.key,
+          body: section.body,
+          references: section.references.map((reference) => reference.id),
+        })),
         features: content.features,
         excludedRequirementIds: record.exclusions.map((entry) => entry.requirementId),
         baselineCurrent: this.baselineCurrent(record, upstream),
@@ -680,6 +704,20 @@ export class DocumentsService {
     const record = await this.expect(context, type, request.expectedVersion);
     const status = record.status as DocumentSnapshot['status'];
 
+    const snapshot = await this.assemble(context, record);
+
+    /*
+     * Checked before both the already-approved and the transition complaints. A
+     * document that is approved *and* stale answers "already approved" only in a
+     * bookkeeping sense; what the user needs to know is that something upstream
+     * moved, which is also what the screen is already showing them.
+     */
+    if (snapshot.outdatedReasons.length > 0) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_UPSTREAM_STALE, 422, undefined, {
+        outdatedReasons: snapshot.outdatedReasons,
+      });
+    }
+
     if (isDocumentAuthoritative(status)) {
       throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_ALREADY_APPROVED, 409);
     }
@@ -688,7 +726,6 @@ export class DocumentsService {
       throw new DocumentError(DOCUMENT_ERROR_CODES.INVALID_STATUS_TRANSITION, 409);
     }
 
-    const snapshot = await this.assemble(context, record);
     const validation = snapshot.validation;
 
     if (!validationIsCurrent(validation, record.version)) {
@@ -749,8 +786,13 @@ export class DocumentsService {
     const record = await this.expect(context, type, request.expectedVersion);
     const status = record.status as DocumentSnapshot['status'];
 
+    /*
+     * An issued document is not reopened — it is revised. The issued version stays
+     * exactly as it was sent, and a new working version is created beside it. That
+     * is the whole difference between approved and issued.
+     */
     if (status === 'FINAL') {
-      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_FINAL, 409);
+      return this.revise(context, type, request);
     }
 
     if (status !== 'APPROVED') {
@@ -777,7 +819,92 @@ export class DocumentsService {
     return this.reload(context, type);
   }
 
-  /** Mark issued. Irreversible: a revision means a new version. */
+  /**
+   * Start a new working version from an issued document.
+   *
+   * The issued version is not touched: it keeps its `FINAL` status and its content
+   * in `document_versions`, which is what makes "what did the client receive?"
+   * answerable afterwards. The new version begins as a copy, in `DRAFT`, and every
+   * section is marked as a person's — somebody chose that text when they issued it,
+   * so the next regeneration has to ask before replacing it.
+   */
+  async revise(
+    context: DocumentContext,
+    type: DocumentType,
+    request: ReopenDocument,
+  ): Promise<DocumentSnapshot> {
+    this.assertImplemented(type);
+
+    const record = await this.expect(context, type, request.expectedVersion);
+
+    if (record.status !== 'FINAL') {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_NOT_APPROVED, 409);
+    }
+
+    const issued = await this.currentContent(context.projectId, record);
+
+    /* The issued version, recorded as issued, before anything else happens. */
+    await this.archive(context.projectId, record, issued, 'FINAL');
+
+    const version = await this.repository.nextVersion(context.projectId, type);
+    const now = new Date();
+
+    await this.repository.replaceSections(
+      context.projectId,
+      type,
+      version,
+      issued.sections.map((section) => ({
+        sectionId: DocumentsRepository.newId('dsc'),
+        documentVersion: version,
+        key: section.key,
+        title: section.title,
+        order: section.order,
+        body: section.body,
+        origin: 'USER_EDITED',
+        omittedReason: section.omittedReason ?? '',
+        references: section.references,
+        proposedBody: '',
+        regenerationReason: `Revised from issued version ${record.version}`,
+        updatedAt: now,
+      })),
+    );
+
+    await this.repository.replaceFeatures(
+      context.projectId,
+      type,
+      version,
+      issued.features.map((feature) =>
+        toFeatureRecord(feature, version, { featureId: DocumentsRepository.newId('ftr') }),
+      ),
+    );
+
+    await this.repository.update(
+      context.projectId,
+      type,
+      record.recordVersion,
+      {
+        version,
+        status: 'DRAFT',
+        supersedesVersion: record.version,
+        regenerationReason: request.reason,
+        validation: null,
+      },
+      ['finalAt', 'approvedAt'],
+    );
+
+    await this.audit.record({
+      type: 'DOCUMENT_REOPENED',
+      projectId: context.projectId,
+      correlationId: context.correlationId,
+      metadata: { documentType: type, issuedVersion: record.version, newVersion: version },
+    });
+
+    await this.markDependentsOutdated(context, type);
+
+    return this.reload(context, type);
+  }
+
+  /** Mark issued. The issued version is immutable from then on. */
   async markFinal(
     context: DocumentContext,
     type: DocumentType,
@@ -787,6 +914,17 @@ export class DocumentsService {
 
     const record = await this.expect(context, type, request.expectedVersion);
     const status = record.status as DocumentSnapshot['status'];
+
+    /*
+     * Issuing is the most consequential thing this application does — the document
+     * leaves the building. Doing it while an input has moved would put a stale
+     * document on somebody's desk with our name on it.
+     */
+    const upstream = await this.upstream.read(context.projectId, context.correlationId);
+
+    if (this.outdatedFor(record, upstream).length > 0) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_UPSTREAM_STALE, 422);
+    }
 
     if (!canTransitionDocument(status, 'FINAL')) {
       throw new DocumentError(
@@ -863,14 +1001,9 @@ export class DocumentsService {
       updatedAt: now,
     }));
 
-    const features = (stored.features as unknown as FeatureRow[]).map((feature) => ({
-      ...feature,
-      featureId: DocumentsRepository.newId('ftr'),
-      projectId: context.projectId,
-      type,
-      documentVersion: version,
-      references: feature.references,
-    }));
+    const features = (stored.features as unknown as FeatureRow[]).map((feature) =>
+      toFeatureRecord(feature, version, { featureId: DocumentsRepository.newId('ftr') }),
+    );
 
     await this.repository.update(context.projectId, type, record.recordVersion, {
       version,
@@ -916,6 +1049,22 @@ export class DocumentsService {
     type: DocumentType,
   ): Promise<DocumentDocument | null> {
     return this.repository.find(context.projectId, type);
+  }
+
+  /** The current feature rows, for the AI service's join. */
+  async currentFeatures(
+    context: DocumentContext,
+    type: DocumentType,
+  ): Promise<readonly FeatureRow[]> {
+    const record = await this.repository.find(context.projectId, type);
+
+    if (!record) {
+      return [];
+    }
+
+    return (await this.repository.listFeatures(context.projectId, type, record.version)).map(
+      toFeatureRow,
+    );
   }
 
   async currentSections(
@@ -1331,6 +1480,7 @@ export class DocumentsService {
     const blockers = calculateDocumentBlockers({
       generated: content.sections.length > 0 || content.features.length > 0,
       sections: content.sections,
+      pendingFeatureIds: DocumentsService.featuresAwaitingDecision(content.features),
       requiredSectionKeys: composer.requiredSectionKeys,
       validation: record.validation as unknown as DocumentValidation | null,
       outdatedReasons: reasons,
@@ -1343,9 +1493,14 @@ export class DocumentsService {
      * An approved document whose inputs moved is reported as OUTDATED without
      * being rewritten. The status is derived here rather than written by a
      * background job, so it cannot be stale.
+     *
+     * An **issued** document is not. It is a record of what was sent, and it did
+     * not stop being that because the requirements moved afterwards — relabelling
+     * it would make the history lie. The reasons are still reported, so a reader
+     * can see the world has moved on; the status stays FINAL.
      */
     const status =
-      reasons.length > 0 && isDocumentAuthoritative(record.status as DocumentSnapshot['status'])
+      reasons.length > 0 && record.status === 'APPROVED'
         ? 'OUTDATED'
         : (record.status as DocumentSnapshot['status']);
 
@@ -1415,6 +1570,293 @@ export class DocumentsService {
       /* Prerequisite changes are recorded on the document as they happen. */
       ...(record.outdatedReasons as unknown as DocumentSnapshot['outdatedReasons']),
     ];
+  }
+
+  /* --------------------------------------------- targeted regeneration */
+
+  /**
+   * Rewrite the wording of specific feature rows, and nothing else.
+   *
+   * `featureIds` selects rows directly; `module` selects every row in one module.
+   * Rows outside the selection are carried forward unchanged — same wording, same
+   * review status, same hours — so a targeted rewrite cannot quietly reword the
+   * rest of the sheet.
+   *
+   * **Effort never comes from here.** Each selected row keeps the effort, total and
+   * estimate-unit references it already had, which came from the approved estimate.
+   * `named` supplies wording only, and the schema it arrives under has no effort
+   * field at all.
+   *
+   * A row somebody edited gets a **proposal**: the wording stays and the suggestion
+   * waits beside it, exactly as a protected section does.
+   */
+  async regenerateFeatures(
+    context: DocumentContext,
+    type: DocumentType,
+    selection: { readonly featureIds?: readonly string[]; readonly module?: string },
+    expectedVersion: number,
+    named: ReadonlyMap<
+      string,
+      { module: string; submodule: string; screen: string; description: string }
+    >,
+    reason?: string,
+  ): Promise<{ snapshot: DocumentSnapshot; proposed: boolean; touched: readonly string[] }> {
+    const record = await this.editableDocument(context, type, expectedVersion);
+
+    if (DOCUMENT_SHAPE_BY_TYPE[type] !== 'ROWS') {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.WRONG_DOCUMENT_SHAPE, 422);
+    }
+
+    const content = await this.currentContent(context.projectId, record);
+    const wanted = new Set(selection.featureIds ?? []);
+
+    const selected = content.features.filter((row) =>
+      selection.module !== undefined
+        ? row.module.toLowerCase() === selection.module.toLowerCase()
+        : wanted.has(row.featureId),
+    );
+
+    if (selected.length === 0) {
+      throw new DocumentError(
+        selection.module === undefined
+          ? DOCUMENT_ERROR_CODES.FEATURE_NOT_FOUND
+          : DOCUMENT_ERROR_CODES.MODULE_NOT_FOUND,
+        404,
+      );
+    }
+
+    /* Archive the version being replaced before anything is written. */
+    await this.archive(context.projectId, record, content);
+
+    const version = await this.repository.nextVersion(context.projectId, type);
+    const now = new Date();
+    const selectedIds = new Set(selected.map((row) => row.featureId));
+    let proposed = false;
+
+    const rows = content.features.map((row) => {
+      const featureId = DocumentsRepository.newId('ftr');
+
+      if (!selectedIds.has(row.featureId)) {
+        /* Untouched, down to the review status and the hours. */
+        return toFeatureRecord(row, version, { featureId });
+      }
+
+      const wording = named.get(row.estimateUnitIds.join('|')) ?? {
+        module: row.module,
+        submodule: row.submodule,
+        screen: row.screen,
+        description: row.description,
+      };
+
+      if (mayReplaceFeatureDirectly(row)) {
+        return toFeatureRecord({ ...row, ...wording }, version, { featureId });
+      }
+
+      proposed = true;
+
+      return toFeatureRecord(row, version, {
+        featureId,
+        proposed: { ...wording },
+        proposedAt: now,
+      });
+    });
+
+    await this.repository.update(context.projectId, type, record.recordVersion, {
+      version,
+      status: record.status === 'APPROVED' ? 'DRAFT' : record.status,
+      supersedesVersion: record.version,
+      regenerationReason: reason ?? '',
+      validation: null,
+    });
+
+    /* Sections carry forward untouched; a row document has none, but a later
+       document type may have both, and copying them keeps this general. */
+    await this.repository.replaceSections(
+      context.projectId,
+      type,
+      version,
+      content.sections.map((section) => ({
+        sectionId: DocumentsRepository.newId('dsc'),
+        documentVersion: version,
+        key: section.key,
+        title: section.title,
+        order: section.order,
+        body: section.body,
+        origin: section.origin,
+        omittedReason: section.omittedReason ?? '',
+        references: section.references,
+        proposedBody: section.proposedBody ?? '',
+        regenerationReason: section.regenerationReason ?? '',
+      })),
+    );
+
+    await this.repository.replaceFeatures(context.projectId, type, version, rows);
+
+    await this.audit.record({
+      type: 'DOCUMENT_SECTION_REGENERATED',
+      projectId: context.projectId,
+      correlationId: context.correlationId,
+      metadata: {
+        documentType: type,
+        version,
+        ...(selection.module !== undefined ? { module: selection.module } : {}),
+        featureCount: selected.length,
+        proposedOnly: proposed,
+      },
+    });
+
+    if (record.status === 'APPROVED') {
+      await this.markDependentsOutdated(context, type);
+    }
+
+    return {
+      snapshot: await this.reload(context, type),
+      proposed,
+      touched: selected.map((row) => row.featureId),
+    };
+  }
+
+  /** Keep the wording, take the suggestion, or start from it and edit. */
+  async resolveFeatureProposal(
+    context: DocumentContext,
+    type: DocumentType,
+    featureId: string,
+    request: ResolveFeatureProposal,
+  ): Promise<DocumentSnapshot> {
+    const record = await this.editableDocument(context, type, request.expectedVersion);
+    const feature = await this.repository.findFeature(context.projectId, featureId);
+
+    if (feature?.type !== type) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.FEATURE_NOT_FOUND, 404);
+    }
+
+    if (!feature.proposed) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.NO_FEATURE_PROPOSAL, 422);
+    }
+
+    const suggestion = feature.proposed;
+    const chosen =
+      request.decision === 'KEEP_CURRENT'
+        ? {}
+        : request.decision === 'ACCEPT_GENERATED_REVISION'
+          ? suggestion
+          : {
+              module: request.module ?? suggestion.module,
+              submodule: request.submodule ?? suggestion.submodule,
+              screen: request.screen ?? suggestion.screen,
+              description: request.description ?? suggestion.description,
+            };
+
+    await this.repository.updateFeature(context.projectId, featureId, {
+      ...chosen,
+      /* Their decision, so the row stays theirs. */
+      reviewStatus: 'USER_EDITED',
+      proposed: null,
+    });
+
+    await this.afterContentChange(context, type, record, 'DOCUMENT_EDITED', {
+      featureId,
+      decision: request.decision,
+    });
+
+    return this.reload(context, type);
+  }
+
+  /* ------------------------------------------------------- corrections */
+
+  /**
+   * Records a correction instruction before it is carried out.
+   *
+   * Written first, so a run that fails still leaves the request on the record —
+   * "we asked for this and it did not work" is exactly the case a history is for.
+   * The audit event carries a length and an outcome; the text stays in the
+   * project's own collection.
+   */
+  async openCorrection(
+    context: DocumentContext,
+    type: DocumentType,
+    request: ApplyCorrection,
+    documentVersion: number,
+  ): Promise<string> {
+    const correctionId = DocumentsRepository.newId('dcr');
+
+    await this.repository.recordCorrection({
+      correctionId,
+      projectId: context.projectId,
+      type,
+      targetKind: request.targetKind,
+      targetKey: request.targetKey ?? '',
+      instruction: request.instruction,
+      actor: 'USER',
+      documentVersion,
+      outcome: 'NOT_APPLIED',
+      producedProposal: false,
+      usedAi: request.useAi,
+    });
+
+    await this.audit.record({
+      type: 'DOCUMENT_SECTION_REGENERATED',
+      projectId: context.projectId,
+      correlationId: context.correlationId,
+      metadata: correctionAuditMetadata({
+        type,
+        targetKind: request.targetKind,
+        ...(request.targetKey ? { targetKey: request.targetKey } : {}),
+        instruction: request.instruction,
+        documentVersion,
+        outcome: 'NOT_APPLIED',
+        usedAi: request.useAi,
+      }),
+    });
+
+    return correctionId;
+  }
+
+  /** Closes the record once the run has finished, whatever came of it. */
+  async closeCorrection(
+    correctionId: string,
+    outcome: CorrectionOutcome,
+    detail: { readonly resultingVersion?: number; readonly runId?: string },
+  ): Promise<void> {
+    await this.repository.completeCorrection(correctionId, {
+      outcome,
+      producedProposal: outcome === 'PROPOSED',
+      ...(detail.resultingVersion !== undefined
+        ? { resultingVersion: detail.resultingVersion }
+        : {}),
+      ...(detail.runId ? { runId: detail.runId } : {}),
+    });
+  }
+
+  async listCorrections(
+    context: DocumentContext,
+    type: DocumentType,
+  ): Promise<readonly CorrectionInstruction[]> {
+    const records = await this.repository.listCorrections(context.projectId, type);
+
+    return records.map((record) => ({
+      correctionId: record.correctionId,
+      projectId: record.projectId,
+      type: record.type as DocumentType,
+      targetKind: record.targetKind as CorrectionInstruction['targetKind'],
+      ...(record.targetKey ? { targetKey: record.targetKey } : {}),
+      instruction: record.instruction,
+      actor: 'USER' as const,
+      documentVersion: record.documentVersion,
+      ...(record.resultingVersion !== undefined
+        ? { resultingVersion: record.resultingVersion }
+        : {}),
+      ...(record.runId ? { runId: record.runId } : {}),
+      outcome: record.outcome as CorrectionOutcome,
+      producedProposal: record.producedProposal,
+      usedAi: record.usedAi,
+      createdAt: record.createdAt.toISOString(),
+    }));
+  }
+
+  /** Rows waiting for a decision. Used by the blocker calculation. */
+  static featuresAwaitingDecision(rows: readonly FeatureRow[]): readonly string[] {
+    return rows.filter(hasFeatureProposal).map((row) => row.featureId);
   }
 
   private async reload(context: DocumentContext, type: DocumentType): Promise<DocumentSnapshot> {

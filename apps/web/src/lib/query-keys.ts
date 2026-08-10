@@ -45,4 +45,5 @@ export const queryKeys = {
     ['documents', type, 'diff', left, right] as const,
   documentCsv: (type: string) => ['documents', type, 'csv'] as const,
   documentRun: (type: string) => ['documents', type, 'run'] as const,
+  documentCorrections: (type: string) => ['documents', type, 'corrections'] as const,
 } as const;

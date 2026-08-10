@@ -34,6 +34,8 @@ export interface DocumentBlockerInput {
   readonly reconciliation: EffortReconciliation | null;
   /** Prerequisite documents that are not approved. */
   readonly unapprovedPrerequisites: readonly string[];
+  /** Feature rows with a suggested rewrite waiting for a decision. */
+  readonly pendingFeatureIds?: readonly string[];
 }
 
 export function calculateDocumentBlockers(input: DocumentBlockerInput): readonly DocumentBlocker[] {
@@ -90,15 +92,19 @@ export function calculateDocumentBlockers(input: DocumentBlockerInput): readonly
     });
   }
 
-  const pending = input.sections.filter(hasProposal);
+  const pendingSections = input.sections.filter(hasProposal);
+  const pendingRows = input.pendingFeatureIds ?? [];
+  const pending = pendingSections.length + pendingRows.length;
 
-  if (pending.length > 0) {
+  if (pending > 0) {
+    const noun = pendingSections.length > 0 ? 'section' : 'feature';
+
     blockers.push({
       kind: 'unresolved_proposal',
-      count: pending.length,
-      summary: `${pending.length} section${pending.length === 1 ? ' has' : 's have'} a suggested rewrite waiting for your decision.`,
+      count: pending,
+      summary: `${pending} ${noun}${pending === 1 ? ' has' : 's have'} a suggested rewrite waiting for your decision.`,
       action: 'Keep what you wrote, use the new version, or edit it — then approve.',
-      subjectIds: pending.map((section) => section.sectionId),
+      subjectIds: [...pendingSections.map((section) => section.sectionId), ...pendingRows],
     });
   }
 

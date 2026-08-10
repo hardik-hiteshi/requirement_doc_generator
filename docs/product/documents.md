@@ -95,6 +95,62 @@ be approved.
 Restoring an old version works the same way: it comes back as a new version, and
 the version you were on stays exactly where it was. Nothing here can be rewound.
 
+## Asking for something different
+
+Any document, any section, any feature, any module: say what you want changed.
+
+> "Make the Business Objective shorter."
+> "Use client-facing wording."
+> "Do not call this module Admin; call it Operations."
+> "Regenerate only the Payments module."
+
+What you asked and what came of it are kept with the version it produced, so
+"why does version 4 read differently?" has an answer.
+
+**A correction changes wording.** It cannot add a requirement, change a technology
+or change an hours figure — those are decisions with their own steps, and a sentence
+in a text box does not carry that authority. If you ask for one of them, the screen
+says so and points at where it is actually done, rather than quietly doing half of
+what you asked.
+
+And if the section you are correcting is one **you** wrote, the rewrite arrives as a
+suggestion beside it, not over it.
+
+## Adding something the client just sent
+
+Use **Add supporting source** on the documents step. It takes you to the
+requirements step, because that is where requirements go in — through extraction,
+review and a re-approved baseline. The document does not read it directly, and there
+is no way to attach evidence to a document that the rest of the application has not
+agreed to.
+
+Once the baseline moves, every document says it is out of date, and you decide what
+to regenerate.
+
+## Rewriting part of the Feature Listing
+
+One row, or one module. Everything outside the selection is left exactly as it is —
+wording, your edits, and every hours figure. The hours cannot change here at all;
+they are the estimate's.
+
+A row you edited gets a suggestion rather than a replacement, the same as a section.
+
+## Copying
+
+**Copy the document** gives you the client-facing text: headings and prose. No
+requirement ids, no source references, no internal notes, and no empty sections with
+our reasoning in them.
+
+**Copy with citations** is a separate button, for an internal review, and it adds
+the requirement ids.
+
+If you typed a requirement id into your own wording, the copy keeps your sentence as
+you wrote it and tells you the id is in there — it will not quietly edit your text,
+and it will not quietly send an identifier to a client either.
+
+For the Feature Listing, **Copy to clipboard** gives you the export exactly: eight
+columns in order, every value quoted, additional roles named, blank screens blank.
+
 ## Checks before approval
 
 Running the checks is a step you take, and approving without it is refused —
@@ -117,10 +173,19 @@ acknowledging it is recorded.
 
 **Approved** means agreed, and it unlocks whatever is built on it.
 
-**Issued** is separate and irreversible. It means the document left the building.
-An approved document can be reopened and revised; an issued one is a matter of
-record, and the only way past it is a new version. Collapsing the two is how
-"which version did the client actually receive?" becomes unanswerable.
+**Issued** is separate. It means the document left the building. An issued document
+cannot be edited, regenerated, restored over or issued again — every one of those is
+refused.
+
+What you can do is **start a new version**. The issued one stays exactly as it was
+sent, on the record, and the new version begins as a copy for you to work on. That
+is why "which version did the client actually receive?" has an answer here.
+
+An issued document is never relabelled out of date when the requirements move
+afterwards. It was a true record of what was sent, and it still is — the changes are
+reported beside it, not applied to it.
+
+Neither approving nor issuing is possible while something upstream has moved.
 
 Reopening Our Understanding marks Feature Listing out of date. It does not
 regenerate it, change it or delete it.
