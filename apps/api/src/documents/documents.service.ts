@@ -139,7 +139,7 @@ export class DocumentsService {
         lock: lock ? { reason: lock.reason, summary: lock.summary } : null,
         implemented: isImplementedDocumentType(type),
         version: record?.version ?? 0,
-        outdated: (record?.outdatedReasons ?? []).length > 0,
+        outdated: record ? this.outdatedFor(record, upstream).length > 0 : false,
         blockerCount: (record?.blockers ?? []).length,
         validationSeverity: (record?.validation as { severity?: string } | null)?.severity ?? null,
         ...(record ? { updatedAt: record.updatedAt.toISOString() } : {}),
@@ -1309,50 +1309,7 @@ export class DocumentsService {
     const content = await this.currentContent(context.projectId, record);
     const composer = this.composerFor(type);
 
-    const reasons = [
-      ...documentOutdatedReasons({
-        type,
-        generatedAgainst: {
-          ...(record.baselineVersion !== undefined
-            ? { baselineVersion: record.baselineVersion }
-            : {}),
-          ...(record.stackVersion !== undefined ? { stackVersion: record.stackVersion } : {}),
-          ...(record.estimateVersion !== undefined
-            ? { estimateVersion: record.estimateVersion }
-            : {}),
-        },
-        current: {
-          ...(upstream.context.baseline
-            ? { baselineVersion: upstream.context.baseline.version }
-            : {}),
-          ...(upstream.context.stack ? { stackVersion: upstream.context.stack.version } : {}),
-          ...(upstream.context.estimate
-            ? { estimateVersion: upstream.context.estimate.version }
-            : {}),
-        },
-        changedPrerequisites: [],
-      }),
-      /*
-       * A baseline that went out of date without changing version. Phase 4 keeps
-       * an approved-then-outdated baseline at the same version until a new
-       * analysis run supersedes it, so a version comparison cannot see this — and
-       * a document built on it is nonetheless no longer current.
-       */
-      ...(!upstream.baselineCurrent &&
-      DOCUMENT_DEPENDENCIES[type].upstream.includes('REQUIREMENT_BASELINE') &&
-      record.baselineVersion !== undefined
-        ? [
-            {
-              cause: 'baseline_changed' as const,
-              summary:
-                'The approved requirements are no longer current — something changed upstream after this document was written.',
-              generatedAgainst: `v${record.baselineVersion}`,
-            },
-          ]
-        : []),
-      /* Prerequisite changes are recorded on the document as they happen. */
-      ...(record.outdatedReasons as unknown as DocumentSnapshot['outdatedReasons']),
-    ];
+    const reasons = this.outdatedFor(record, upstream);
 
     const excluded = record.exclusions.map((entry) => entry.requirementId);
 
@@ -1399,6 +1356,65 @@ export class DocumentsService {
       coverage,
       reconciliation,
     });
+  }
+
+  /**
+   * Every reason a document is out of date.
+   *
+   * One derivation, called by both the list and the detail — a card saying
+   * "approved" beside a document that reports itself out of date when opened is
+   * the kind of disagreement nobody trusts afterwards.
+   */
+  private outdatedFor(
+    record: DocumentDocument,
+    upstream: UpstreamSnapshot,
+  ): DocumentSnapshot['outdatedReasons'] {
+    const type = record.type as DocumentType;
+
+    return [
+      ...documentOutdatedReasons({
+        type,
+        generatedAgainst: {
+          ...(record.baselineVersion !== undefined
+            ? { baselineVersion: record.baselineVersion }
+            : {}),
+          ...(record.stackVersion !== undefined ? { stackVersion: record.stackVersion } : {}),
+          ...(record.estimateVersion !== undefined
+            ? { estimateVersion: record.estimateVersion }
+            : {}),
+        },
+        current: {
+          ...(upstream.context.baseline
+            ? { baselineVersion: upstream.context.baseline.version }
+            : {}),
+          ...(upstream.context.stack ? { stackVersion: upstream.context.stack.version } : {}),
+          ...(upstream.context.estimate
+            ? { estimateVersion: upstream.context.estimate.version }
+            : {}),
+        },
+        changedPrerequisites: [],
+      }),
+      /*
+       * A baseline that went out of date without changing version. Phase 4 keeps
+       * an approved-then-outdated baseline at the same version until a new
+       * analysis run supersedes it, so a version comparison cannot see this — and
+       * a document built on it is nonetheless no longer current.
+       */
+      ...(!upstream.baselineCurrent &&
+      DOCUMENT_DEPENDENCIES[type].upstream.includes('REQUIREMENT_BASELINE') &&
+      record.baselineVersion !== undefined
+        ? [
+            {
+              cause: 'baseline_changed' as const,
+              summary:
+                'The approved requirements are no longer current — something changed upstream after this document was written.',
+              generatedAgainst: `v${record.baselineVersion}`,
+            },
+          ]
+        : []),
+      /* Prerequisite changes are recorded on the document as they happen. */
+      ...(record.outdatedReasons as unknown as DocumentSnapshot['outdatedReasons']),
+    ];
   }
 
   private async reload(context: DocumentContext, type: DocumentType): Promise<DocumentSnapshot> {

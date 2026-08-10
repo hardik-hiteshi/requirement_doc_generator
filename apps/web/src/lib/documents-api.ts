@@ -78,8 +78,8 @@ export async function generateDocument(
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.generate(type), {
     method: 'POST',
+    body: request,
     headers: mutationHeaders(),
-    body: JSON.stringify(request),
   });
 }
 
@@ -90,8 +90,8 @@ export async function updateDocumentSection(
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.section(type, sectionId), {
     method: 'PUT',
+    body: request,
     headers: mutationHeaders(),
-    body: JSON.stringify(request),
   });
 }
 
@@ -102,8 +102,8 @@ export async function regenerateDocumentSection(
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.regenerateSection(type, sectionId), {
     method: 'POST',
+    body: request,
     headers: mutationHeaders(),
-    body: JSON.stringify(request),
   });
 }
 
@@ -114,8 +114,8 @@ export async function resolveSectionProposal(
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.resolveProposal(type, sectionId), {
     method: 'POST',
+    body: request,
     headers: mutationHeaders(),
-    body: JSON.stringify(request),
   });
 }
 
@@ -126,8 +126,8 @@ export async function updateFeature(
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.feature(type, featureId), {
     method: 'PATCH',
+    body: request,
     headers: mutationHeaders(),
-    body: JSON.stringify(request),
   });
 }
 
@@ -137,16 +137,16 @@ export async function excludeRequirement(
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.excludeRequirement(type), {
     method: 'POST',
+    body: request,
     headers: mutationHeaders(),
-    body: JSON.stringify(request),
   });
 }
 
 export async function validateDocument(type: DocumentType, useAi: boolean): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.validate(type), {
     method: 'POST',
+    body: { useAi },
     headers: mutationHeaders(),
-    body: JSON.stringify({ useAi }),
   });
 }
 
@@ -156,8 +156,8 @@ export async function acknowledgeDocumentFinding(
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.acknowledgeFinding(type), {
     method: 'POST',
+    body: request,
     headers: mutationHeaders(),
-    body: JSON.stringify(request),
   });
 }
 
@@ -167,8 +167,8 @@ export async function approveDocument(
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.approve(type), {
     method: 'POST',
+    body: request,
     headers: mutationHeaders(),
-    body: JSON.stringify(request),
   });
 }
 
@@ -178,8 +178,8 @@ export async function reopenDocument(
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.reopen(type), {
     method: 'POST',
+    body: request,
     headers: mutationHeaders(),
-    body: JSON.stringify(request),
   });
 }
 
@@ -189,8 +189,8 @@ export async function markDocumentFinal(
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.markFinal(type), {
     method: 'POST',
+    body: request,
     headers: mutationHeaders(),
-    body: JSON.stringify(request),
   });
 }
 
@@ -200,7 +200,7 @@ export async function restoreDocumentVersion(
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.restore(type), {
     method: 'POST',
+    body: request,
     headers: mutationHeaders(),
-    body: JSON.stringify(request),
   });
 }

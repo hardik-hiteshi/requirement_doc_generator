@@ -310,6 +310,31 @@ describe('Documents (e2e)', () => {
       expect(JSON.stringify(refusal.body)).toContain('DOCUMENT_HAS_BLOCKERS');
     }, 240_000);
 
+    /* The exact sequence the browser walks: break it, check, fix it, check, approve. */
+    it('approves after a blocking finding has been fixed and rechecked', async () => {
+      const session = await project();
+      const document = await generate(session, 'OUR_UNDERSTANDING');
+      const overview = sectionByKey(document, 'project-overview');
+
+      await editSection(session, 'OUR_UNDERSTANDING', overview.sectionId, '   ');
+      const broken = await validate(session, 'OUR_UNDERSTANDING');
+      expect(broken.validation?.severity).toBe('BLOCKING');
+
+      await editSection(
+        session,
+        'OUR_UNDERSTANDING',
+        overview.sectionId,
+        'A timesheet and approval system for internal staff.',
+      );
+      const fixed = await validate(session, 'OUR_UNDERSTANDING');
+
+      expect(fixed.validation?.severity).not.toBe('BLOCKING');
+      expect(fixed.blockers).toEqual([]);
+
+      const approved = await approve(session, 'OUR_UNDERSTANDING');
+      expect(approved.status).toBe('APPROVED');
+    }, 240_000);
+
     it('approves once validation passes, and records when', async () => {
       const session = await project();
       const approved = await approvedUnderstanding(session);
