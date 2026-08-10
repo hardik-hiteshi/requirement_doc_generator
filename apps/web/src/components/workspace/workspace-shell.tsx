@@ -22,6 +22,7 @@ import { RecoveryLinkPanel } from '@/components/project/recovery-link-panel';
 import { RequirementInputStep } from '@/components/requirements/requirement-input-step';
 import { AnalysisStep } from '@/components/analysis/analysis-step';
 import { TechnologyStackStep } from '@/components/stack/technology-stack-step';
+import { EstimationStep } from '@/components/estimation/estimation-step';
 import { BaselineStep } from '@/components/analysis/baseline-step';
 import { ClarificationsStep } from '@/components/analysis/clarifications-step';
 import { useSources } from '@/hooks/use-sources';
@@ -73,6 +74,12 @@ function stepStates(
      * requirements are still being settled.
      */
     'technology-stack': hasReviewedSources ? 'available' : 'locked',
+    /*
+     * Unlocked with the rest. The step itself refuses to estimate without an
+     * approved baseline, a locked stack and a timeline, and says which is
+     * missing — more useful than a tab that explains nothing.
+     */
+    'estimation-timeline': hasReviewedSources ? 'available' : 'locked',
   };
 }
 
@@ -82,6 +89,7 @@ const ANALYSIS_STEPS: readonly WorkflowStepId[] = [
   'clarifications',
   'baseline-approval',
   'technology-stack',
+  'estimation-timeline',
 ];
 
 export function WorkspaceShell() {
@@ -282,6 +290,7 @@ export function WorkspaceShell() {
                   {currentStepId === 'clarifications' ? <ClarificationsStep /> : null}
                   {currentStepId === 'baseline-approval' ? <BaselineStep /> : null}
                   {currentStepId === 'technology-stack' ? <TechnologyStackStep /> : null}
+                  {currentStepId === 'estimation-timeline' ? <EstimationStep /> : null}
 
                   <div className="flex flex-wrap gap-2">
                     {ANALYSIS_STEPS.filter((step) => step !== currentStepId).map((step) => (

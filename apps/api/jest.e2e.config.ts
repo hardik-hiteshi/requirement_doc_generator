@@ -21,17 +21,23 @@ const config: Config = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   testTimeout: 30_000,
   /*
-   * A process per suite.
+   * A process per pair of suites, and two things depend on this number.
    *
-   * pdfjs is loaded through a real dynamic import so it escapes Jest's module
-   * registry and becomes a *process*-level singleton. Run every suite in one
-   * process and a spec that boots and tears down a Nest application leaves it in
-   * a state where the next PDF extraction throws — which presented as a broken
-   * extractor and was really shared state between unrelated files.
+   * **It cannot be 1.** Every suite boots a real Nest application, and Mongoose's
+   * default connection is a module global — so one suite's `app.close()` closes
+   * the connection the next suite's application is holding, and its readiness
+   * probe reports the database down. Separate processes give each application its
+   * own Mongoose.
    *
-   * Safe because the background extraction worker is off for the whole suite
-   * (see `test/e2e-env.ts`): the only thing two suites could have contended over
-   * was the job queue, and now each drives its own jobs explicitly.
+   * **It cannot be large.** The suites share one MongoDB, including the
+   * extraction job queue. Two suites driving extraction at the same moment can
+   * claim each other's jobs — Phase 4 hit exactly this and turned the background
+   * worker off, which removed the *polling* half of the problem but not the
+   * queue itself.
+   *
+   * Two is the number that has been green in hosted CI since Phase 4. With
+   * eleven suites it is tighter than it was; see the known limitations in the
+   * Phase 6 notes.
    */
   maxWorkers: 2,
   clearMocks: true,

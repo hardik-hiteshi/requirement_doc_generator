@@ -204,6 +204,44 @@ export function echoResponse(request: InferenceRequest): string | null {
       });
     }
 
+    /*
+     * A fixed assessment per requirement, derived from its own words.
+     *
+     * Like the stack suggestions above, there is nothing fictional here: the
+     * categories, complexities and drivers are all values the application
+     * defines, and the stub picks between them mechanically. What it cannot do
+     * is judge — so it returns `MEDIUM` unless the text plainly says otherwise,
+     * and the rationale says exactly that.
+     *
+     * Note what is absent: no hours. The stub could not return them if it
+     * wanted to, because the schema has nowhere to put them.
+     */
+    case 'estimation.assess':
+      return JSON.stringify({
+        assessments: blocks.map((block) => {
+          const text = block.text.toLowerCase();
+
+          return {
+            requirementId: block.blockId,
+            taskCategory: /integrat|third.party/.test(text)
+              ? 'integration'
+              : /screen|page|display|form/.test(text)
+                ? 'ui_implementation'
+                : 'business_logic',
+            complexity: /approv|workflow|multi-step/.test(text) ? 'MEDIUM' : 'LOW',
+            complexityDrivers: [
+              ...(/approv|workflow|multi-step/.test(text) ? ['workflow_depth'] : []),
+              ...(/integrat|third.party/.test(text) ? ['integration_complexity'] : []),
+            ],
+            uncertaintySources: /third.party|external system/.test(text)
+              ? ['third_party_dependency']
+              : [],
+            rationale:
+              'Assessed by the deterministic test provider, which matches phrases rather than reasoning about the requirement.',
+          };
+        }),
+      });
+
     default:
       return null;
   }

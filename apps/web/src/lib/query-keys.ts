@@ -30,4 +30,9 @@ export const queryKeys = {
   stackVersions: ['stack', 'versions'] as const,
   stackCatalog: ['stack', 'catalog'] as const,
   stackRecommendationRun: ['stack', 'recommendations', 'run'] as const,
+
+  /* Phase 6 — estimation and timeline. */
+  estimate: ['estimate'] as const,
+  estimateVersions: ['estimate', 'versions'] as const,
+  estimationRun: ['estimate', 'run'] as const,
 } as const;

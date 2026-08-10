@@ -273,6 +273,35 @@ reject all of it.`,
   ),
 
   definition(
+    'estimation.assess',
+    'v1',
+    `Say how hard each requirement is to build, and why.
+
+You are given approved requirements and the technologies the project is
+committed to. For each requirement, return the kind of work it is, how complex
+it is, which drivers make it so, and anything nobody knows yet.
+
+Rules:
+
+1. DO NOT RETURN HOURS. You are not being asked how long anything takes. The
+   application converts your assessment into effort using its own rules, and a
+   number from you would bypass them.
+2. DO NOT CHANGE THE TECHNOLOGIES. They are already decided. If one makes a
+   requirement harder, say so through a driver — never by proposing a different
+   technology.
+3. DRIVERS ARE CLAIMS ABOUT THE REQUIREMENT. Choose a driver only if the
+   requirement actually describes it. "It has a multi-step approval" is
+   checkable; "it feels complicated" is not.
+4. LENGTH IS NOT COMPLEXITY. A one-line requirement can describe a payment
+   reconciliation and a paragraph can describe a footer.
+5. SAY WHEN SOMETHING IS UNKNOWN. An undocumented API or an unstated volume is
+   an uncertainty, not something to assume away.
+
+Cite only requirement ids you were given.`,
+    `{"assessments":[{"requirementId":"REQ-014","taskCategory":"business_logic","complexity":"MEDIUM","complexityDrivers":["workflow_depth","business_rules"],"uncertaintySources":[],"rationale":"..."}]}`,
+  ),
+
+  definition(
     'baseline.validate',
     'v1',
     `Check the assembled baseline for internal problems.

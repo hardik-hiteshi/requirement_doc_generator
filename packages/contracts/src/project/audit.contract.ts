@@ -86,6 +86,22 @@ export const AUDIT_EVENT_TYPES = [
   'TECH_STACK_REOPENED',
   'TECH_STACK_OUTDATED',
   'TECH_STACK_SUPERSEDED',
+
+  /* Phase 6 — estimation. Hours and role names are not confidential; they are
+     the substance of a proposal. Requirement text and prompts never appear. */
+  'ESTIMATION_STARTED',
+  'ESTIMATION_COMPLETED',
+  'ESTIMATION_FAILED',
+  'ESTIMATE_OVERRIDDEN',
+  'DEPENDENCY_CHANGED',
+  'TEAM_CAPACITY_CHANGED',
+  'CALENDAR_CHANGED',
+  'TIMELINE_RECALCULATED',
+  'ESTIMATE_APPROVED',
+  'ESTIMATE_REOPENED',
+  'ESTIMATE_OUTDATED',
+  'ESTIMATE_SUPERSEDED',
+  'TIMELINE_RISK_ACKNOWLEDGED',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
