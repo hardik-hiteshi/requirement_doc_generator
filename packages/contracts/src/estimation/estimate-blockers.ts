@@ -28,6 +28,8 @@ export interface EstimateBlockerInput {
   readonly stackLocked: boolean;
   readonly stackCurrent: boolean;
   readonly timelinePresent: boolean;
+  /** A fixed deadline that falls before a concrete start date. */
+  readonly deadlinePrecedesStart: boolean;
   readonly feasibilityStatus: FeasibilityStatus;
   readonly riskAcknowledgedStatus?: string;
 }
@@ -72,6 +74,25 @@ export function calculateEstimateBlockers(input: EstimateBlockerInput): readonly
         summary: 'No delivery timeline has been set.',
         action:
           'Set the delivery timeline in project details. It is what feasibility is measured against.',
+        subjectIds: [],
+      },
+    ];
+  }
+
+  /*
+   * Two dates that cannot both be true. Returned early like the gates above,
+   * because a negative span makes every schedule and capacity figure below it
+   * meaningless — and the application will not resolve the contradiction by
+   * choosing one of the dates for the user.
+   */
+  if (input.deadlinePrecedesStart) {
+    return [
+      {
+        kind: 'deadline_before_start',
+        count: 1,
+        summary: 'The delivery deadline falls before the start date.',
+        action:
+          'Move the deadline or the start date in project details — whichever is the wrong one.',
         subjectIds: [],
       },
     ];

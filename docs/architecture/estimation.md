@@ -108,6 +108,28 @@ missing input would be a claim the data does not support.
 **Nothing in this file changes the timeline.** The gap is reported in hours or in
 working days, the risks are listed, and the decision is the user's.
 
+Each verdict carries a `determinacy` alongside its status. `CONDITIONAL` means an
+input is missing rather than that the plan is bad, and `missingInformation` names
+which one — `concrete_start_date`, `team_capacity`, or both. The two are the same
+statuses the ordering above puts first; the field exists so a reader (and a
+document) can tell "we assessed this and it is tight" from "we cannot assess this
+yet".
+
+Where the span is unmeasurable, the arithmetic that depends on it is suppressed
+rather than reported as zero-derived fact. `availableWorkingDays` is `null`,
+`availableHours` and `capacityGapHours` are `0`, `recommendStaffing` returns
+nothing, and `collectRisks` omits `insufficient_capacity`, `role_overloaded` and
+`schedule_exceeds_timeline`. Every one of those would otherwise state a
+certainty about a calendar nobody has supplied: a team with no span has zero
+available hours by definition, which is not the same as being short.
+
+`validateDeadlineAgainstStart` refuses a fixed deadline that falls before a
+concrete start date. Either write can create the contradiction, so
+`ProjectsService.updateTimeline` and `updateStartDate` both consult the value
+they are not setting and reject with `deadline_before_start`. The estimate
+carries the matching blocker as well, for a project stored before that check
+existed.
+
 ## The AI half
 
 One task, `estimation.assess`, using Phase 4's provider layer unchanged — the

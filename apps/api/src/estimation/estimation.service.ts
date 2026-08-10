@@ -29,6 +29,7 @@ import {
   recommendStaffing,
   sumRoleEffort,
   timelineWorkingDays,
+  validateDeadlineAgainstStart,
   totalRoleEffort,
   validateDependencies,
   type AcknowledgeFeasibility,
@@ -966,6 +967,8 @@ export class EstimationService {
       stackLocked: Boolean(upstream.stack),
       stackCurrent: upstream.stackCurrent,
       timelinePresent: Boolean(upstream.timeline),
+      deadlinePrecedesStart: !validateDeadlineAgainstStart(upstream.timeline, upstream.startDate)
+        .valid,
       feasibilityStatus: feasibility.status,
       ...(snapshot.riskAcknowledgedStatus
         ? { riskAcknowledgedStatus: snapshot.riskAcknowledgedStatus }
@@ -1323,6 +1326,8 @@ export function digestTimeline(timeline: Timeline): string {
 function emptyFeasibility(): Record<string, unknown> {
   return {
     status: 'CAPACITY_UNKNOWN',
+    determinacy: 'CONDITIONAL',
+    missingInformation: [],
     reason: 'Nothing has been estimated yet.',
     requiredWorkingDays: 0,
     availableWorkingDays: null,

@@ -191,6 +191,7 @@ export const ESTIMATE_BLOCKER_KINDS = [
   'stack_not_locked',
   'stack_not_current',
   'timeline_missing',
+  'deadline_before_start',
   'no_estimates',
   'requirement_unestimated',
   'invalid_hours',

@@ -103,6 +103,36 @@ of them ever depended on which Monday the work begins.
 The **critical path** is marked, because it answers "why is it this long?" — and
 because it tells you which tasks slipping actually moves the finish date.
 
+## A deadline, and no start date yet
+
+The commonest awkward case: the client has named the day it has to be delivered,
+and nobody has agreed when work begins.
+
+**The deadline is kept exactly as you set it**, from the first moment. It is
+stored, displayed and carried forward, and nothing about the missing start date
+changes it.
+
+Everything that does not depend on a start date is calculated in full: the hours
+per feature, the hours per role, the total, and how many working days the
+sequenced work takes. Those numbers are final.
+
+What is _not_ calculated is the fit — because a date is not a duration. Without a
+start there is no span for the work to sit in, so the verdict reads **not yet
+fully determinable**, and beside it is the one thing that would resolve it. No
+dates are invented for the tasks, and no capacity is invented between "unknown"
+and the deadline: an unmeasurable span reports no available hours rather than a
+shortfall it cannot support.
+
+The moment a start date arrives — tentative or confirmed — the same estimate
+becomes dates, available working days, capacity and a verdict. **The hours, the
+scope and the locked technologies do not move**, and neither does the deadline.
+Set the start later and the fit gets worse; set it earlier and it gets better;
+the delivery date stays exactly where the client put it.
+
+A start date after the deadline is refused, from either side — setting the date or
+moving the deadline. Two dates that cannot both be true is a mistake to point
+out, not one to resolve on your behalf.
+
 ## Will it fit?
 
 The verdict, measured against the timeline you set. **That timeline is never

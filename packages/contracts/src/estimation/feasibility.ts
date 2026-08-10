@@ -44,6 +44,40 @@ export const FEASIBILITY_LABELS: Readonly<Record<FeasibilityStatus, string>> = {
   TIMELINE_UNMEASURABLE: 'We need a start date',
 };
 
+/**
+ * Whether the verdict above is the final word.
+ *
+ * A fixed delivery deadline with no start date is the case this exists for. The
+ * deadline is real, authoritative and kept exactly as the user set it — but a
+ * date is not a duration, and until there is a start there is no span for the
+ * work to fit into. The honest answer is "not yet fully determinable", together
+ * with what is missing. Calling that infeasible would be a claim the data does
+ * not support; calling it feasible would be worse.
+ */
+export const FEASIBILITY_DETERMINACY = ['DETERMINED', 'CONDITIONAL'] as const;
+
+export type FeasibilityDeterminacy = (typeof FEASIBILITY_DETERMINACY)[number];
+
+export const FEASIBILITY_DETERMINACY_LABELS: Readonly<Record<FeasibilityDeterminacy, string>> = {
+  DETERMINED: 'Assessed',
+  CONDITIONAL: 'Not yet fully determinable',
+};
+
+/** What the application would need before it can finish the assessment. */
+export const MISSING_INFORMATION_KINDS = ['concrete_start_date', 'team_capacity'] as const;
+
+export type MissingInformationKind = (typeof MISSING_INFORMATION_KINDS)[number];
+
+export const missingInformationSchema = z
+  .object({
+    kind: z.enum(MISSING_INFORMATION_KINDS),
+    summary: z.string().min(1).max(300),
+    action: z.string().min(1).max(300),
+  })
+  .strict();
+
+export type MissingInformation = z.infer<typeof missingInformationSchema>;
+
 /** Statuses a user must explicitly acknowledge before approving. */
 export const ACKNOWLEDGEABLE_STATUSES: readonly FeasibilityStatus[] = [
   'AGGRESSIVE',
@@ -86,6 +120,13 @@ export type TimelineRisk = z.infer<typeof timelineRiskSchema>;
 export const feasibilitySchema = z
   .object({
     status: feasibilityStatusSchema,
+    /**
+     * Whether the verdict is complete. Defaulted so an estimate stored before
+     * this field existed still reads back as the assessed case it was.
+     */
+    determinacy: z.enum(FEASIBILITY_DETERMINACY).default('DETERMINED'),
+    /** Empty whenever the verdict is `DETERMINED`. */
+    missingInformation: z.array(missingInformationSchema).max(10).default([]),
     /** One sentence saying why, in the user's terms. */
     reason: z.string().min(1).max(600),
     /** Working days the plan needs. */
@@ -130,6 +171,8 @@ export function assessFeasibility(input: FeasibilityInput): Feasibility {
     available === null ? 0 : Math.max(0, input.requiredWorkingDays - available);
 
   const base = {
+    determinacy: 'DETERMINED' as FeasibilityDeterminacy,
+    missingInformation: [] as MissingInformation[],
     requiredWorkingDays: input.requiredWorkingDays,
     availableWorkingDays: available,
     scheduleGapDays,
@@ -140,11 +183,37 @@ export function assessFeasibility(input: FeasibilityInput): Feasibility {
   };
 
   if (available === null) {
+    /*
+     * No span, so no availability — and therefore no shortfall either. Reporting
+     * the whole plan as a capacity gap would be inventing a deficit out of a
+     * missing start date, which is the same failure as inventing the start date.
+     * The effort figure stands; everything derived from a calendar does not.
+     */
     return {
       ...base,
       status: 'TIMELINE_UNMEASURABLE',
+      determinacy: 'CONDITIONAL',
+      missingInformation: [
+        {
+          kind: 'concrete_start_date',
+          summary: 'The delivery deadline is fixed, but the project has no start date.',
+          action:
+            'Set a tentative or confirmed start date. The deadline stays exactly as it is, and the dates, capacity and feasibility are calculated against it.',
+        },
+        ...(input.capacity.capacityUnknown
+          ? [
+              {
+                kind: 'team_capacity' as const,
+                summary: 'Nobody has said who is working on this.',
+                action: 'Add the team, or read the recommended staffing below.',
+              },
+            ]
+          : []),
+      ],
+      availableHours: 0,
+      capacityGapHours: 0,
       reason:
-        'You have set a delivery date but no start date, so there is no span to measure the work against. Set a start date and this will resolve.',
+        'Your delivery deadline is kept exactly as you set it. There is no start date yet, so there is no span to measure the work against — the effort and the working duration below are final, and the deadline verdict is not yet determinable.',
     };
   }
 
@@ -152,6 +221,14 @@ export function assessFeasibility(input: FeasibilityInput): Feasibility {
     return {
       ...base,
       status: 'CAPACITY_UNKNOWN',
+      determinacy: 'CONDITIONAL',
+      missingInformation: [
+        {
+          kind: 'team_capacity',
+          summary: 'Nobody has said who is working on this.',
+          action: 'Add the team, or read the recommended staffing below.',
+        },
+      ],
       reason: `The plan needs ${Math.round(input.capacity.totalPlannedHours)} hours over ${available} working days. Tell us who is on the team and we can say whether that fits — or use the recommended staffing below.`,
     };
   }
@@ -209,7 +286,15 @@ export function assessFeasibility(input: FeasibilityInput): Feasibility {
 function collectRisks(input: FeasibilityInput): TimelineRisk[] {
   const risks: TimelineRisk[] = [];
 
-  if (input.capacity.totalGapHours > 0) {
+  /*
+   * With no span, every capacity figure is zero by arithmetic rather than by
+   * measurement — so the risks derived from them would all read as certainties
+   * about a calendar nobody has supplied. The risks that come from the work
+   * itself are still reported below; they do not depend on a start date.
+   */
+  const spanKnown = input.availableWorkingDays !== null;
+
+  if (spanKnown && input.capacity.totalGapHours > 0) {
     risks.push({
       kind: 'insufficient_capacity',
       summary: `The team is ${Math.round(input.capacity.totalGapHours)} hours short over this timeline.`,
@@ -230,7 +315,7 @@ function collectRisks(input: FeasibilityInput): TimelineRisk[] {
     });
   }
 
-  for (const role of input.capacity.overloadedRoles) {
+  for (const role of spanKnown ? input.capacity.overloadedRoles : []) {
     risks.push({
       kind: 'role_overloaded',
       summary: `${role} is planned above a sustainable load.`,

@@ -42,7 +42,9 @@ const BRIEF = [
  */
 async function reachEstimation(
   page: Page,
-  options: { readonly weeks: number; readonly startDate?: string } = { weeks: 12 },
+  options: { readonly weeks?: number; readonly deadline?: string; readonly startDate?: string } = {
+    weeks: 12,
+  },
 ): Promise<void> {
   await page.goto('/');
   await createProject(page, { name: 'Estimation' });
@@ -53,8 +55,15 @@ async function reachEstimation(
   await saveSection(page, 'details');
 
   const timeline = section(page, 'timeline');
-  await timeline.getByRole('radio', { name: 'Weeks', exact: true }).check();
-  await timeline.getByRole('spinbutton').fill(String(options.weeks));
+
+  if (options.deadline) {
+    await timeline.getByRole('radio', { name: 'Fixed client deadline', exact: true }).check();
+    await timeline.getByRole('textbox').fill(options.deadline);
+  } else {
+    await timeline.getByRole('radio', { name: 'Weeks', exact: true }).check();
+    await timeline.getByRole('spinbutton').fill(String(options.weeks ?? 12));
+  }
+
   await saveSection(page, 'timeline');
 
   if (options.startDate) {
@@ -307,6 +316,62 @@ test.describe('Estimation and timeline', () => {
     await expect(
       schedulePanel(page).getByText(/your overrides and what waits for what are all untouched/),
     ).toBeVisible();
+  });
+
+  test('a fixed deadline with no start date is conditional, and resolves when one arrives', async ({
+    page,
+  }) => {
+    /* A real client deadline, and nobody has agreed when work starts. */
+    await reachEstimation(page, { deadline: '2026-12-18' });
+    await estimate(page);
+
+    /* The deadline is on screen exactly as it was set. */
+    await expect(page.getByTestId('required-timeline')).toHaveText('delivery by 2026-12-18');
+
+    /* The verdict says it cannot be reached yet, and says why. */
+    await expect(page.getByTestId('feasibility-determinacy')).toHaveText(
+      'Not yet fully determinable',
+    );
+    await expect(page.getByTestId('feasibility-status')).toHaveText('We need a start date');
+    await expect(page.getByTestId('missing-concrete_start_date')).toBeVisible();
+    await expect(
+      feasibilityPanel(page).getByText(/Your delivery date is unchanged and kept for later/),
+    ).toBeVisible();
+
+    /* The hours are final all the same, and the schedule is relative only. */
+    const hoursBefore = await page.getByTestId('effort-expected').textContent();
+    const daysBefore = await page.getByTestId('schedule-days').textContent();
+    await expect(page.getByTestId('schedule-mode')).toHaveText('Relative to the start');
+
+    /* No plausible-looking calendar date anywhere in the schedule. */
+    expect(await schedulePanel(page).innerText()).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+
+    /* Now somebody confirms a start date. */
+    await page.getByRole('button', { name: 'Back to requirement input' }).click();
+    await page.getByRole('button', { name: 'Project details' }).click();
+
+    const startDate = section(page, 'startDate');
+    await startDate.getByRole('radio', { name: /Confirmed start date/ }).check();
+    await startDate.getByRole('textbox').fill('2026-09-07');
+    await saveSection(page, 'startDate');
+
+    await page.getByRole('button', { name: 'Continue to requirement input' }).click();
+    await page.getByRole('button', { name: 'Continue to requirement analysis' }).click();
+    await page.getByRole('button', { name: 'Estimation & timeline' }).click();
+
+    await page.getByRole('button', { name: 'Recalculate the dates' }).click();
+    await expect(schedulePanel(page).getByText(/From 2026-09-07 to/)).toBeVisible({
+      timeout: 30_000,
+    });
+
+    /* The question has been answered, so it is no longer asked. */
+    await expect(page.getByTestId('missing-concrete_start_date')).toBeHidden();
+    await expect(page.getByTestId('feasibility-status')).not.toHaveText('We need a start date');
+
+    /* And the deadline and the hours are exactly what they were. */
+    await expect(page.getByTestId('required-timeline')).toHaveText('delivery by 2026-12-18');
+    await expect(page.getByTestId('effort-expected')).toHaveText(hoursBefore!);
+    await expect(page.getByTestId('schedule-days')).toHaveText(daysBefore!);
   });
 
   test('an aggressive deadline is reported, acknowledged and approved — never moved', async ({

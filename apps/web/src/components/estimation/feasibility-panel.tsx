@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  FEASIBILITY_DETERMINACY_LABELS,
   FEASIBILITY_LABELS,
   feasibilityNeedsAcknowledgement,
   type EstimateSnapshot,
@@ -35,9 +36,16 @@ export function FeasibilityPanel({ estimate }: { readonly estimate: EstimateSnap
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle>Will it fit?</CardTitle>
-          <Badge tone={toneFor(feasibility.status)} data-testid="feasibility-status">
-            {FEASIBILITY_LABELS[feasibility.status]}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            {feasibility.determinacy === 'CONDITIONAL' ? (
+              <Badge tone="neutral" data-testid="feasibility-determinacy">
+                {FEASIBILITY_DETERMINACY_LABELS.CONDITIONAL}
+              </Badge>
+            ) : null}
+            <Badge tone={toneFor(feasibility.status)} data-testid="feasibility-status">
+              {FEASIBILITY_LABELS[feasibility.status]}
+            </Badge>
+          </div>
         </div>
         <CardDescription>
           Measured against the timeline you set. That timeline has not been changed.
@@ -74,6 +82,27 @@ export function FeasibilityPanel({ estimate }: { readonly estimate: EstimateSnap
             </dd>
           </div>
         </dl>
+
+        {feasibility.missingInformation.length > 0 ? (
+          <div
+            className="rounded-md border border-border p-3"
+            data-testid="feasibility-missing-information"
+          >
+            <h3 className="text-sm font-medium">What is still missing</h3>
+            <p className="mt-1 text-xs text-muted">
+              Your delivery date is unchanged and kept for later. Until this is supplied, the
+              verdict above is not the final one.
+            </p>
+            <ul className="mt-2 flex flex-col gap-2">
+              {feasibility.missingInformation.map((missing) => (
+                <li key={missing.kind} className="text-sm" data-testid={`missing-${missing.kind}`}>
+                  <p>{missing.summary}</p>
+                  <p className="mt-1 text-xs text-muted">{missing.action}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         {feasibility.risks.length > 0 ? (
           <div>

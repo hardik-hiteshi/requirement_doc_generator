@@ -59,6 +59,40 @@ export function supportsCalendarScheduling(startDate: StartDate): boolean {
   return hasCalendarDate(startDate);
 }
 
+/**
+ * Whether a fixed deadline and a concrete start date contradict each other.
+ *
+ * The two values are set independently and either write can create the
+ * contradiction, so the check lives beside neither of them. It applies only when
+ * both are actually known: a deadline with `NOT_CONFIRMED` or
+ * `IMMEDIATELY_AFTER_APPROVAL` is incomplete, not wrong, and the estimate says so
+ * rather than refusing it.
+ *
+ * Compared as strings, which is exact for `YYYY-MM-DD` and avoids constructing
+ * dates in a time zone neither value carries.
+ */
+export function validateDeadlineAgainstStart(
+  timeline: { mode: string; deadline?: string } | undefined,
+  startDate: StartDate | undefined,
+): { valid: true } | { valid: false; reason: string } {
+  if (timeline?.mode !== 'FIXED_DEADLINE' || !timeline.deadline) {
+    return { valid: true };
+  }
+
+  if (!startDate || !hasCalendarDate(startDate)) {
+    return { valid: true };
+  }
+
+  if (startDate.date > timeline.deadline) {
+    return {
+      valid: false,
+      reason: `The delivery deadline (${timeline.deadline}) is before the start date (${startDate.date}). One of the two has to move, and which one is your decision.`,
+    };
+  }
+
+  return { valid: true };
+}
+
 export const START_DATE_MODE_LABELS: Readonly<Record<StartDateMode, string>> = {
   NOT_CONFIRMED: 'Start date not confirmed',
   IMMEDIATELY_AFTER_APPROVAL: 'Start immediately after approval',

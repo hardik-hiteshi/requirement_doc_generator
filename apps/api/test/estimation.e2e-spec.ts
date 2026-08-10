@@ -560,6 +560,343 @@ describe('Estimation and timeline (e2e)', () => {
     expect(estimate.feasibility.reason).toContain('start date');
   }, 180_000);
 
+  /* ------------------------- 4b. a fixed deadline, start date unknown */
+
+  /**
+   * The combination the whole start-date design exists for: the client has named
+   * a delivery date and nobody has agreed when work begins.
+   *
+   * The deadline is authoritative from the first moment and is never touched.
+   * What changes as a start date appears is only what a start date can change —
+   * dates, available days, capacity and the verdict. The hours do not move,
+   * because hours never depended on which Monday the work begins.
+   */
+  describe('a fixed delivery deadline', () => {
+    const DEADLINE = fixture('a project with a fixed deadline');
+    /** The deadline every test below measures against. */
+    const DEADLINE_DATE =
+      DEADLINE.timeline.mode === 'FIXED_DEADLINE' ? DEADLINE.timeline.deadline : '';
+
+    async function deadlineProject(
+      startDate: EstimationFixture['startDate'],
+    ): Promise<{ session: Session; estimate: EstimateSnapshot }> {
+      const session = await readyProject({ ...DEADLINE, startDate });
+
+      return { session, estimate: await runEstimation(session, await readEstimate(session)) };
+    }
+
+    async function setStartDate(
+      session: Session,
+      startDate: Record<string, unknown>,
+      status: number,
+    ) {
+      const project = await session.agent.get(PROJECT_ROUTES.current).expect(200);
+
+      return session.agent
+        .put(PROJECT_ROUTES.startDate)
+        .set('x-csrf-token', session.csrf)
+        .send({ startDate, version: project.body.version })
+        .expect(status);
+    }
+
+    async function recalculate(session: Session): Promise<EstimateSnapshot> {
+      const current = await readEstimate(session);
+
+      return (
+        await session.agent
+          .post(ESTIMATION_ROUTES.recalculateSchedule)
+          .set('x-csrf-token', session.csrf)
+          .send({ expectedVersion: current.recordVersion })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+    }
+
+    /**
+     * One engineer for every role the plan actually uses, so the verdict is a
+     * measurement rather than a shrug.
+     *
+     * Derived from the estimate rather than hard-coded: a role with planned hours
+     * and nobody assigned reports its whole effort as a gap whatever the span is,
+     * which would make the span the one thing the test could not detect.
+     */
+    async function setTeam(session: Session): Promise<EstimateSnapshot> {
+      const current = await readEstimate(session);
+
+      return (
+        await session.agent
+          .put(ESTIMATION_ROUTES.team)
+          .set('x-csrf-token', session.csrf)
+          .send({
+            lines: rolesIn(current).map((role) => ({
+              role,
+              people: 1,
+              productiveHoursPerDay: 6.5,
+              workingDaysPerWeek: 5,
+              availability: 1,
+              availableFromDay: 0,
+            })),
+            expectedVersion: current.recordVersion,
+          })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+    }
+
+    it.each([['NOT_CONFIRMED'], ['IMMEDIATELY_AFTER_APPROVAL']])(
+      'keeps the deadline and estimates everything it can with a %s start date',
+      async (mode) => {
+        const { estimate } = await deadlineProject({ mode });
+
+        /* The deadline, exactly as set. */
+        expect(estimate.timelineDescription).toBe(`delivery by ${DEADLINE_DATE}`);
+        expect(estimate.startDateMode).toBe(mode);
+        expect(estimate.startDate).toBeUndefined();
+
+        /* Effort, roles and duration are all calculable without a start date. */
+        expect(estimate.totalEffort.expected).toBeGreaterThan(0);
+        expect(rolesIn(estimate).length).toBeGreaterThan(0);
+        expect(features(estimate).length).toBeGreaterThan(0);
+        expect(estimate.schedule.totalWorkingDays).toBeGreaterThan(0);
+        expect(estimate.schedule.criticalPath.length).toBeGreaterThan(0);
+
+        /* Feasibility against the deadline is not one of them. */
+        expect(estimate.feasibility.status).toBe('TIMELINE_UNMEASURABLE');
+        expect(estimate.feasibility.determinacy).toBe('CONDITIONAL');
+        expect(estimate.feasibility.availableWorkingDays).toBeNull();
+        expect(estimate.feasibility.missingInformation.map((missing) => missing.kind)).toContain(
+          'concrete_start_date',
+        );
+        expect(estimate.feasibility.reason).toContain('kept exactly as you set it');
+
+        /* And no capacity is invented out of the gap between "unknown" and the date. */
+        expect(estimate.feasibility.availableHours).toBe(0);
+        expect(estimate.feasibility.capacityGapHours).toBe(0);
+        expect(estimate.recommendedStaffing).toEqual([]);
+      },
+      180_000,
+    );
+
+    it.each([['TENTATIVE_DATE'], ['CONFIRMED_DATE']])(
+      'measures the deadline against a %s start date',
+      async (mode) => {
+        const { session, estimate } = await deadlineProject({ mode, date: '2026-09-07' });
+
+        expect(estimate.timelineDescription).toBe(`delivery by ${DEADLINE_DATE}`);
+        expect(estimate.startDate).toBe('2026-09-07');
+        expect(estimate.schedule.relativeOnly).toBe(false);
+        expect(estimate.schedule.startDate).toBe('2026-09-07');
+        expect(estimate.schedule.finishDate).toBeDefined();
+
+        /* There is a span now, so the deadline can be measured. */
+        expect(estimate.feasibility.status).not.toBe('TIMELINE_UNMEASURABLE');
+        expect(estimate.feasibility.availableWorkingDays).toBeGreaterThan(0);
+        expect(
+          estimate.feasibility.missingInformation.map((missing) => missing.kind),
+        ).not.toContain('concrete_start_date');
+
+        /*
+         * The team is the only thing still missing — a start date resolves the
+         * span, not who is available. With one, the verdict is final.
+         */
+        const withTeam = await setTeam(session);
+
+        expect(withTeam.feasibility.determinacy).toBe('DETERMINED');
+        expect(withTeam.feasibility.missingInformation).toEqual([]);
+        expect(withTeam.totalEffort.expected).toBe(estimate.totalEffort.expected);
+      },
+      180_000,
+    );
+
+    it('emits no calendar date at all while the start date is unknown', async () => {
+      const { estimate } = await deadlineProject({ mode: 'NOT_CONFIRMED' });
+
+      expect(estimate.schedule.relativeOnly).toBe(true);
+      expect(estimate.schedule.startDate).toBeUndefined();
+      expect(estimate.schedule.finishDate).toBeUndefined();
+      expect(estimate.schedule.tasks.every((task) => task.startDate === undefined)).toBe(true);
+      expect(estimate.schedule.tasks.every((task) => task.endDate === undefined)).toBe(true);
+      expect(estimate.milestones.every((milestone) => milestone.date === undefined)).toBe(true);
+
+      /*
+       * A sweep rather than a field list: a plausible-looking date appearing
+       * anywhere in the schedule is the failure, wherever somebody adds it.
+       */
+      expect(
+        JSON.stringify({ schedule: estimate.schedule, milestones: estimate.milestones }),
+      ).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+
+      /* The deadline itself is still on the record, ready to be measured. */
+      expect(estimate.timelineDescription).toContain(DEADLINE_DATE);
+    }, 180_000);
+
+    it('changes only the schedule and the verdict when a start date arrives later', async () => {
+      const { session, estimate } = await deadlineProject({ mode: 'NOT_CONFIRMED' });
+
+      const before = {
+        hours: estimate.totalEffort.expected,
+        range: estimate.totalEffort,
+        byRole: estimate.effortByRole,
+        days: estimate.schedule.totalWorkingDays,
+        criticalPath: estimate.schedule.criticalPath,
+        units: estimate.estimates.map((unit) => ({ id: unit.id, hours: unit.totalHours })),
+        timeline: estimate.timelineDescription,
+      };
+
+      await setStartDate(session, { mode: 'CONFIRMED_DATE', date: '2026-09-07' }, 200);
+      const after = await recalculate(session);
+
+      /* Effort: untouched, to the hour. */
+      expect(after.totalEffort).toEqual(before.range);
+      expect(after.totalEffort.expected).toBe(before.hours);
+      expect(after.effortByRole).toEqual(before.byRole);
+      expect(after.estimates.map((unit) => ({ id: unit.id, hours: unit.totalHours }))).toEqual(
+        before.units,
+      );
+
+      /* Duration: the same sequence, now expressed in dates as well. */
+      expect(after.schedule.totalWorkingDays).toBe(before.days);
+      expect(after.schedule.criticalPath).toEqual(before.criticalPath);
+      expect(after.schedule.startDate).toBe('2026-09-07');
+
+      /* The deadline can now be measured, and it never moved. */
+      expect(after.feasibility.status).not.toBe('TIMELINE_UNMEASURABLE');
+      expect(after.feasibility.availableWorkingDays).toBeGreaterThan(0);
+      expect(after.feasibility.missingInformation.map((missing) => missing.kind)).not.toContain(
+        'concrete_start_date',
+      );
+      expect(after.timelineDescription).toBe(before.timeline);
+    }, 180_000);
+
+    it('reports a worse fit when the start date moves later, and keeps the deadline', async () => {
+      const { session } = await deadlineProject({ mode: 'CONFIRMED_DATE', date: '2026-09-07' });
+      await setTeam(session);
+
+      const early = await recalculate(session);
+
+      /* Late enough that the deadline leaves a single working day. */
+      await setStartDate(session, { mode: 'CONFIRMED_DATE', date: '2026-12-18' }, 200);
+      const late = await recalculate(session);
+
+      /* Less runway to the same date. */
+      expect(late.feasibility.availableWorkingDays!).toBeLessThan(
+        early.feasibility.availableWorkingDays!,
+      );
+
+      /* Measurably worse, in whichever unit it went wrong. */
+      const pressure = (snapshot: EstimateSnapshot): number =>
+        snapshot.feasibility.scheduleGapDays + snapshot.feasibility.capacityGapHours;
+      expect(pressure(late)).toBeGreaterThan(pressure(early));
+
+      /* And the effort and the deadline are exactly what they were. */
+      expect(late.totalEffort.expected).toBe(early.totalEffort.expected);
+      expect(late.timelineDescription).toBe(`delivery by ${DEADLINE_DATE}`);
+    }, 180_000);
+
+    it('reports a better fit when the start date moves earlier, and keeps the deadline', async () => {
+      const { session } = await deadlineProject({ mode: 'CONFIRMED_DATE', date: '2026-12-18' });
+      await setTeam(session);
+
+      const late = await recalculate(session);
+
+      await setStartDate(session, { mode: 'CONFIRMED_DATE', date: '2026-09-07' }, 200);
+      const early = await recalculate(session);
+
+      expect(early.feasibility.availableWorkingDays!).toBeGreaterThan(
+        late.feasibility.availableWorkingDays!,
+      );
+
+      const pressure = (snapshot: EstimateSnapshot): number =>
+        snapshot.feasibility.scheduleGapDays + snapshot.feasibility.capacityGapHours;
+      expect(pressure(early)).toBeLessThan(pressure(late));
+
+      expect(early.totalEffort.expected).toBe(late.totalEffort.expected);
+      expect(early.timelineDescription).toBe(`delivery by ${DEADLINE_DATE}`);
+    }, 180_000);
+
+    it('respects weekends and holidays between the start and the deadline', async () => {
+      const { session, estimate } = await deadlineProject({
+        mode: 'CONFIRMED_DATE',
+        date: '2026-09-07',
+      });
+
+      const before = estimate.feasibility.availableWorkingDays!;
+
+      /* Three holidays, all of them Mondays and Tuesdays inside the span. */
+      const holidays = ['2026-09-14', '2026-09-15', '2026-10-05'];
+
+      const withHolidays = (
+        await session.agent
+          .put(ESTIMATION_ROUTES.calendar)
+          .set('x-csrf-token', session.csrf)
+          .send({
+            calendar: { ...estimate.calendar, holidays },
+            expectedVersion: estimate.recordVersion,
+          })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+
+      /* Exactly three fewer days available, and not one of them a weekend. */
+      expect(withHolidays.feasibility.availableWorkingDays).toBe(before - holidays.length);
+
+      /*
+       * A weekend costs nothing, because it was never counted. Adding one as a
+       * holiday would reduce the total if weekends were being counted as
+       * available — which is the mistake this asserts against.
+       */
+      const withWeekend = (
+        await session.agent
+          .put(ESTIMATION_ROUTES.calendar)
+          .set('x-csrf-token', session.csrf)
+          .send({
+            calendar: { ...estimate.calendar, holidays: [...holidays, '2026-09-12', '2026-09-13'] },
+            expectedVersion: withHolidays.recordVersion,
+          })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+
+      expect(withWeekend.feasibility.availableWorkingDays).toBe(
+        withHolidays.feasibility.availableWorkingDays,
+      );
+      expect(withWeekend.timelineDescription).toBe(`delivery by ${DEADLINE_DATE}`);
+    }, 180_000);
+
+    it('refuses a start date after the deadline, from either side', async () => {
+      const { session, estimate } = await deadlineProject({ mode: 'NOT_CONFIRMED' });
+
+      /* Setting a start beyond the deadline. */
+      const refusedStart = await setStartDate(
+        session,
+        { mode: 'CONFIRMED_DATE', date: '2027-01-15' },
+        422,
+      );
+
+      expect(JSON.stringify(refusedStart.body)).toContain('deadline_before_start');
+
+      /* Nothing was stored — the project still has no start date. */
+      const untouched = await session.agent.get(PROJECT_ROUTES.current).expect(200);
+      expect(untouched.body.startDate?.mode ?? 'NOT_CONFIRMED').toBe('NOT_CONFIRMED');
+
+      /* And the same contradiction from the other direction. */
+      await setStartDate(session, { mode: 'CONFIRMED_DATE', date: '2026-09-07' }, 200);
+
+      const project = await session.agent.get(PROJECT_ROUTES.current).expect(200);
+      const refusedDeadline = await session.agent
+        .put(PROJECT_ROUTES.timeline)
+        .set('x-csrf-token', session.csrf)
+        .send({
+          timeline: { mode: 'FIXED_DEADLINE', deadline: '2026-08-20' },
+          version: project.body.version,
+        })
+        .expect(422);
+
+      expect(JSON.stringify(refusedDeadline.body)).toContain('deadline_before_start');
+
+      /* The estimate is still the one it was, against the deadline it was set. */
+      const after = await readEstimate(session);
+      expect(after.totalEffort.expected).toBe(estimate.totalEffort.expected);
+      expect(after.timelineDescription).toBe(`delivery by ${DEADLINE_DATE}`);
+    }, 180_000);
+  });
+
   /* -------------------------------------------- 5. work in parallel */
 
   it('runs work in parallel and reports role contention', async () => {

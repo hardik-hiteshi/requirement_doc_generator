@@ -1061,6 +1061,112 @@ describe('feasibility', () => {
     );
   });
 
+  /*
+   * A fixed deadline with no start date. The deadline is real; the span is not
+   * yet, and the difference has to survive into the verdict.
+   */
+  describe('a fixed deadline with no start date', () => {
+    const unmeasurable = () =>
+      assessFeasibility(
+        input({
+          availableWorkingDays: null,
+          capacity: capacity({ totalAvailableHours: 0, totalGapHours: 400 }),
+        }),
+      );
+
+    it('is reported as conditional rather than as a verdict', () => {
+      const result = unmeasurable();
+
+      expect(result.determinacy).toBe('CONDITIONAL');
+      expect(result.status).toBe('TIMELINE_UNMEASURABLE');
+      expect(result.reason).toContain('kept exactly as you set it');
+    });
+
+    it('names the start date as the missing information', () => {
+      expect(unmeasurable().missingInformation.map((missing) => missing.kind)).toEqual([
+        'concrete_start_date',
+      ]);
+    });
+
+    it('invents no available capacity between an unknown start and the deadline', () => {
+      const result = unmeasurable();
+
+      expect(result.availableWorkingDays).toBeNull();
+      expect(result.availableHours).toBe(0);
+      // Not a 400-hour shortfall. There is no span to be short against.
+      expect(result.capacityGapHours).toBe(0);
+      expect(result.scheduleGapDays).toBe(0);
+    });
+
+    it('raises no capacity or schedule risk it cannot measure', () => {
+      const result = assessFeasibility(
+        input({
+          availableWorkingDays: null,
+          capacity: capacity({
+            totalAvailableHours: 0,
+            totalGapHours: 400,
+            overloadedRoles: ['BACKEND'],
+          }),
+        }),
+      );
+
+      const kinds = result.risks.map((risk) => risk.kind);
+      expect(kinds).not.toContain('insufficient_capacity');
+      expect(kinds).not.toContain('role_overloaded');
+      expect(kinds).not.toContain('schedule_exceeds_timeline');
+    });
+
+    it('still reports the risks that come from the work itself', () => {
+      const result = assessFeasibility(
+        input({
+          availableWorkingDays: null,
+          highUncertaintyShare: 0.4,
+          hasUnassessedCodebase: true,
+        }),
+      );
+
+      const kinds = result.risks.map((risk) => risk.kind);
+      expect(kinds).toContain('high_uncertainty_share');
+      expect(kinds).toContain('unassessed_codebase');
+    });
+
+    it('keeps the working duration it calculated', () => {
+      // The effort and the sequenced duration do not depend on a start date, so
+      // an unknown start does not degrade them.
+      expect(unmeasurable().requiredWorkingDays).toBe(30);
+    });
+
+    it('lists the team as missing too when nobody has said who is working', () => {
+      const result = assessFeasibility(
+        input({
+          availableWorkingDays: null,
+          capacity: capacity({ capacityUnknown: true, totalAvailableHours: 0 }),
+        }),
+      );
+
+      expect(result.missingInformation.map((missing) => missing.kind)).toEqual([
+        'concrete_start_date',
+        'team_capacity',
+      ]);
+    });
+  });
+
+  it('marks an unknown team as conditional rather than assessed', () => {
+    const result = assessFeasibility(
+      input({ capacity: capacity({ capacityUnknown: true, totalAvailableHours: 0 }) }),
+    );
+
+    expect(result.determinacy).toBe('CONDITIONAL');
+    expect(result.missingInformation.map((missing) => missing.kind)).toEqual(['team_capacity']);
+  });
+
+  it('reports a measurable verdict as determined, with nothing missing', () => {
+    const result = assessFeasibility(input());
+
+    expect(result.determinacy).toBe('DETERMINED');
+    expect(result.missingInformation).toEqual([]);
+  });
+
   it('is tight when a role is loaded past sustainability', () => {
     expect(
       assessFeasibility(input({ capacity: capacity({ overloadedRoles: ['BACKEND'] }) })).status,
