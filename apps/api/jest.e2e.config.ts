@@ -40,6 +40,9 @@ const config: Config = {
    * Phase 6 notes.
    */
   maxWorkers: 2,
+  // Fixed order, and the PDF suite has to be first in its worker process.
+  // The reason is in the file — it is not a preference.
+  testSequencer: '<rootDir>/test/sequencer.cjs',
   clearMocks: true,
 };
 
