@@ -36,6 +36,15 @@ export const DOCUMENT_ERROR_CODES = {
   DOCUMENT_UPSTREAM_STALE: 'DOCUMENT_UPSTREAM_STALE',
   MODULE_NOT_FOUND: 'MODULE_NOT_FOUND',
   NO_FEATURE_PROPOSAL: 'NO_FEATURE_PROPOSAL',
+  /* Phase 8 — the structured row documents. */
+  ROW_NOT_FOUND: 'ROW_NOT_FOUND',
+  NO_ROW_PROPOSAL: 'NO_ROW_PROPOSAL',
+  UNKNOWN_FEATURE: 'UNKNOWN_FEATURE',
+  ATTRIBUTION_REQUIRED: 'ATTRIBUTION_REQUIRED',
+  ASSUMPTION_NOT_CONFIRMABLE: 'ASSUMPTION_NOT_CONFIRMABLE',
+  ASSUMPTION_PROVENANCE_REQUIRED: 'ASSUMPTION_PROVENANCE_REQUIRED',
+  SECTION_NOT_MODEL_WRITABLE: 'SECTION_NOT_MODEL_WRITABLE',
+  CATEGORY_NOT_FOUND: 'CATEGORY_NOT_FOUND',
 } as const;
 
 export type DocumentErrorCode = (typeof DOCUMENT_ERROR_CODES)[keyof typeof DOCUMENT_ERROR_CODES];
@@ -73,6 +82,19 @@ export const DOCUMENT_ERROR_MESSAGES: Readonly<Record<DocumentErrorCode, string>
     'AI document writing is not switched on for this deployment. You can still write and edit every section yourself, validate it and approve it.',
   DOCUMENT_UPSTREAM_STALE:
     'Something this document is built on has changed since it was written, so it cannot be approved or issued as it stands. Read what changed, then regenerate or edit it — nothing has been altered for you.',
+  ROW_NOT_FOUND: 'That entry is not part of this document.',
+  NO_ROW_PROPOSAL: 'There is no suggested rewrite waiting on that entry.',
+  UNKNOWN_FEATURE:
+    'That feature is not in the approved Feature Listing. An acceptance criterion can only be about scope somebody has agreed to.',
+  ATTRIBUTION_REQUIRED:
+    'This entry was added by hand and nothing upstream supports it, so it needs a note saying where it came from before the document can be approved.',
+  ASSUMPTION_NOT_CONFIRMABLE:
+    'That assumption cannot be confirmed from its current state. A rejected assumption has to be reopened first.',
+  ASSUMPTION_PROVENANCE_REQUIRED:
+    'Confirming an assumption means saying what it rests on — the client said it, you are stating it, or a clarification settled it.',
+  SECTION_NOT_MODEL_WRITABLE:
+    'This section is written from the approved technology, timeline, milestones or assumptions, so it is not rewritten with AI. Change the approved source and regenerate.',
+  CATEGORY_NOT_FOUND: 'No entries in this document belong to that category.',
   MODULE_NOT_FOUND: 'No features in this document belong to that module.',
   NO_FEATURE_PROPOSAL: 'That feature has no suggested rewrite waiting.',
 };

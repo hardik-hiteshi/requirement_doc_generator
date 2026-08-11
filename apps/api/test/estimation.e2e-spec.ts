@@ -1083,6 +1083,54 @@ describe('Estimation and timeline (e2e)', () => {
     expect(restored.source).toBe('SYSTEM_CALCULATED');
   }, 180_000);
 
+  /*
+   * Reset after a re-estimation, which is the sequence a reviewer actually performs:
+   * change a figure, re-run because the requirements moved, then decide the override
+   * was wrong after all.
+   */
+  it('puts an override back even after the estimate has been re-run', async () => {
+    const { session, estimate } = await estimatedProject(WEB);
+
+    const target = features(estimate)[0]!;
+    const calculatedHours = target.totalHours;
+
+    const overridden = (
+      await session.agent
+        .patch(ESTIMATION_ROUTES.estimateUnit(target.id))
+        .set('x-csrf-token', session.csrf)
+        .send({
+          effort: { BACKEND: calculatedHours + 50 },
+          expectedVersion: estimate.recordVersion,
+        })
+        .expect(200)
+    ).body.snapshot as EstimateSnapshot;
+
+    expect(overridden.estimates.find((unit) => unit.id === target.id)!.totalHours).not.toBe(
+      calculatedHours,
+    );
+
+    const rerun = await runEstimation(session, overridden);
+
+    /* The override survived, and it still remembers what was calculated. */
+    const survivor = rerun.estimates.find((unit) => unit.id === target.id)!;
+    expect(survivor.source).toBe('USER_OVERRIDE');
+    expect(survivor.originalTotalHours).toBe(calculatedHours);
+
+    const reset = (
+      await session.agent
+        .post(ESTIMATION_ROUTES.resetEstimate(target.id))
+        .set('x-csrf-token', session.csrf)
+        .send({ expectedVersion: rerun.recordVersion })
+        .expect(201)
+    ).body.snapshot as EstimateSnapshot;
+
+    const restored = reset.estimates.find((unit) => unit.id === target.id)!;
+
+    expect(restored.source).toBe('SYSTEM_CALCULATED');
+    expect(restored.totalHours).toBe(calculatedHours);
+    expect(restored.originalTotalHours).toBeUndefined();
+  }, 180_000);
+
   it('refuses an impossible number of hours, including from a person', async () => {
     const { session, estimate } = await estimatedProject(WEB);
     const unitId = features(estimate)[0]!.id;
@@ -1476,6 +1524,327 @@ describe('Estimation and timeline (e2e)', () => {
 
     expect(source).not.toContain('node:https');
     expect(source).not.toContain('fetch(');
+  });
+
+  /* ============================ team capacity and the calendar ========= */
+
+  /**
+   * The planning result with no team, and what changes when one arrives.
+   *
+   * The rule these protect: a user who has not decided who is doing the work still
+   * gets a usable plan. Nobody should have to invent a team to obtain a schedule,
+   * and inventing one would put fabricated capacity into an approved artifact.
+   */
+  describe('planning with and without a team', () => {
+    it('plans without a team, deriving the staffing the work would need', async () => {
+      const { session, estimate } = await estimatedProject(WEB);
+
+      /* No team, and the estimate says so rather than assuming one. */
+      expect(estimate.team.supplied).toBe(false);
+      expect(estimate.team.lines).toEqual([]);
+
+      /* Effort exists, per role and in total. */
+      expect(estimate.totalEffort.expected).toBeGreaterThan(0);
+      expect(Object.keys(estimate.effortByRole).length).toBeGreaterThan(0);
+
+      /* Required staffing is derived, and fractional where that is honest. */
+      expect(estimate.recommendedStaffing.length).toBeGreaterThan(0);
+      for (const line of estimate.recommendedStaffing) {
+        expect(line.people).toBeGreaterThan(0);
+        expect(line.note.length).toBeGreaterThan(0);
+      }
+
+      /*
+       * And there is a schedule, laid out against that derived capacity. This is the
+       * property that was missing: a plan with no team reported zero working days, so
+       * anything downstream quoting the duration had nothing to quote.
+       */
+      expect(estimate.schedule.totalWorkingDays).toBeGreaterThan(0);
+      expect(estimate.schedule.tasks.length).toBeGreaterThan(0);
+
+      /* No start date was given, so the schedule is relative and names no date. */
+      expect(estimate.schedule.startDate).toBeUndefined();
+      expect(estimate.schedule.finishDate).toBeUndefined();
+
+      /* Feasibility is assessed rather than left unknown. */
+      expect(estimate.feasibility.status.length).toBeGreaterThan(0);
+
+      /* Read again: the stored snapshot carries the plan, not just the view. */
+      const stored = await readEstimate(session);
+      expect(stored.schedule.totalWorkingDays).toBe(estimate.schedule.totalWorkingDays);
+    }, 240_000);
+
+    it('keeps the derived plan in the snapshot the rest of the application reads', async () => {
+      const { session, estimate } = await estimatedProject(WEB);
+
+      const approved = (
+        await session.agent
+          .post(ESTIMATION_ROUTES.approve)
+          .set('x-csrf-token', session.csrf)
+          .send({ acknowledgedAiAssistance: true, expectedVersion: estimate.recordVersion })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+
+      /*
+       * Approval freezes the plan it checked. Before this was true, an approved
+       * snapshot could carry the empty schedule defaults while the screen showed a
+       * real one — and every later phase reads the snapshot.
+       */
+      expect(approved.status).toBe('APPROVED');
+      expect(approved.schedule.totalWorkingDays).toBeGreaterThan(0);
+      expect(approved.recommendedStaffing.length).toBeGreaterThan(0);
+      expect(approved.feasibility.status).toBe(estimate.feasibility.status);
+      expect(approved.totalEffort.expected).toBe(estimate.totalEffort.expected);
+    }, 240_000);
+
+    /*
+     * The approved snapshot is what every later phase reads. These assert that it
+     * contains the plan rather than a shell that a reader would have to reconstruct.
+     */
+    it('stores every part of the approved plan, not just a status', async () => {
+      const { session, estimate } = await estimatedProject(WEB);
+
+      const approved = (
+        await session.agent
+          .post(ESTIMATION_ROUTES.approve)
+          .set('x-csrf-token', session.csrf)
+          .send({ acknowledgedAiAssistance: true, expectedVersion: estimate.recordVersion })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+
+      /* Effort, in total and per role. */
+      expect(approved.totalEffort.expected).toBeGreaterThan(0);
+      expect(approved.totalEffort.optimistic).toBeGreaterThan(0);
+      expect(approved.totalEffort.conservative).toBeGreaterThan(0);
+      expect(Object.keys(approved.effortByRole).length).toBeGreaterThan(0);
+      expect(approved.implementationHours).toBeGreaterThan(0);
+
+      /* The schedule, with the tasks in it. */
+      expect(approved.schedule.totalWorkingDays).toBeGreaterThan(0);
+      expect(approved.schedule.tasks.length).toBeGreaterThan(0);
+      expect(approved.schedule.criticalPath.length).toBeGreaterThan(0);
+
+      /* The plan structure and the staffing behind it. */
+      expect(approved.milestones.length).toBeGreaterThan(0);
+      expect(approved.recommendedStaffing.length).toBeGreaterThan(0);
+
+      /* And the verdict. */
+      expect(approved.feasibility.status.length).toBeGreaterThan(0);
+
+      /*
+       * Read it back cold. Nothing here is reconstructed on the way out — the record
+       * itself carries the authority, which is what makes it quotable a month later.
+       */
+      const reread = await readEstimate(session);
+
+      expect(reread.status).toBe('APPROVED');
+      expect(reread.schedule.totalWorkingDays).toBe(approved.schedule.totalWorkingDays);
+      expect(reread.milestones.length).toBe(approved.milestones.length);
+      expect(reread.recommendedStaffing.length).toBe(approved.recommendedStaffing.length);
+      expect(reread.feasibility.status).toBe(approved.feasibility.status);
+      expect(reread.totalEffort.expected).toBe(approved.totalEffort.expected);
+    }, 240_000);
+
+    it('states a tiny staffing requirement as a fraction rather than a whole person', async () => {
+      const { estimate } = await estimatedProject(WEB);
+
+      /* Whatever the shape of the work, no line claims nobody or invents somebody. */
+      for (const line of estimate.recommendedStaffing) {
+        expect(line.people).toBeGreaterThan(0);
+
+        const hours = estimate.effortByRole[line.role] ?? 0;
+
+        /* A role with a couple of hours must not be reported as a full-time person. */
+        if (hours > 0 && hours < estimate.calendar.hoursPerDay) {
+          expect(line.people).toBeLessThan(1);
+        }
+      }
+    }, 240_000);
+
+    it('measures against a supplied team without moving the effort', async () => {
+      const { session, estimate } = await estimatedProject(WEB);
+
+      const effortBefore = { ...estimate.effortByRole };
+      const totalBefore = estimate.totalEffort.expected;
+      const roles = Object.entries(estimate.effortByRole)
+        .filter(([, hours]) => hours > 0)
+        .map(([role]) => role);
+
+      const staffed = (
+        await session.agent
+          .put(ESTIMATION_ROUTES.team)
+          .set('x-csrf-token', session.csrf)
+          .send({
+            lines: roles.map((role) => ({
+              role,
+              people: 1,
+              productiveHoursPerDay: 6,
+              workingDaysPerWeek: 5,
+              availability: 1,
+              availableFromDay: 0,
+            })),
+            expectedVersion: estimate.recordVersion,
+          })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+
+      /* Supplied capacity, measured. */
+      expect(staffed.team.supplied).toBe(true);
+      expect(staffed.team.lines).toHaveLength(roles.length);
+      expect(staffed.utilisation.length).toBeGreaterThan(0);
+      for (const line of staffed.utilisation) {
+        expect(line.availableHours).toBeGreaterThan(0);
+      }
+
+      /* The schedule and the verdict are recalculated. */
+      expect(staffed.schedule.totalWorkingDays).toBeGreaterThan(0);
+      expect(staffed.feasibility.status.length).toBeGreaterThan(0);
+
+      /* The effort is untouched. Capacity never changes what the work is. */
+      expect(staffed.effortByRole).toEqual(effortBefore);
+      expect(staffed.totalEffort.expected).toBe(totalBefore);
+    }, 240_000);
+
+    it('recalculates when the team changes, and returns to derived capacity when removed', async () => {
+      const { session, estimate } = await estimatedProject(WEB);
+
+      const effortBefore = { ...estimate.effortByRole };
+      const roles = Object.entries(estimate.effortByRole)
+        .filter(([, hours]) => hours > 0)
+        .map(([role]) => role);
+
+      const line = (role: string, people: number) => ({
+        role,
+        people,
+        productiveHoursPerDay: 6,
+        workingDaysPerWeek: 5,
+        availability: 1,
+        availableFromDay: 0,
+      });
+
+      const thin = (
+        await session.agent
+          .put(ESTIMATION_ROUTES.team)
+          .set('x-csrf-token', session.csrf)
+          .send({
+            lines: roles.map((role) => line(role, 1)),
+            expectedVersion: estimate.recordVersion,
+          })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+
+      /* More people: the same work, no later and no more loaded. */
+      const generous = (
+        await session.agent
+          .put(ESTIMATION_ROUTES.team)
+          .set('x-csrf-token', session.csrf)
+          .send({
+            lines: roles.map((role) => line(role, 4)),
+            expectedVersion: thin.recordVersion,
+          })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+
+      expect(generous.schedule.totalWorkingDays).toBeLessThanOrEqual(
+        thin.schedule.totalWorkingDays,
+      );
+
+      const worst = (snapshot: EstimateSnapshot): number =>
+        snapshot.utilisation.reduce((highest, entry) => Math.max(highest, entry.utilisation), 0);
+
+      expect(worst(generous)).toBeLessThanOrEqual(worst(thin));
+      expect(generous.effortByRole).toEqual(effortBefore);
+
+      /* Removing the team returns to the derived planning capacity. */
+      const removed = (
+        await session.agent
+          .put(ESTIMATION_ROUTES.team)
+          .set('x-csrf-token', session.csrf)
+          .send({ lines: [], expectedVersion: generous.recordVersion })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+
+      expect(removed.team.supplied).toBe(false);
+      expect(removed.team.lines).toEqual([]);
+      expect(removed.recommendedStaffing.length).toBeGreaterThan(0);
+      expect(removed.schedule.totalWorkingDays).toBeGreaterThan(0);
+      /* And still the same work. */
+      expect(removed.effortByRole).toEqual(effortBefore);
+    }, 240_000);
+
+    it('reschedules when the calendar changes, and leaves the effort alone', async () => {
+      const { session, estimate } = await estimatedProject(WEB);
+
+      const effortBefore = { ...estimate.effortByRole };
+      const daysBefore = estimate.schedule.totalWorkingDays;
+
+      /* Fewer productive hours a day: the same hours take more days. */
+      const shorter = (
+        await session.agent
+          .put(ESTIMATION_ROUTES.calendar)
+          .set('x-csrf-token', session.csrf)
+          .send({
+            calendar: { ...estimate.calendar, hoursPerDay: 4 },
+            expectedVersion: estimate.recordVersion,
+          })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+
+      expect(shorter.calendar.hoursPerDay).toBe(4);
+      expect(shorter.schedule.totalWorkingDays).toBeGreaterThanOrEqual(daysBefore);
+      expect(shorter.effortByRole).toEqual(effortBefore);
+      expect(shorter.totalEffort.expected).toBe(estimate.totalEffort.expected);
+
+      /* A four-day week and a non-working date are both accepted. */
+      const restricted = (
+        await session.agent
+          .put(ESTIMATION_ROUTES.calendar)
+          .set('x-csrf-token', session.csrf)
+          .send({
+            calendar: {
+              ...shorter.calendar,
+              workingWeekdays: [1, 2, 3, 4],
+              holidays: ['2027-01-01'],
+            },
+            expectedVersion: shorter.recordVersion,
+          })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+
+      expect(restricted.calendar.workingWeekdays).toEqual([1, 2, 3, 4]);
+      expect(restricted.calendar.holidays).toEqual(['2027-01-01']);
+      expect(restricted.effortByRole).toEqual(effortBefore);
+    }, 240_000);
+
+    it('refuses to staff a role this project has no work for', async () => {
+      const { session, estimate } = await estimatedProject(WEB);
+
+      const unused = ['MOBILE', 'DEVOPS', 'BA'].find(
+        (role) => (estimate.effortByRole[role] ?? 0) === 0,
+      );
+
+      if (unused === undefined) {
+        return;
+      }
+
+      await session.agent
+        .put(ESTIMATION_ROUTES.team)
+        .set('x-csrf-token', session.csrf)
+        .send({
+          lines: [
+            {
+              role: unused,
+              people: 1,
+              productiveHoursPerDay: 6,
+              workingDaysPerWeek: 5,
+              availability: 1,
+              availableFromDay: 0,
+            },
+          ],
+          expectedVersion: estimate.recordVersion,
+        })
+        .expect(422);
+    }, 240_000);
   });
 
   it('documents every Phase 6 endpoint in the OpenAPI document', async () => {

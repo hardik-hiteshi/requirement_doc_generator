@@ -147,6 +147,29 @@ pnpm blocks dependency lifecycle scripts by default. Approved packages are liste
 in `pnpm-workspace.yaml` under `allowBuilds`. If a new dependency legitimately
 needs one, add it there with a comment explaining why — do not blanket-allow.
 
+**A document refuses to approve and the blocker mentions coverage or assumptions.**
+Working as designed, and the message says what to do. The three most common:
+
+- _"N approved items have no acceptance criterion"_ — write one for each, or record
+  that it is deliberately not covered and why. A gap has to be a decision.
+- _"N suggested assumptions are waiting for a decision"_ — confirm the ones you stand
+  behind and reject the rest. A suggestion never becomes an assumption on its own.
+- _"This document describes something as included that the approved scope excludes"_ —
+  the brief says something is out of scope while the estimate priced it. Decide which
+  is right upstream; a commercial document must not claim both.
+
+**A Statement of Work says "the duration set out in the approved estimate" instead of
+a number of weeks.**
+No team has been supplied, so Phase 6 produced hours and no schedule. The document is
+stating the strongest thing the evidence supports. Supply a team through
+`PUT /projects/current/estimation/team` and regenerate; there is no interface for it
+yet.
+
+**An Assumptions document is empty.**
+Also working as designed. Nothing becomes an assumption unless somebody put it there —
+see [ADR-0036](../adr/0036-assumption-provenance.md). Ask for candidates if you want
+suggestions to work from.
+
 **API exits at startup with "Invalid environment configuration".**
 Working as designed. Fix the listed variables. `cp .env.example .env` gives a
 working local set.

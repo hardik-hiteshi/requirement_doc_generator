@@ -3,6 +3,9 @@ import type { DocumentValidation } from './document-validation.contract';
 import type { DocumentSection } from './document-section.contract';
 import type { DocumentOutdatedReason } from './document-dependency';
 import type { FeatureCoverage, EffortReconciliation } from './feature-listing.contract';
+import type { CriteriaCoverage } from './acceptance-criteria.contract';
+import type { AssumptionSummary } from './assumptions.contract';
+import type { SowScopeReconciliation } from './statement-of-work.contract';
 import { hasProposal } from './document-section.contract';
 
 /**
@@ -36,6 +39,16 @@ export interface DocumentBlockerInput {
   readonly unapprovedPrerequisites: readonly string[];
   /** Feature rows with a suggested rewrite waiting for a decision. */
   readonly pendingFeatureIds?: readonly string[];
+  /** Structured rows with a suggested rewrite waiting for a decision. */
+  readonly pendingRowIds?: readonly string[];
+  /** Rows added by hand with nothing saying where they came from. */
+  readonly unattributedRowIds?: readonly string[];
+  /** Acceptance Criteria coverage, when this is that document. */
+  readonly criteriaCoverage?: CriteriaCoverage | null;
+  /** Assumption counts, when this is that document. */
+  readonly assumptionSummary?: AssumptionSummary | null;
+  /** SOW scope reconciliation, when this is that document. */
+  readonly scopeReconciliation?: SowScopeReconciliation | null;
 }
 
 export function calculateDocumentBlockers(input: DocumentBlockerInput): readonly DocumentBlocker[] {
@@ -93,11 +106,11 @@ export function calculateDocumentBlockers(input: DocumentBlockerInput): readonly
   }
 
   const pendingSections = input.sections.filter(hasProposal);
-  const pendingRows = input.pendingFeatureIds ?? [];
+  const pendingRows = [...(input.pendingFeatureIds ?? []), ...(input.pendingRowIds ?? [])];
   const pending = pendingSections.length + pendingRows.length;
 
   if (pending > 0) {
-    const noun = pendingSections.length > 0 ? 'section' : 'feature';
+    const noun = pendingSections.length > 0 ? 'section' : 'entry';
 
     blockers.push({
       kind: 'unresolved_proposal',
@@ -131,6 +144,93 @@ export function calculateDocumentBlockers(input: DocumentBlockerInput): readonly
       summary: `${input.coverage.unresolved} approved requirement${input.coverage.unresolved === 1 ? ' is' : 's are'} in neither a feature nor the excluded list.`,
       action: 'Add a feature for each, or mark it not applicable with a reason.',
       subjectIds: [...input.coverage.unresolvedRequirementIds],
+    });
+  }
+
+  /*
+   * Phase 8. Each of these is the same discipline as coverage above: a fact about
+   * stored data, with a way through that is a decision per item rather than an
+   * override.
+   */
+  const unattributed = input.unattributedRowIds ?? [];
+
+  if (unattributed.length > 0) {
+    blockers.push({
+      kind: 'attribution_missing',
+      count: unattributed.length,
+      summary: `${unattributed.length} entr${unattributed.length === 1 ? 'y was' : 'ies were'} added by hand with nothing recorded about where ${unattributed.length === 1 ? 'it' : 'they'} came from.`,
+      action:
+        'Say what each one rests on, or remove it — an entry nobody can trace cannot be approved.',
+      subjectIds: [...unattributed],
+    });
+  }
+
+  if (input.criteriaCoverage && !input.criteriaCoverage.complete) {
+    const uncovered = [
+      ...input.criteriaCoverage.uncoveredRequirementIds,
+      ...input.criteriaCoverage.uncoveredFeatureIds,
+    ];
+
+    if (uncovered.length > 0) {
+      blockers.push({
+        kind: 'coverage_incomplete',
+        count: uncovered.length,
+        summary: `${uncovered.length} approved ${uncovered.length === 1 ? 'item has' : 'items have'} no acceptance criterion and no decision to leave one out.`,
+        action: 'Write a criterion for each, or mark it not applicable with a reason.',
+        subjectIds: uncovered.slice(0, 200),
+      });
+    }
+
+    if (input.criteriaCoverage.unsupportedCriterionKeys.length > 0) {
+      blockers.push({
+        kind: 'blocking_validation',
+        count: input.criteriaCoverage.unsupportedCriterionKeys.length,
+        summary: `${input.criteriaCoverage.unsupportedCriterionKeys.length} criterion cites nothing, so nothing supports it.`,
+        action: 'Link each one to the requirement or feature it is about, or remove it.',
+        subjectIds: [...input.criteriaCoverage.unsupportedCriterionKeys],
+      });
+    }
+  }
+
+  if (input.assumptionSummary) {
+    if (input.assumptionSummary.candidates > 0) {
+      blockers.push({
+        kind: 'unconfirmed_assumptions',
+        count: input.assumptionSummary.candidates,
+        summary: `${input.assumptionSummary.candidates} suggested assumption${input.assumptionSummary.candidates === 1 ? ' is' : 's are'} waiting for you to accept or turn ${input.assumptionSummary.candidates === 1 ? 'it' : 'them'} down.`,
+        action:
+          'Confirm the ones you stand behind and reject the rest. A suggestion never becomes an assumption on its own.',
+        subjectIds: [],
+      });
+    }
+
+    if (input.assumptionSummary.blockingUnresolved.length > 0) {
+      blockers.push({
+        kind: 'blocking_assumption',
+        count: input.assumptionSummary.blockingUnresolved.length,
+        summary: `${input.assumptionSummary.blockingUnresolved.length} unresolved assumption${input.assumptionSummary.blockingUnresolved.length === 1 ? '' : 's'} would stop the plan if ${input.assumptionSummary.blockingUnresolved.length === 1 ? 'it were' : 'they were'} wrong.`,
+        action: 'Settle each one, or accept it explicitly, before this document is approved.',
+        subjectIds: [...input.assumptionSummary.blockingUnresolved],
+      });
+    }
+  }
+
+  if (input.scopeReconciliation && !input.scopeReconciliation.reconciled) {
+    const subjects = [
+      ...input.scopeReconciliation.missingFeatureIds,
+      ...input.scopeReconciliation.unknownFeatureIds,
+    ];
+
+    blockers.push({
+      kind: 'scope_not_reconciled',
+      count: Math.max(subjects.length, input.scopeReconciliation.contradictedExclusions.length),
+      summary:
+        input.scopeReconciliation.contradictedExclusions.length > 0
+          ? 'This document describes something as in scope that the approved scope excludes.'
+          : `The scope stated here does not match the approved Feature Listing.`,
+      action:
+        'Regenerate the scope sections — what a commercial document promises has to be what was agreed and estimated.',
+      subjectIds: subjects.slice(0, 200),
     });
   }
 

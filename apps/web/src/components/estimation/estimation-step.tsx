@@ -20,7 +20,9 @@ import {
 } from '@/hooks/use-estimation';
 import { EffortPanel } from './effort-panel';
 import { FeasibilityPanel } from './feasibility-panel';
+import { CalendarPanel } from './calendar-panel';
 import { CapacityPanel } from './capacity-panel';
+import { TeamPanel } from './team-panel';
 import { SchedulePanel } from './schedule-panel';
 import { EstimateTable } from './estimate-table';
 
@@ -205,6 +207,13 @@ export function EstimationStep() {
       */}
       <EffortPanel estimate={estimate} />
       <CapacityPanel estimate={estimate} />
+      {/*
+       * The two inputs behind every duration on this screen. They sit after
+       * capacity because that is the order a reader needs them in: what the plan
+       * would take, then who is available and on what calendar.
+       */}
+      <TeamPanel estimate={estimate} />
+      <CalendarPanel estimate={estimate} />
       <SchedulePanel estimate={estimate} />
       <FeasibilityPanel estimate={estimate} />
 

@@ -21,6 +21,25 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import {
+  addRowSchema,
+  confirmAssumptionSchema,
+  editRowSchema,
+  excludeRowSchema,
+  regenerateRowGroupSchema,
+  regenerateRowSchema,
+  rejectAssumptionSchema,
+  resolveRowProposalSchema,
+  settleAssumptionSchema,
+  type AddRow,
+  type ConfirmAssumption,
+  type DocumentRow,
+  type EditRow,
+  type ExcludeRow,
+  type RegenerateRow,
+  type RegenerateRowGroup,
+  type RejectAssumption,
+  type ResolveRowProposal,
+  type SettleAssumption,
   acknowledgeFindingSchema,
   applyCorrectionSchema,
   approveDocumentSchema,
@@ -426,6 +445,211 @@ export class DocumentsController {
         context(request),
         documentType(type),
         featureId,
+        body,
+      ),
+    };
+  }
+
+  /* ------------------------------------------------- Phase 8: structured rows */
+
+  /*
+   * One set of row endpoints for every list document. The row kind comes from the
+   * document type in the path, so Acceptance Criteria and Assumptions share these
+   * and a later list document needs no new route.
+   */
+
+  @Get(':type/rows')
+  @ApiOperation({ summary: 'The structured entries of a list document' })
+  @ApiOkResponse({ description: 'The entries, in display order.' })
+  async rows(
+    @Param('type') type: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ rows: readonly DocumentRow[] }> {
+    const document = await this.documents.read(context(request), documentType(type));
+
+    return { rows: document.rows };
+  }
+
+  @Post(':type/rows')
+  @ApiOperation({
+    summary: 'Add an entry by hand',
+    description:
+      'Marked as yours, and it asks where it came from: an entry nothing upstream produced cannot be approved without a note saying what it rests on.',
+  })
+  @ApiCreatedResponse({ description: 'The document with the entry added.' })
+  async addRow(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(addRowSchema)) body: AddRow,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return { document: await this.documents.addRow(context(request), documentType(type), body) };
+  }
+
+  @Patch(':type/rows/:rowId')
+  @ApiOperation({
+    summary: 'Edit one entry',
+    description:
+      'An assumption’s status and provenance are not editable here — those move through confirming, rejecting or settling it, where who did it is recorded.',
+  })
+  @ApiOkResponse({ description: 'The document with the edit applied.' })
+  async updateRow(
+    @Param('type') type: string,
+    @Param('rowId') rowId: string,
+    @Body(new ZodValidationPipe(editRowSchema)) body: EditRow,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.updateRow(context(request), documentType(type), rowId, body),
+    };
+  }
+
+  @Post(':type/rows/regenerate-group')
+  @ApiOperation({
+    summary: 'Rewrite every entry in one group',
+    description:
+      'A module for acceptance criteria, a category for assumptions. Entries outside the group are left exactly as they are.',
+  })
+  @ApiCreatedResponse({ description: 'The document, at a new version.' })
+  async regenerateRowGroup(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(regenerateRowGroupSchema)) body: RegenerateRowGroup,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    const result = await this.ai.regenerateRows(
+      context(request),
+      documentType(type),
+      { group: body.group },
+      body,
+    );
+
+    return { document: result };
+  }
+
+  @Post(':type/rows/candidates')
+  @ApiOperation({
+    summary: 'Ask for assumption candidates',
+    description:
+      'Suggestions only. A candidate is recorded as a candidate and stays out of an approved document until somebody confirms it.',
+  })
+  @ApiCreatedResponse({ description: 'The document with the candidates added.' })
+  async assumptionCandidates(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(generateDocumentSchema)) body: GenerateDocument,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.ai.suggestAssumptions(context(request), documentType(type), body),
+    };
+  }
+
+  @Post(':type/rows/:rowId/regenerate')
+  @ApiOperation({ summary: 'Rewrite one entry’s wording' })
+  @ApiCreatedResponse({ description: 'The document, at a new version.' })
+  async regenerateRow(
+    @Param('type') type: string,
+    @Param('rowId') rowId: string,
+    @Body(new ZodValidationPipe(regenerateRowSchema)) body: RegenerateRow,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    const result = await this.ai.regenerateRows(
+      context(request),
+      documentType(type),
+      { rowIds: [rowId] },
+      body,
+    );
+
+    return { document: result };
+  }
+
+  @Post(':type/rows/:rowId/proposal')
+  @ApiOperation({ summary: 'Decide what happens to an entry’s suggested rewrite' })
+  @ApiCreatedResponse({ description: 'The document with the decision applied.' })
+  async resolveRowProposal(
+    @Param('type') type: string,
+    @Param('rowId') rowId: string,
+    @Body(new ZodValidationPipe(resolveRowProposalSchema)) body: ResolveRowProposal,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.resolveRowProposal(
+        context(request),
+        documentType(type),
+        rowId,
+        body,
+      ),
+    };
+  }
+
+  @Post(':type/rows/:rowId/exclude')
+  @ApiOperation({ summary: 'Record that an entry is deliberately left out' })
+  @ApiCreatedResponse({ description: 'The document with the exclusion recorded.' })
+  async excludeRow(
+    @Param('type') type: string,
+    @Param('rowId') rowId: string,
+    @Body(new ZodValidationPipe(excludeRowSchema)) body: ExcludeRow,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.excludeRow(context(request), documentType(type), rowId, body),
+    };
+  }
+
+  @Post(':type/rows/:rowId/confirm')
+  @ApiOperation({
+    summary: 'Stand behind an assumption',
+    description:
+      'The only way an assumption becomes authoritative, and it takes a person. You say what it rests on; the application records that it was you and when.',
+  })
+  @ApiCreatedResponse({ description: 'The document with the assumption confirmed.' })
+  async confirmAssumption(
+    @Param('type') type: string,
+    @Param('rowId') rowId: string,
+    @Body(new ZodValidationPipe(confirmAssumptionSchema)) body: ConfirmAssumption,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.confirmAssumption(
+        context(request),
+        documentType(type),
+        rowId,
+        body,
+      ),
+    };
+  }
+
+  @Post(':type/rows/:rowId/reject')
+  @ApiOperation({ summary: 'Turn an assumption down, with a reason' })
+  @ApiCreatedResponse({ description: 'The document with the rejection recorded.' })
+  async rejectAssumption(
+    @Param('type') type: string,
+    @Param('rowId') rowId: string,
+    @Body(new ZodValidationPipe(rejectAssumptionSchema)) body: RejectAssumption,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.rejectAssumption(
+        context(request),
+        documentType(type),
+        rowId,
+        body,
+      ),
+    };
+  }
+
+  @Post(':type/rows/:rowId/settle')
+  @ApiOperation({ summary: 'Record that an assumption turned out true, or did not' })
+  @ApiCreatedResponse({ description: 'The document with the outcome recorded.' })
+  async settleAssumption(
+    @Param('type') type: string,
+    @Param('rowId') rowId: string,
+    @Body(new ZodValidationPipe(settleAssumptionSchema)) body: SettleAssumption,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.settleAssumption(
+        context(request),
+        documentType(type),
+        rowId,
         body,
       ),
     };

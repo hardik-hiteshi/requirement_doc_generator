@@ -90,12 +90,18 @@ export * from './documents/document-type.contract';
 export * from './documents/document-status.contract';
 export * from './documents/document-dependency';
 export * from './documents/document-section.contract';
+export * from './documents/document-row.contract';
 export * from './documents/document-validation.contract';
 export * from './documents/understanding.contract';
 export * from './documents/feature-listing.contract';
 export * from './documents/document-correction.contract';
 export * from './documents/document-clipboard';
 export * from './documents/feature-csv';
+
+/* Phase 8 — Acceptance Criteria, Assumptions and the Statement of Work. */
+export * from './documents/acceptance-criteria.contract';
+export * from './documents/assumptions.contract';
+export * from './documents/statement-of-work.contract';
 export * from './documents/document-snapshot.contract';
 export * from './documents/document-blockers';
 export * from './documents/document-run.contract';

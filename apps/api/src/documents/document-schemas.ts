@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-import { MODEL_RAISABLE_KINDS } from '@wdrg/contracts';
+import {
+  assumptionCandidateSchema,
+  sowSectionDraftSchema,
+  MODEL_RAISABLE_KINDS,
+} from '@wdrg/contracts';
 
 /**
  * What the model is allowed to return, per Phase 7 task.
@@ -126,3 +130,65 @@ export const documentValidationOutputSchema = z
   .strict();
 
 export type DocumentValidationOutput = z.infer<typeof documentValidationOutputSchema>;
+
+/* ------------------------------------------ Phase 8: acceptance criteria */
+
+/**
+ * Acceptance conditions, as wording.
+ *
+ * No `criterionKey` — the application assigns them, so a model cannot renumber a
+ * document or overwrite a criterion by claiming its key. No `status`, so it cannot
+ * mark anything agreed. No `aspect`, because which class of condition this is
+ * follows from the requirement and is the application's judgement. And nothing
+ * resembling effort, a date or a threshold field: those have nowhere to go.
+ */
+export const acceptanceCriteriaOutputSchema = z
+  .object({
+    criteria: z
+      .array(
+        z
+          .object({
+            /** Must be a feature the run was given. Checked semantically. */
+            featureId: z.string().min(1).max(64),
+            requirementIds: z.array(z.string().max(64)).max(40),
+            given: z.string().max(1_000),
+            when: z.string().max(1_000),
+            then: z.string().min(1).max(2_000),
+            rule: z.string().max(1_000),
+          })
+          .strict(),
+      )
+      .max(500),
+  })
+  .strict();
+
+export type AcceptanceCriteriaOutput = z.infer<typeof acceptanceCriteriaOutputSchema>;
+
+/* -------------------------------------------------- Phase 8: assumptions */
+
+/**
+ * Assumption candidates.
+ *
+ * The schema is `assumptionCandidateSchema` from the contracts, unchanged, because
+ * the absence of `status`, `provenance`, `owner` and `confirmedBy` there is the
+ * whole safety property and it should be stated in one place.
+ */
+export const assumptionCandidatesOutputSchema = z
+  .object({ assumptions: z.array(assumptionCandidateSchema).max(60) })
+  .strict();
+
+export type AssumptionCandidatesOutput = z.infer<typeof assumptionCandidatesOutputSchema>;
+
+/* ---------------------------------------------- Phase 8: statement of work */
+
+/**
+ * One SOW section, as prose.
+ *
+ * Nowhere to put a date, a duration, an hours figure, a price, a technology
+ * version or a status. The sections that carry those facts are composed by the
+ * application and are not model-writable at all — see
+ * `MODEL_WRITABLE_SOW_SECTIONS`.
+ */
+export const sowSectionOutputSchema = sowSectionDraftSchema;
+
+export type SowSectionOutput = z.infer<typeof sowSectionOutputSchema>;

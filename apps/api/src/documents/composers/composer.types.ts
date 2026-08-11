@@ -1,10 +1,14 @@
 import type {
+  AcceptanceCriterion,
+  Assumption,
   DocumentReference,
+  DocumentRow,
   DocumentShape,
   DocumentType,
   EstimateUnit,
   FeatureRow,
   RequirementItem,
+  SowTimeline,
   ValidationFinding,
 } from '@wdrg/contracts';
 
@@ -69,18 +73,71 @@ export interface UpstreamContext {
   readonly requirements: readonly RequirementItem[];
   /** Every requirement, including rejected ones — validation needs to see them. */
   readonly allRequirements: readonly RequirementItem[];
-  /** Confirmed clarifications, as question/answer pairs. */
+  /** Settled clarifications, as question/answer pairs. */
   readonly clarifications: readonly {
     readonly id: string;
     readonly label: string;
     readonly question: string;
     readonly answer: string;
+    /**
+     * Whether the person answering said this was an assumption rather than a
+     * fact the client stated. Phase 4 required them to choose, so this is a
+     * recorded decision rather than an inference.
+     */
+    readonly isAssumption: boolean;
+    /** Whether the answer has been confirmed as the client's. */
+    readonly confirmed: boolean;
   }[];
   readonly stack: UpstreamStack | null;
   readonly estimate: UpstreamArtifact | null;
   readonly estimateUnits: readonly EstimateUnit[];
   /** Blocking issues upstream that a document must not conceal. */
   readonly upstreamBlockers: readonly { readonly kind: string; readonly summary: string }[];
+  /**
+   * The approved schedule, in the terms a document may quote.
+   *
+   * Null when no estimate is approved. `basis` is the important part: it decides
+   * whether a document may name a date at all, and it comes from Phase 6 rather
+   * than from a composer's guess about whether a start date exists.
+   */
+  readonly timeline: SowTimeline | null;
+  /**
+   * Content of the documents before this one, and only where they are authority.
+   *
+   * A prerequisite appears here **only** when it is approved and current — the
+   * reader applies `isAuthoritativeState` before filling these in. So a composer
+   * cannot accidentally build on a draft or a stale document: there is nothing to
+   * build on. That is the sequential rule expressed as data rather than as a check
+   * every composer would have to remember.
+   */
+  readonly documents: UpstreamDocuments;
+}
+
+/** Approved, current content from the documents earlier in the sequence. */
+export interface UpstreamDocuments {
+  readonly understanding: {
+    readonly version: number;
+    readonly sections: readonly {
+      readonly key: string;
+      readonly title: string;
+      readonly body: string;
+    }[];
+  } | null;
+  readonly featureListing: {
+    readonly version: number;
+    readonly features: readonly FeatureRow[];
+    /** Requirements deliberately left out of the listing. */
+    readonly excludedRequirementIds: readonly string[];
+  } | null;
+  readonly acceptanceCriteria: {
+    readonly version: number;
+    readonly criteria: readonly AcceptanceCriterion[];
+  } | null;
+  readonly assumptions: {
+    readonly version: number;
+    /** Every assumption, whatever its state — validation needs to see them all. */
+    readonly assumptions: readonly Assumption[];
+  } | null;
 }
 
 /** One composed section, before the engine assigns ids and origins. */
@@ -94,10 +151,24 @@ export interface ComposedSection {
   readonly references: readonly DocumentReference[];
 }
 
-/** Composed content. A composer fills one of the two, by its shape. */
+/** One composed row, before the engine assigns an id and an origin. */
+export interface ComposedRow {
+  readonly order: number;
+  readonly references: readonly DocumentReference[];
+  /** The document-specific content, already valid against its own schema. */
+  readonly payload: Record<string, unknown>;
+}
+
+/**
+ * Composed content. A composer fills the channel its shape calls for.
+ *
+ * `sections` for prose, `features` for the Feature Listing, `rows` for every other
+ * list document. A composer leaves the others empty.
+ */
 export interface ComposedContent {
   readonly sections: readonly ComposedSection[];
   readonly features: readonly Omit<FeatureRow, 'featureId'>[];
+  readonly rows: readonly ComposedRow[];
 }
 
 export interface ValidationInput {
@@ -120,6 +191,8 @@ export interface ValidationInput {
     readonly references: readonly string[];
   }[];
   readonly features: readonly FeatureRow[];
+  /** Structured rows as stored, with their origin and any pending proposal. */
+  readonly rows: readonly DocumentRow[];
   /** Requirements a person deliberately left out of this document. */
   readonly excludedRequirementIds: readonly string[];
   /** Whether the document was written against the current baseline. */
@@ -131,6 +204,24 @@ export interface DocumentComposer {
   readonly shape: DocumentShape;
   /** Section keys a document of this type cannot be approved without. */
   readonly requiredSectionKeys: readonly string[];
+  /**
+   * The row kind this document is a list of, for a `ROWS` document that uses the
+   * generic row channel. Absent for prose documents and for Feature Listing,
+   * which has its own storage.
+   */
+  readonly rowKind?: DocumentRow['kind'];
+  /**
+   * Whether an empty document is a legitimate result rather than a failure.
+   *
+   * True for Assumptions alone. Every other document is answerable for covering
+   * something — requirements, features, the agreed scope — so no content means
+   * something went wrong. Assumptions is answerable for recording only what
+   * somebody has stood behind, and when nobody has stood behind anything the
+   * correct document is empty. Without this flag the blocker calculation reads
+   * "no content" as "not generated" and refuses to approve a document that is
+   * exactly right.
+   */
+  readonly mayBeEmpty?: boolean;
 
   /**
    * The document, assembled from approved artifacts and nothing else.

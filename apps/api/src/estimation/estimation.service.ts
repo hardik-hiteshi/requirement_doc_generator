@@ -274,6 +274,24 @@ export class EstimationService {
 
     await this.generateDependencies(context, snapshot.version);
 
+    /*
+     * Persist the derived plan, not only the units.
+     *
+     * `assemble` recomputes the schedule, capacity, staffing and feasibility on every
+     * read, so the screen was always right — but the *stored* snapshot kept the empty
+     * defaults until something happened to call `recalculate`, and approval only
+     * flipped the status. Every later phase reads the stored snapshot as authority, so
+     * a Statement of Work asking for the agreed duration found zero working days and
+     * said so, correctly and unhelpfully.
+     *
+     * A snapshot must contain the plan it represents.
+     */
+    const current = await this.repository.currentSnapshot(context.projectId);
+
+    if (current) {
+      await this.recalculate(context, current);
+    }
+
     return { produced: drafts.length, preserved: preserved.length };
   }
 
@@ -762,6 +780,13 @@ export class EstimationService {
       });
     }
 
+    /*
+     * Approval freezes the plan it just checked.
+     *
+     * `canApproveEstimate` judged the view; storing the status without the numbers
+     * behind it would leave an approved snapshot whose schedule and feasibility were
+     * whatever happened to be persisted last. What was approved is what is written.
+     */
     const updated = await this.repository.updateSnapshot(
       context.projectId,
       snapshot.snapshotId,
@@ -770,6 +795,16 @@ export class EstimationService {
         status: 'APPROVED',
         approvedAt: new Date(),
         ...(request.note ? { approvalNote: request.note } : {}),
+        totalEffort: view.snapshot.totalEffort,
+        effortByRole: view.snapshot.effortByRole,
+        implementationHours: view.snapshot.implementationHours,
+        overheadHours: view.snapshot.overheadHours,
+        schedule: view.snapshot.schedule,
+        milestones: view.snapshot.milestones,
+        utilisation: view.snapshot.utilisation,
+        recommendedStaffing: view.snapshot.recommendedStaffing,
+        feasibility: view.snapshot.feasibility,
+        blockers: view.snapshot.blockers,
       },
     );
 
@@ -896,17 +931,50 @@ export class EstimationService {
       })),
     );
 
-    /* 2. Duration, from the graph — never from the hours alone. */
-    const peoplePerRole: Record<string, number> = {};
-
-    for (const line of team.lines) {
-      peoplePerRole[line.role] = (peoplePerRole[line.role] ?? 0) + line.people;
-    }
-
     const startDate =
       upstream.startDate && hasCalendarDate(upstream.startDate)
         ? upstream.startDate.date
         : undefined;
+
+    const availableWorkingDays = upstream.timeline
+      ? timelineWorkingDays(upstream.timeline, calendar, startDate)
+      : null;
+
+    /*
+     * 2. Duration, from the graph — never from the hours alone.
+     *
+     * The capacity the schedule is laid out against depends on whether a team has
+     * been supplied.
+     *
+     * **Team supplied**: the people they actually have. Role contention is real, and
+     * two tasks needing the same single engineer cannot run at once.
+     *
+     * **No team**: the staffing the work *would need* to meet the timeline, derived
+     * by `recommendStaffing` from the effort and the agreed duration. That is the
+     * honest planning answer to "what would this take?", and it is what a reader
+     * expects from a plan with no team attached. Falling back to one person per role
+     * — which is what the scheduler assumes when told nothing — would report a
+     * duration nobody is proposing, produced by an assumption nobody made.
+     *
+     * Nobody is asked to invent a team to obtain a schedule.
+     */
+    const recommended = recommendStaffing({
+      plannedEffort: totals.byRole,
+      calendar,
+      availableWorkingDays,
+    });
+
+    const peoplePerRole: Record<string, number> = {};
+
+    if (team.supplied && team.lines.length > 0) {
+      for (const line of team.lines) {
+        peoplePerRole[line.role] = (peoplePerRole[line.role] ?? 0) + line.people;
+      }
+    } else {
+      for (const line of recommended) {
+        peoplePerRole[line.role] = line.people;
+      }
+    }
 
     const schedule = buildSchedule({
       tasks: counted.map((unit) => ({
@@ -922,10 +990,6 @@ export class EstimationService {
     });
 
     /* 3. Capacity, against the timeline the user set. */
-    const availableWorkingDays = upstream.timeline
-      ? timelineWorkingDays(upstream.timeline, calendar, startDate)
-      : null;
-
     const capacity = calculateCapacity({
       plannedEffort: totals.byRole,
       team,
@@ -988,13 +1052,7 @@ export class EstimationService {
         schedule,
         milestones: deriveMilestones(counted, schedule),
         utilisation: [...capacity.byRole],
-        recommendedStaffing: [
-          ...recommendStaffing({
-            plannedEffort: totals.byRole,
-            calendar,
-            availableWorkingDays,
-          }),
-        ],
+        recommendedStaffing: [...recommended],
         feasibility,
         blockers: [...blockers],
       },

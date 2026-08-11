@@ -13,7 +13,10 @@ import { DocumentsRepository } from './documents.repository';
 import { DocumentsService } from './documents.service';
 import { DocumentsAiService } from './documents-ai.service';
 import { UpstreamReader } from './upstream.reader';
+import { AcceptanceCriteriaComposer } from './composers/acceptance-criteria.composer';
+import { AssumptionsComposer } from './composers/assumptions.composer';
 import { FeatureListingComposer } from './composers/feature-listing.composer';
+import { StatementOfWorkComposer } from './composers/statement-of-work.composer';
 import { UnderstandingComposer } from './composers/understanding.composer';
 import {
   DocumentCorrectionRecord,
@@ -21,6 +24,8 @@ import {
   DocumentFeatureRecord,
   DocumentFeatureSchema,
   DocumentRecord,
+  DocumentRowRecord,
+  DocumentRowSchema,
   DocumentRunRecord,
   DocumentRunSchema,
   DocumentSchema,
@@ -65,6 +70,7 @@ import {
       { name: DocumentRunRecord.name, schema: DocumentRunSchema },
       { name: DocumentValidationRecord.name, schema: DocumentValidationSchema },
       { name: DocumentCorrectionRecord.name, schema: DocumentCorrectionSchema },
+      { name: DocumentRowRecord.name, schema: DocumentRowSchema },
     ]),
   ],
   controllers: [DocumentsController],
@@ -73,6 +79,9 @@ import {
     UpstreamReader,
     UnderstandingComposer,
     FeatureListingComposer,
+    AcceptanceCriteriaComposer,
+    AssumptionsComposer,
+    StatementOfWorkComposer,
     DocumentsService,
     DocumentsAiService,
   ],

@@ -192,6 +192,31 @@ Requires **Tesseract** for text recognition (`OCR_ENABLED=false` to run without
 it). Files are stored on local disk, outside every static directory, and reached
 only through an authorized API route.
 
+## Controlled documents
+
+Seven documents, one engine. `DocumentsService` owns the status machine,
+currentness, versioning, edit protection, the dependency graph, propagation,
+validation and approval; a composer owns what is true of one document. Five are
+implemented — Our Understanding, Feature Listing, Acceptance Criteria, Assumptions,
+Statement of Work — and the Work Breakdown Structure and Client Dependency Sheet are
+declared and reported unavailable rather than hidden.
+
+Each document is locked until the one before it is approved, and a document quotes its
+inputs rather than deciding them: hours come from the approved estimate, technologies
+from the locked stack, and the timeline in the only form the approved schedule permits.
+
+Three rules are worth stating outright, because each is a way this application could
+have done real damage and does not:
+
+- **an acceptance condition cannot invent a commitment.** A response time, an
+  availability figure or a compliance standard that is not in the approved
+  requirements blocks approval — see [documents](docs/product/documents.md);
+- **missing information does not become an assumption.** An assumption needs a person
+  behind it; a gap is a question to ask —
+  [ADR-0036](docs/adr/0036-assumption-provenance.md);
+- **the Statement of Work invents no legal or commercial term**, and names what is
+  missing as missing — [ADR-0037](docs/adr/0037-statement-of-work-boundary.md).
+
 ## Key decisions
 
 Recorded as [ADRs](docs/adr/), with the reasoning and the rejected alternatives:
@@ -223,6 +248,11 @@ Recorded as [ADRs](docs/adr/), with the reasoning and the rejected alternatives:
 | [0025](docs/adr/0025-clarification-integration.md)           | A confirmed clarification is evidence, not an assumption                              |
 | [0009](docs/adr/0009-request-validation-and-mapping.md)      | Reject undeclared properties; map explicitly to domain types                          |
 | [0010](docs/adr/0010-anonymous-project-access.md)            | Anonymous access: split identifier, secret in the URL fragment, stateless session     |
+| [0033](docs/adr/0033-shared-document-engine.md)              | One document engine, seven documents                                                  |
+| [0034](docs/adr/0034-document-authority.md)                  | A document quotes its inputs; it never decides them                                   |
+| [0035](docs/adr/0035-document-status-and-currentness.md)     | Lifecycle status and currentness are two axes                                         |
+| [0036](docs/adr/0036-assumption-provenance.md)               | An assumption needs somebody behind it                                                |
+| [0037](docs/adr/0037-statement-of-work-boundary.md)          | The Statement of Work is contract-ready, and is not a contract                        |
 
 ## Technology
 
@@ -313,8 +343,8 @@ of secrets.
 | 4     | Requirement analysis, conflicts, baseline            | **Complete** |
 | 5     | Technology-stack recommendation and locking          | **Complete** |
 | 6     | Estimation and timeline planning                     | **Complete** |
-| 7     | Document engine + Our Understanding, Feature Listing | Planned      |
-| 8     | Acceptance Criteria, Assumptions, Statement of Work  | Planned      |
+| 7     | Document engine + Our Understanding, Feature Listing | **Complete** |
+| 8     | Acceptance Criteria, Assumptions, Statement of Work  | **Complete** |
 | 9     | Work Breakdown Structure, Client Dependency Sheet    | Planned      |
 | 10    | Editing, versioning, invalidation                    | Planned      |
 | 11    | Export and branding                                  | Planned      |

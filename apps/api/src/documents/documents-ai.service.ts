@@ -27,7 +27,10 @@ import { AI_PROVIDER_PORT } from '../ports';
 import { DocumentError } from './documents.errors';
 import { DocumentsRepository } from './documents.repository';
 import { DocumentsService, type DocumentContext } from './documents.service';
+import { payloadText } from './documents.mapper';
 import {
+  acceptanceCriteriaOutputSchema,
+  assumptionCandidatesOutputSchema,
   documentFeaturesSchema,
   documentPlanSchema,
   documentSectionOutputSchema,
@@ -649,7 +652,7 @@ export class DocumentsAiService {
       });
     }
 
-    return { content: { sections, features: [] }, outputCharacters };
+    return { content: { sections, features: [], rows: [] }, outputCharacters };
   }
 
   /**
@@ -740,7 +743,7 @@ export class DocumentsAiService {
     });
 
     return {
-      content: { sections: [], features },
+      content: { sections: [], features, rows: [] },
       outputCharacters: outcome.value.features.reduce(
         (total, feature) => total + feature.description.length,
         0,
@@ -847,6 +850,247 @@ export class DocumentsAiService {
       (total, requirement) => total + requirement.title.length + requirement.statement.length,
       0,
     );
+  }
+  /* ------------------------------------------------- Phase 8: rows */
+
+  /**
+   * Rewrite the wording of selected rows.
+   *
+   * The model supplies wording; the engine decides what may change. For an
+   * acceptance criterion that is the condition's words — never which feature or
+   * requirement it is about, because that is a scope decision. For an assumption it
+   * is the statement and its impact wording — never the status or the provenance,
+   * because those are what make it authoritative.
+   */
+  async regenerateRows(
+    context: DocumentContext,
+    type: DocumentType,
+    selection: { readonly rowIds?: readonly string[]; readonly group?: string },
+    request: {
+      readonly useAi: boolean;
+      readonly instruction?: string;
+      readonly expectedVersion: number;
+    },
+  ): Promise<DocumentSnapshot> {
+    if (request.useAi && !this.provider) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_GENERATION_NOT_CONFIGURED, 503);
+    }
+
+    const upstream = await this.documents.readUpstream(context);
+    const runId = DocumentsRepository.newId('drun');
+    const taskId =
+      type === 'ACCEPTANCE_CRITERIA' ? 'acceptance_criteria.regenerate' : 'assumptions.suggest';
+
+    await this.repository.createRun({
+      runId,
+      projectId: context.projectId,
+      type,
+      kind: 'SECTION_REGENERATION',
+      status: 'RUNNING',
+      provider: request.useAi && this.provider ? this.provider.name : 'none',
+      modelName: request.useAi ? this.modelName() : 'none',
+      promptVersions: request.useAi ? { [taskId]: 'v1' } : {},
+      sectionKeys: selection.group ? [selection.group] : [...(selection.rowIds ?? [])],
+      startedAt: new Date(),
+      deterministicOnly: !request.useAi,
+    });
+
+    const named = new Map<string, Record<string, unknown>>();
+
+    if (request.useAi && this.provider && type === 'ACCEPTANCE_CRITERIA') {
+      const document = await this.documents.read(context, type);
+      const selected = document.rows.filter((row) =>
+        selection.rowIds ? selection.rowIds.includes(row.rowId) : true,
+      );
+
+      const known = new Set(upstream.context.requirements.map((requirement) => requirement.key));
+      const features = new Set(
+        (upstream.context.documents.featureListing?.features ?? []).map(
+          (feature) => feature.featureId,
+        ),
+      );
+
+      const outcome = await this.runner.run(this.provider, {
+        taskId: 'acceptance_criteria.regenerate',
+        profile: resolveModelProfile(this.config),
+        model: this.modelName(),
+        evidence: [
+          ...upstream.context.requirements.map((requirement) => ({
+            blockId: requirement.key,
+            text: `${requirement.title}\n${requirement.statement}`,
+          })),
+          ...selected.map((row) => ({
+            blockId: payloadText(row.payload, 'criterionKey') || row.rowId,
+            text: JSON.stringify(row.payload),
+          })),
+          ...(request.instruction
+            ? [
+                {
+                  blockId: 'user-correction',
+                  text: `A note from the person reviewing this document about how they would like these conditions worded. ${EVIDENCE_NOTICE}\n\n${request.instruction}`,
+                },
+              ]
+            : []),
+        ],
+        priorResults: [
+          'Return wording only. Do not change which feature or requirement a condition is about.',
+          'No figures and no standards. If the requirements do not state it, it does not exist.',
+        ].join('\n'),
+        schema: acceptanceCriteriaOutputSchema,
+        semantic: {
+          validate: (value) => [
+            ...value.criteria
+              .flatMap((criterion) => criterion.requirementIds)
+              .filter((id) => !known.has(id))
+              .map((id) => ({
+                path: `criteria.${id}`,
+                message: `"${id}" is not a requirement you were given.`,
+                reason: 'hallucinated_source_reference' as const,
+              })),
+            ...value.criteria
+              .map((criterion) => criterion.featureId)
+              .filter((id) => !features.has(id))
+              .map((id) => ({
+                path: `criteria.${id}`,
+                message: `"${id}" is not a feature you were given.`,
+                reason: 'hallucinated_source_reference' as const,
+              })),
+          ],
+        },
+        correlationId: context.correlationId,
+      });
+
+      if (outcome.ok) {
+        /*
+         * Matched to the row by the feature it is about. A suggestion for a row the
+         * user did not select is discarded rather than applied — a targeted rewrite
+         * that quietly touched its neighbours would not be targeted.
+         */
+        for (const criterion of outcome.value.criteria) {
+          const row = selected.find((candidate) =>
+            (
+              (candidate.payload as Record<string, unknown>).featureIds as string[] | undefined
+            )?.includes(criterion.featureId),
+          );
+
+          if (row) {
+            named.set(row.rowId, {
+              given: criterion.given,
+              when: criterion.when,
+              then: criterion.then,
+              rule: criterion.rule,
+            });
+          }
+        }
+      }
+    }
+
+    const snapshot = await this.documents.regenerateRows(
+      context,
+      type,
+      selection,
+      request.expectedVersion,
+      named,
+      request.instruction,
+    );
+
+    await this.repository.finishRun(runId, { status: 'COMPLETED', completedAt: new Date() });
+
+    return snapshot;
+  }
+
+  /**
+   * Ask a model what the plan appears to be resting on.
+   *
+   * Everything it returns is stored as a **candidate**: `DRAFT`, provenance
+   * `MODEL_SUGGESTED`, excluded from an approved document until a person confirms
+   * it. `candidateToAssumption` is the only path from the model's answer to a row,
+   * and it is the function that supplies every authoritative field — the model has
+   * nowhere to put one.
+   */
+  async suggestAssumptions(
+    context: DocumentContext,
+    type: DocumentType,
+    request: { readonly useAi: boolean; readonly expectedVersion: number },
+  ): Promise<DocumentSnapshot> {
+    if (type !== 'ASSUMPTIONS') {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.WRONG_DOCUMENT_SHAPE, 422);
+    }
+
+    if (!request.useAi || !this.provider) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_GENERATION_NOT_CONFIGURED, 503);
+    }
+
+    const upstream = await this.documents.readUpstream(context);
+    const runId = DocumentsRepository.newId('drun');
+
+    await this.repository.createRun({
+      runId,
+      projectId: context.projectId,
+      type,
+      kind: 'FULL_GENERATION',
+      status: 'RUNNING',
+      provider: this.provider.name,
+      modelName: this.modelName(),
+      promptVersions: { 'assumptions.suggest': 'v1' },
+      sectionKeys: [],
+      startedAt: new Date(),
+      deterministicOnly: false,
+    });
+
+    const known = new Map(
+      upstream.context.requirements.map((requirement) => [requirement.key, requirement.id]),
+    );
+
+    const outcome = await this.runner.run(this.provider, {
+      taskId: 'assumptions.suggest',
+      profile: resolveModelProfile(this.config),
+      model: this.modelName(),
+      evidence: upstream.context.requirements.map((requirement) => ({
+        blockId: requirement.key,
+        text: `${requirement.title}\n${requirement.statement}`,
+      })),
+      priorResults: [
+        `Project type: ${upstream.context.projectTypes.join(', ') || 'unspecified'}`,
+        'Everything you return is a candidate for a person to accept or reject.',
+        'A missing answer is not an assumption. Say what would have to be true.',
+      ].join('\n'),
+      schema: assumptionCandidatesOutputSchema,
+      semantic: {
+        validate: (value) =>
+          value.assumptions
+            .flatMap((assumption) => assumption.requirementKeys)
+            .filter((key) => !known.has(key))
+            .map((key) => ({
+              path: `assumptions.${key}`,
+              message: `"${key}" is not a requirement you were given.`,
+              reason: 'hallucinated_source_reference' as const,
+            })),
+      },
+      correlationId: context.correlationId,
+    });
+
+    if (!outcome.ok) {
+      await this.repository.finishRun(runId, {
+        status: 'FAILED',
+        completedAt: new Date(),
+        failureReason: outcome.reason,
+      });
+
+      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_GENERATION_FAILED, 422);
+    }
+
+    const snapshot = await this.documents.addAssumptionCandidates(
+      context,
+      type,
+      outcome.value.assumptions,
+      request.expectedVersion,
+      runId,
+    );
+
+    await this.repository.finishRun(runId, { status: 'COMPLETED', completedAt: new Date() });
+
+    return snapshot;
   }
 }
 

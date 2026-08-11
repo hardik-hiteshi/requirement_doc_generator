@@ -96,6 +96,14 @@ function context(overrides: Partial<UpstreamContext> = {}): UpstreamContext {
     estimate: { id: 'esp_1', version: 1, status: 'APPROVED' },
     estimateUnits: [unit()],
     upstreamBlockers: [],
+    timeline: { basis: 'RELATIVE', workingWeeks: 4, acknowledgedRisk: false },
+    /* No approved documents by default: each suite fills in what it needs. */
+    documents: {
+      understanding: null,
+      featureListing: null,
+      acceptanceCriteria: null,
+      assumptions: null,
+    },
     ...overrides,
   };
 }
@@ -177,6 +185,7 @@ describe('UnderstandingComposer', () => {
         context: context(overrides),
         sections,
         features: [],
+        rows: [],
         excludedRequirementIds: [],
         baselineCurrent,
       });
@@ -293,6 +302,7 @@ describe('UnderstandingComposer', () => {
           section('functional-scope', 'REQ-001 only.'),
         ],
         features: [],
+        rows: [],
         excludedRequirementIds: [],
         baselineCurrent: true,
       });
@@ -381,6 +391,7 @@ describe('FeatureListingComposer', () => {
       features: composer
         .compose(two)
         .features.map((row, index) => ({ ...row, featureId: `ftr_${index}` })),
+      rows: [],
       excludedRequirementIds: [],
       baselineCurrent: true,
     });
@@ -402,6 +413,7 @@ describe('FeatureListingComposer', () => {
       features: composer
         .compose(two)
         .features.map((row, index) => ({ ...row, featureId: `ftr_${index}` })),
+      rows: [],
       excludedRequirementIds: ['REQ-002'],
       baselineCurrent: true,
     });
@@ -422,6 +434,7 @@ describe('FeatureListingComposer', () => {
           technologyIds: ['some-other-framework'],
         },
       ],
+      rows: [],
       excludedRequirementIds: [],
       baselineCurrent: true,
     });

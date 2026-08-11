@@ -192,7 +192,31 @@ export function peopleForHours(
     return 0;
   }
 
-  return Number((hours / (calendar.hoursPerDay * workingDays)).toFixed(2));
+  /*
+   * A requirement rounds **up**, at hundredths of a person, and stays fractional.
+   *
+   * Two properties, both load-bearing.
+   *
+   * **Never zero for work that exists.** Rounding to nearest sends a role with an
+   * hour or two over a long timeline to 0.00, and "this needs nobody" is false about
+   * work somebody has to do. 0.003 of a person becomes 0.01 — the smallest figure
+   * this precision can state — and emphatically not 1.
+   *
+   * **Never less than the work needs.** This is a floor somebody plans against, so
+   * rounding down would understate it. Ceiling at two decimals overstates by at most
+   * a hundredth of a person, which is the honest direction to be wrong in.
+   *
+   * The fraction is preserved throughout. Phase 6's capacity model is fractional on
+   * purpose — 0.3 of a DevOps engineer is a real arrangement, and rounding it to a
+   * whole person would invent three and a half days a week of somebody's time.
+   *
+   * The `toFixed(6)` is a float guard: `1.2 * 100` is `120.00000000000001` in binary
+   * floating point, and ceiling that would report 1.21 people for a clean 1.2.
+   */
+  const exact = hours / (calendar.hoursPerDay * workingDays);
+  const hundredths = Math.ceil(Number((exact * 100).toFixed(6)));
+
+  return Math.max(0.01, hundredths / 100);
 }
 
 /* ------------------------------------------------- staffing recommendation */

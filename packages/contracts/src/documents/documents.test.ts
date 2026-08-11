@@ -90,17 +90,24 @@ import {
 /* ------------------------------------------------------------- the types */
 
 describe('document types', () => {
-  it('declares all seven and implements two', () => {
+  it('declares all seven and implements the first five', () => {
     expect(DOCUMENT_TYPES).toHaveLength(7);
-    expect(IMPLEMENTED_DOCUMENT_TYPES).toEqual(['OUR_UNDERSTANDING', 'FEATURE_LISTING']);
+    expect(IMPLEMENTED_DOCUMENT_TYPES).toEqual([
+      'OUR_UNDERSTANDING',
+      'FEATURE_LISTING',
+      'ACCEPTANCE_CRITERIA',
+      'ASSUMPTIONS',
+      'STATEMENT_OF_WORK',
+    ]);
   });
 
   it('reports honestly which are available', () => {
     expect(isImplementedDocumentType('OUR_UNDERSTANDING')).toBe(true);
     expect(isImplementedDocumentType('FEATURE_LISTING')).toBe(true);
+    expect(isImplementedDocumentType('STATEMENT_OF_WORK')).toBe(true);
     /* Declared for the graph, and not pretending to exist. */
-    expect(isImplementedDocumentType('STATEMENT_OF_WORK')).toBe(false);
     expect(isImplementedDocumentType('WORK_BREAKDOWN_STRUCTURE')).toBe(false);
+    expect(isImplementedDocumentType('CLIENT_DEPENDENCY_SHEET')).toBe(false);
   });
 
   it('orders Understanding before Feature Listing', () => {
@@ -267,16 +274,15 @@ describe('the canonical document workflow', () => {
     expect(DOCUMENT_TYPES.map((type) => DOCUMENT_ORDER[type])).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
-  it('implements the first two in this phase, and no others', () => {
-    expect(IMPLEMENTED_DOCUMENT_TYPES).toEqual(['OUR_UNDERSTANDING', 'FEATURE_LISTING']);
-
+  /* Phases 7 and 8 between them cover the first five. */
+  it('implements the first five, and no others', () => {
     for (const type of DOCUMENT_TYPES) {
-      expect(isImplementedDocumentType(type)).toBe(DOCUMENT_ORDER[type] <= 2);
+      expect(isImplementedDocumentType(type)).toBe(DOCUMENT_ORDER[type] <= 5);
     }
   });
 
   it('reports each unimplemented document as unavailable rather than broken', () => {
-    for (const type of DOCUMENT_TYPES.filter((candidate) => DOCUMENT_ORDER[candidate] > 2)) {
+    for (const type of DOCUMENT_TYPES.filter((candidate) => DOCUMENT_ORDER[candidate] > 5)) {
       /* Every input present: the only reason it is locked is that it does not exist yet. */
       const lock = lockFor(
         type,
@@ -455,9 +461,13 @@ describe('locking', () => {
     ).toBe('prerequisite_document');
   });
 
+  /*
+   * Ordering: telling somebody to approve a baseline so they can generate a
+   * document that does not exist would be worse than saying nothing.
+   */
   it('reports an unimplemented document as unavailable before anything else', () => {
     const lock = lockFor(
-      'STATEMENT_OF_WORK',
+      'WORK_BREAKDOWN_STRUCTURE',
       { availableUpstream: [], documentStates: {} },
       implemented,
     );

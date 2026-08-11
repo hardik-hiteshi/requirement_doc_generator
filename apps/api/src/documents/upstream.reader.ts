@@ -2,13 +2,17 @@ import { Injectable } from '@nestjs/common';
 import {
   currentnessFrom,
   documentOutdatedReasons,
+  isAuthoritativeState,
   DOCUMENT_DEPENDENCIES,
   SETTLED_CLARIFICATION_STATUSES,
+  type AcceptanceCriterion,
+  type Assumption,
   type DocumentOutdatedReason,
   type DocumentState,
   type DocumentStatus,
   type DocumentType,
   type RequirementItem,
+  type SowTimeline,
 } from '@wdrg/contracts';
 
 import { AnalysisRepository } from '../analysis/analysis.repository';
@@ -18,7 +22,8 @@ import { toUnit } from '../estimation/estimation.mapper';
 import { ProjectRepository } from '../projects/project.repository';
 import { StackRepository } from '../stack/stack.repository';
 import { DocumentsRepository } from './documents.repository';
-import type { UpstreamContext } from './composers/composer.types';
+import { toFeatureRow } from './documents.mapper';
+import type { UpstreamContext, UpstreamDocuments } from './composers/composer.types';
 
 export interface UpstreamSnapshot {
   readonly context: UpstreamContext;
@@ -176,13 +181,26 @@ export class UpstreamReader {
         (SETTLED_CLARIFICATION_STATUSES as readonly string[]).includes(clarification.status),
       )
       .map((clarification) => {
-        const answers = clarification.answers as { text?: string }[];
+        const answers = clarification.answers as {
+          text?: string;
+          isAssumption?: boolean;
+          confirmedAt?: Date;
+        }[];
+        const current = answers.at(-1);
 
         return {
           id: clarification.clarificationId,
           label: clarification.key,
           question: clarification.question,
-          answer: answers.at(-1)?.text ?? '',
+          answer: current?.text ?? '',
+          /*
+           * Phase 4 asked the user, at the time they answered, whether this was the
+           * client's fact or their own assumption. That answer is the authoritative
+           * provenance for Document 4 — the one place an assumption can come from
+           * without anybody being asked again.
+           */
+          isAssumption: current?.isAssumption === true,
+          confirmed: current?.confirmedAt !== undefined,
         };
       })
       .filter((entry) => entry.answer.length > 0);
@@ -250,6 +268,17 @@ export class UpstreamReader {
           kind: String((blocker as { kind?: string }).kind ?? 'unknown'),
           summary: String((blocker as { summary?: string }).summary ?? ''),
         })),
+        timeline: approvedEstimate ? this.timelineFrom(approvedEstimate, project) : null,
+        documents: await this.approvedDocuments(projectId, documentRecords, {
+          ...(approvedBaselineVersion !== undefined
+            ? { baselineVersion: approvedBaselineVersion }
+            : {}),
+          ...(lockedStackVersion !== undefined ? { stackVersion: lockedStackVersion } : {}),
+          ...(approvedEstimateVersion !== undefined
+            ? { estimateVersion: approvedEstimateVersion }
+            : {}),
+          baselineCurrent,
+        }),
       },
       baselineCurrent,
       documentStates: Object.fromEntries(
@@ -272,6 +301,147 @@ export class UpstreamReader {
           },
         ]),
       ),
+    };
+  }
+
+  /**
+   * The approved schedule, in the terms a document may quote.
+   *
+   * `basis` is the whole point. A document may name a date only when the project
+   * has one, and this is where that is decided — from the project's own start-date
+   * mode and the client's deadline, not from a composer's guess. `RELATIVE` means
+   * there is no date to name and the document must say "following commencement".
+   */
+  private timelineFrom(
+    estimate: {
+      schedule?: Record<string, unknown>;
+      feasibility?: Record<string, unknown>;
+      acknowledgedFeasibility?: string;
+    },
+    project: { timeline?: Record<string, unknown>; startDate?: Record<string, unknown> } | null,
+  ): SowTimeline {
+    const schedule = (estimate.schedule ?? {}) as {
+      totalWorkingDays?: number;
+      startDate?: string;
+      relativeOnly?: boolean;
+    };
+    const timeline = (project?.timeline ?? {}) as { mode?: string; deadline?: string };
+    const feasibility = (estimate.feasibility ?? {}) as { status?: string };
+
+    const workingDays = schedule.totalWorkingDays ?? 0;
+    /* Five working days to the week, which is what Phase 6's calendar assumes. */
+    const workingWeeks = workingDays > 0 ? Math.ceil(workingDays / 5) : undefined;
+
+    const basis: SowTimeline['basis'] =
+      timeline.mode === 'FIXED_DEADLINE' && timeline.deadline
+        ? 'FIXED_DEADLINE'
+        : schedule.startDate
+          ? 'ABSOLUTE_START'
+          : 'RELATIVE';
+
+    return {
+      basis,
+      ...(workingWeeks !== undefined ? { workingWeeks } : {}),
+      ...(workingDays > 0 ? { workingDays } : {}),
+      ...(schedule.startDate ? { startDate: schedule.startDate } : {}),
+      ...(timeline.deadline ? { deadline: timeline.deadline } : {}),
+      ...(feasibility.status ? { feasibility: feasibility.status } : {}),
+      /*
+       * An estimate approved despite a high-risk verdict. The SOW states the
+       * approved timeline and the risk; it does not quietly substitute a safer
+       * date, which would be this application deciding a commercial question.
+       */
+      acknowledgedRisk: Boolean(estimate.acknowledgedFeasibility),
+    };
+  }
+
+  /**
+   * Content of earlier documents, and only where they are authority.
+   *
+   * A document appears here **only** when it is approved or issued *and* current.
+   * That single condition is the sequential rule and the currentness rule at once,
+   * expressed as data: a composer for document 5 that finds `assumptions: null`
+   * has nothing to build on, and cannot accidentally quote a draft.
+   */
+  private async approvedDocuments(
+    projectId: string,
+    records: readonly {
+      type: string;
+      status: string;
+      version: number;
+      outdatedReasons: unknown[];
+    }[],
+    current: AuthorityVersions,
+  ): Promise<UpstreamDocuments> {
+    const authoritative = new Map<string, { version: number }>();
+
+    for (const record of records) {
+      const state = {
+        status: record.status as DocumentStatus,
+        currentness: currentnessFrom(documentOutdatedReasonsFor(record, current)),
+      };
+
+      if (isAuthoritativeState(state)) {
+        authoritative.set(record.type, { version: record.version });
+      }
+    }
+
+    const understanding = authoritative.get('OUR_UNDERSTANDING');
+    const featureListing = authoritative.get('FEATURE_LISTING');
+    const acceptanceCriteria = authoritative.get('ACCEPTANCE_CRITERIA');
+    const assumptions = authoritative.get('ASSUMPTIONS');
+
+    const [understandingSections, features, criteriaRows, assumptionRows, exclusions] =
+      await Promise.all([
+        understanding
+          ? this.documents.listSections(projectId, 'OUR_UNDERSTANDING', understanding.version)
+          : Promise.resolve([]),
+        featureListing
+          ? this.documents.listFeatures(projectId, 'FEATURE_LISTING', featureListing.version)
+          : Promise.resolve([]),
+        acceptanceCriteria
+          ? this.documents.listRows(projectId, 'ACCEPTANCE_CRITERIA', acceptanceCriteria.version)
+          : Promise.resolve([]),
+        assumptions
+          ? this.documents.listRows(projectId, 'ASSUMPTIONS', assumptions.version)
+          : Promise.resolve([]),
+        featureListing ? this.documents.find(projectId, 'FEATURE_LISTING') : Promise.resolve(null),
+      ]);
+
+    return {
+      understanding: understanding
+        ? {
+            version: understanding.version,
+            sections: understandingSections.map((section) => ({
+              key: section.key,
+              title: section.title,
+              body: section.body,
+            })),
+          }
+        : null,
+      featureListing: featureListing
+        ? {
+            version: featureListing.version,
+            features: features.map(toFeatureRow),
+            excludedRequirementIds: (exclusions?.exclusions ?? []).map(
+              (entry) => entry.requirementId,
+            ),
+          }
+        : null,
+      acceptanceCriteria: acceptanceCriteria
+        ? {
+            version: acceptanceCriteria.version,
+            criteria: criteriaRows
+              .filter((row) => !row.excludedReason)
+              .map((row) => row.payload as unknown as AcceptanceCriterion),
+          }
+        : null,
+      assumptions: assumptions
+        ? {
+            version: assumptions.version,
+            assumptions: assumptionRows.map((row) => row.payload as unknown as Assumption),
+          }
+        : null,
     };
   }
 }

@@ -168,6 +168,33 @@ The web client mirrors this: `useEstimate` sets `staleTime: 0` and
 `refetchOnMount: 'always'`. A cached "the deadline is achievable" after a
 document changed is not slow, it is wrong.
 
+## Planning capacity when there is no team
+
+`buildSchedule` needs people per role. Supplied a team, it uses the real one, because
+role contention is real — two tasks needing the same single engineer cannot run at once.
+
+Supplied nothing, it uses `recommendStaffing`'s derived figures: the staffing the work
+would need to meet the agreed timeline. Told nothing at all the scheduler assumes one
+person per role, which reports a duration nobody is proposing, produced by an assumption
+nobody made. Deriving is the honest planning answer to "what would this take?", and it
+means nobody has to invent a team to obtain a schedule.
+
+`peopleForHours` never returns zero for work that exists. A role with an hour or two over
+a long timeline rounds to 0.00 at two decimal places, and "this needs nobody" is false; a
+recommendation is a floor, so it rounds up to the smallest figure it can state.
+
+## A snapshot contains the plan it represents
+
+`assemble` recomputes the schedule, capacity, staffing and feasibility on every read, so
+the screen is always current. That is not sufficient: **every later phase reads the
+stored snapshot as authority**, so the derived plan has to be written down.
+
+The run persists what it computed, and approval freezes the plan it just checked rather
+than only flipping the status. Before both were true, an estimate that was run and
+approved without any capacity or calendar change kept the empty schedule defaults — the
+screen showed a duration and the artifact contained zero working days, which is how a
+Statement of Work came to ask for the agreed duration and find nothing.
+
 ## Working without a model
 
 `POST /estimation/run` with `useAi: false` touches no provider. The deterministic

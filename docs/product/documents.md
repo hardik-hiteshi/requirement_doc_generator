@@ -229,6 +229,78 @@ baseline is re-approved, and everything downstream is marked out of date so you 
 see what it affected. There is no path that puts a requirement into a document
 without going through the requirements it is supposed to be based on.
 
+## Acceptance Criteria
+
+The conditions for accepting the work. Each one is something you could watch happen
+and agree had happened — "the submitted timesheet appears in the manager's approval
+list", not "the system works correctly".
+
+**It is not a list of test cases.** No steps, no test data, no clicking. A test case
+describes how somebody would check; a criterion describes what has to be true, and
+that is the thing the client agrees to. Step-by-step detail appears only where a
+requirement asks for it.
+
+Some conditions read naturally as Given / When / Then, and those show that way.
+Others — a retention rule, a permission, a reporting figure — do not, and forcing
+them into a scenario makes them read as something a person does when they are not.
+So the shape follows the condition rather than a template.
+
+**Nothing here invents a number.** No response time, no availability percentage, no
+concurrency figure, no browser version, no compliance standard — unless your
+requirements state it, in which case the criterion quotes it. A figure that appears
+from nowhere is a commitment nobody agreed to, and it blocks approval rather than
+warning you about it.
+
+Coverage counts what has a condition and what does not. A feature you deliberately
+leave without one is a recorded decision, not a gap. A condition you add yourself is
+marked as yours and asks where it came from, because one nobody can trace cannot be
+agreed.
+
+## Assumptions
+
+What the plan is resting on, with somebody behind each one.
+
+**A gap in the requirements is not an assumption.** If nobody said which currency,
+that is a question to ask — and writing "we assume GBP" makes it look answered when
+it is not. So an assumption gets in here only when its provenance says a person put
+it there: the client stated it, you are stating it, or a clarification settled it.
+
+That means a project where nobody has flagged anything gets an **empty** Assumptions
+document, and that is a complete answer rather than a gap to fill.
+
+**AI can suggest; only you can confirm.** Suggestions arrive marked as candidates,
+say that nobody has stood behind them, and cannot reach an approved document. To
+confirm one you say what it rests on — and that sentence is what makes the assumption
+worth anything six months later, when somebody asks why the plan assumed it.
+
+Each assumption records what would happen if it were wrong, in words. Not "this would
+cost 40 hours", because nobody calculated that.
+
+## Statement of Work
+
+The commercial document. Scope from the approved Feature Listing, technology from the
+locked stack, the timeline from the approved estimate, assumptions from the ones you
+confirmed, acceptance pointing at the Acceptance Criteria.
+
+**It is contract-ready in structure, and it is not a contract.** No governing law, no
+warranty, no liability limitation, no payment terms, no penalties — none of it is
+invented, and an attempt to write any of it blocks approval. What is missing is listed
+as missing, so you can see what you still have to add before this becomes an
+agreement.
+
+**Nothing about how the work gets built.** No mention of AI, models or tooling. That
+is a commercial decision for you to make deliberately, not something a generator
+leaks by accident.
+
+**The timeline is the estimate's.** If no start date is agreed, the document says
+"approximately N working weeks following commencement" and contains no date at all. If
+you set a deadline, that exact date appears. A timeline accepted as risky says so
+rather than quietly substituting a safer one.
+
+**Roles, not headcount.** "Backend engineering — API and server-side business logic",
+never "two developers will be assigned", unless your capacity plan actually
+established that.
+
 ## What it is not, yet
 
 Copy-to-clipboard and the strict CSV preview work now. **Full DOCX, PDF and XLSX

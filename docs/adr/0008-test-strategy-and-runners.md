@@ -104,3 +104,32 @@ context: it is the reliable way to make a suite stop being run.
 
 **`ts-jest` instead of `@swc/jest`.** Rejected: materially slower, and it would
 type-check twice (the `typecheck` gate already does that properly).
+
+## Addendum, Phase 8: the browser can reach the whole plan
+
+An earlier version of this addendum recorded that the browser could not supply a team,
+because Phase 6 exposed no interface for one — so the browser suite asserted a weaker
+timeline form than the integration suite did.
+
+That gap is closed. The estimation step now has team-capacity and working-calendar
+panels, and the browser suite drives them: no team, add one, change it, remove it, edit
+the calendar, reload. Both suites now assert the same "approximately N working weeks"
+form, because both can reach it.
+
+The lesson worth keeping: a test that asserts a weaker property than the product should
+support is a signal, not a settled boundary. This one was recorded as a limitation for
+one review cycle and was then read back as a missing feature — which is what it was.
+
+## Addendum, Phase 8: optimistic concurrency and test synchronisation
+
+Every mutation carries the record version it expects to be changing, and a stale one
+is refused with 409. That is load-bearing: two people editing the same document, or a
+tab left open, must not overwrite each other silently.
+
+A browser test that clicks Save and then immediately clicks Generate sends the version
+it held before the save returned, and is refused — correctly. The fix belongs in the
+test, which waits for the saved state to appear before issuing the next mutation; a
+person cannot click faster than the round trip, and a test that can must say so.
+
+The concurrency check is never relaxed to make a test pass. If a browser test fails
+with 409, the test is wrong.

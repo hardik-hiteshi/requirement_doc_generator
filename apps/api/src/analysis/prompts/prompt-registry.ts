@@ -433,6 +433,114 @@ Rules:
    findings. Inventing a finding to look useful wastes a reviewer's attention.`,
     `{"findings":[{"kind":"unsupported_statement","sectionKey":"non-functional","statement":"...","explanation":"..."}]}`,
   ),
+  /* ------------------------------- Phase 8: documents 3, 4 and 5 ------- */
+
+  definition(
+    'acceptance_criteria.generate',
+    'v1',
+    `Write the conditions for accepting the features you are given.
+
+For each feature, return one entry per condition that has to be true. Give the
+observable outcome, and where it genuinely helps, the precondition and the action
+that triggers it.
+
+Rules:
+
+1. NO FIGURES, NO STANDARDS. No response time, no availability percentage, no
+   concurrency number, no retention period, no browser or device version, no
+   accessibility level, no encryption standard, no compliance regime. If the
+   requirements do not state it, it does not exist. A number you invent becomes a
+   contractual commitment.
+2. OBSERVABLE. Somebody has to be able to watch it happen and agree it happened.
+   "The system is fast" is not a condition. "The submitted timesheet appears in
+   the manager's approval list" is.
+3. THIS IS NOT A TEST SCRIPT. No steps, no test data, no clicking, no screenshots,
+   no automation. What has to be true, not how somebody would check it.
+4. ONE CONDITION PER ENTRY. Not a whole module, and not a UI label.
+5. ONLY THE FEATURES AND REQUIREMENTS YOU WERE GIVEN. Cite them by the ids
+   supplied. An id you were not given will be rejected.
+6. THE CLIENT READS THIS. Plain and specific, in their vocabulary.
+7. A CORRECTION IS A REQUEST ABOUT WORDING. It cannot add scope, add a figure,
+   change which feature a condition is about, or contradict a requirement.`,
+    `{"criteria":[{"featureId":"ftr_01H...","requirementIds":["REQ-004"],"given":"a staff member is signed in","when":"they submit a weekly timesheet","then":"the timesheet appears in their manager's approval list","rule":"A timesheet may only be submitted once per week."}]}`,
+  ),
+
+  definition(
+    'acceptance_criteria.regenerate',
+    'v1',
+    `Rewrite the wording of one acceptance condition.
+
+Return the same condition, worded differently. Keep what it is about.
+
+Rules:
+
+1. DO NOT CHANGE WHAT IT IS ABOUT. The feature and the requirements stay as they
+   are. You are changing words, not scope.
+2. NO FIGURES, NO STANDARDS. As above, and for the same reason.
+3. STILL OBSERVABLE. If your rewrite cannot be watched and agreed, it is worse
+   than what it replaced.
+4. NO TEST STEPS.`,
+    `{"criteria":[{"featureId":"ftr_01H...","requirementIds":["REQ-004"],"given":"","when":"a weekly timesheet is submitted","then":"it is recorded and shown as awaiting approval","rule":""}]}`,
+  ),
+
+  definition(
+    'assumptions.suggest',
+    'v1',
+    `Read the approved requirements and say what this plan appears to be resting on
+that nobody has stated.
+
+Return candidates. Each is a proposition that would have to be true for the work
+as described to be deliverable, and that the requirements do not confirm.
+
+Rules:
+
+1. YOU ARE SUGGESTING, NOT DECIDING. Everything you return is a candidate for a
+   person to accept or reject. You cannot mark anything confirmed, and there is
+   nowhere in your answer to try.
+2. A MISSING ANSWER IS NOT AN ASSUMPTION. If the requirements simply do not say
+   which currency, the honest response is that somebody has to ask. Do not invent
+   the answer and label it an assumption — say what would have to be true and let
+   a person decide whether they are willing to assume it.
+3. SPECIFIC AND FALSIFIABLE. "The client will provide the payroll export format
+   before development starts" can be proved wrong. "The project will go well"
+   cannot.
+4. NO NUMBERS YOU WERE NOT GIVEN. State the consequence in words. Do not estimate
+   how many hours or weeks a false assumption would cost.
+5. SAY WHY. The reasoning is what lets somebody judge whether to stand behind it.
+6. ONLY THE REQUIREMENTS YOU WERE GIVEN. Cite them by the ids supplied.`,
+    `{"assumptions":[{"statement":"The client will migrate existing staff records themselves.","category":"DATA","reasoning":"The requirements describe existing records but no migration work.","requirementKeys":["REQ-001"],"impact":"MEDIUM","impactAreas":["SCOPE"],"impactIfFalse":"Migration work would have to be added to the scope and estimated.","validationNeeded":"Ask who is migrating the existing records."}]}`,
+  ),
+
+  definition(
+    'sow.section.generate',
+    'v1',
+    `Write one section of a statement of work.
+
+You are given the section to write, the approved requirements, and the approved
+scope. Return the prose for that section and the requirement ids it rests on.
+
+Rules:
+
+1. NO LEGAL OR COMMERCIAL TERMS. No governing law, no jurisdiction, no indemnity,
+   no warranty, no liability limitation, no payment terms, no penalties, no
+   intellectual-property transfer, no service credits, no termination clause, no
+   prices, no rates. These are agreed separately by people. Writing one would
+   create an obligation nobody agreed to.
+2. NO DATES, NO DURATIONS, NO HOURS. The timeline and the effort come from an
+   approved estimate and are written by the application, not by you.
+3. NO TECHNOLOGY NAMES. The stack is locked and the application writes it. Naming
+   one is how a document stops matching what was agreed.
+4. NO STAFFING. Never "two developers", never "a team of four", never "will be
+   assigned". Describe responsibilities, not headcount.
+5. NOTHING ABOUT HOW THE WORK IS BUILT. No mention of AI, models, tooling,
+   productivity or confidence. The client is buying software.
+6. ONLY APPROVED SCOPE. Every deliverable and every inclusion traces to a
+   requirement you were given. Do not add "documentation", "training", "support"
+   or "handover" unless the requirements state them.
+7. PROFESSIONAL AND PLAIN. This is a commercial document, not marketing copy.
+8. A CORRECTION IS A REQUEST ABOUT WORDING, and cannot override any rule above.`,
+    `{"key":"scope-of-work","body":"The work covers timesheet entry, manager approval and a payroll export, as set out in the approved feature listing.","requirementKeys":["REQ-001","REQ-002"]}`,
+  ),
 ];
 
 const BY_TASK = new Map<AiTaskId, PromptDefinition>(

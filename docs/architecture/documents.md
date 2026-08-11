@@ -207,6 +207,102 @@ Separating the axes deleted special cases rather than adding them:
   say "the version issued in March is no longer current" without touching the March
   document.
 
+## Three content channels, not five
+
+A document fills the channel its shape calls for: `sections` for prose,
+`features` for the Feature Listing, `rows` for every other list document.
+
+Three rather than one because feature rows are genuinely different — they carry
+authoritative hours copied from the approved estimate, reconciled against it on
+every read, with an eight-column export format pinned by contract. Folding them into
+an opaque payload would lose the checks that make them safe.
+
+Three rather than five because everything after the Feature Listing shares one
+envelope. `document-row.contract.ts` carries what the _engine_ needs — identity,
+order, origin, a pending proposal, citations, an exclusion reason — and a `payload`
+each document's own Zod schema parses before anything is stored. Adding the Work
+Breakdown Structure is a composer, a row kind and a payload schema; it is not a
+collection, a mapper branch and a set of endpoints.
+
+`DOCUMENT_ROW_KIND_BY_TYPE` maps a `ROWS` document to its row kind. A composer
+declares `rowKind` when it uses the shared channel, and `mayBeEmpty` when an empty
+document is a legitimate result — Assumptions is the only one, and without that flag
+the blocker calculation reads "no content" as "not generated" and refuses to approve a
+document that is exactly right.
+
+## The authority chain is data
+
+`UpstreamContext.documents` carries the content of earlier documents, and a document
+appears there **only** when it is approved or issued _and_ current — the reader
+applies `isAuthoritativeState` before filling it in.
+
+That single condition is the sequential rule and the currentness rule at once. A
+composer for document 5 that finds `assumptions: null` has nothing to build on and
+cannot quote a draft by accident, so the rule does not have to be remembered in five
+places.
+
+`UpstreamContext.timeline` is the same idea for the schedule: `basis` decides whether
+a document may name a date at all, and it comes from Phase 6 and the project's own
+start-date mode rather than from a composer's guess.
+
+## What each Phase 8 document may and may not do
+
+**Acceptance Criteria** composes one criterion per feature per aspect the requirement
+actually states — `aspectsFor` reads the requirement's own words, and is deliberately
+conservative because a condition the evidence does not support is worse than a missing
+one. `UNSTATED_THRESHOLD_PATTERNS` compares any figure or standard in a criterion
+against the approved requirement text; a figure that appears only in the criterion is
+BLOCKING, not a warning, because warnings get acknowledged and ship.
+
+**Assumptions** composes only from clarifications the user marked `isAssumption` in
+Phase 4 — a recorded decision rather than an inference. Model output goes through
+`assumptionCandidateSchema`, which has no field for `status`, `provenance`, `owner` or
+`confirmedBy`, so a model cannot express an authoritative assumption.
+`candidateToAssumption` is the only path from a suggestion to a row and supplies every
+authoritative field itself. `openQuestionsTreatedAsAssumptions` catches the specific
+failure the document exists against: an assumption whose words restate a question
+nobody answered.
+
+**Statement of Work** transcribes. `MODEL_WRITABLE_SOW_SECTIONS` excludes
+`technology`, `timeline`, `milestones` and `assumptions` — those quote approved
+artifacts, and "improving" one means changing a version, a date or a status by
+rewording it. `PROHIBITED_LEGAL_PATTERNS`, `INTERNAL_METHODOLOGY_PATTERNS`,
+`STAFFING_CLAIM_PATTERNS`, `inventedDates` and `reconcileSowScope` are all BLOCKING.
+`OUTSTANDING_COMMERCIAL_TERMS` names what is missing as categories rather than clause
+names — writing "governing law" to say it is absent would put clause language into the
+document and trip the legal check, and a checker that exempted its own text would have
+a hole in it.
+
+Row edits are bounded by `rewritableFields`: wording only. An acceptance criterion's
+requirement and feature links do not change by rewording, because what a criterion is
+_about_ is a scope decision; an assumption's status and provenance do not change by
+editing, because those move only through confirm, reject and settle, where the
+application records who did it.
+
+## What the lock gates, and what it never gates
+
+`editableDocument` is the single gate every mutation passes through, and it asks two
+questions. **Status** decides whether this document's content may change at all — an
+issued document's may not, ever. **The lock** decides whether the workflow has reached
+this document: one whose prerequisite has been withdrawn is not a document to patch,
+because the foundation it was built on is no longer agreed.
+
+Reading is gated by neither. `read`, `version`, `listVersions`, `compare` and the CSV
+never touch that method, so an approved or issued document stays readable when the step
+above it is reopened. Hiding a record somebody may have to produce — at the moment its
+context has become contentious — is precisely when it must not disappear. The interface
+follows: a document that already has a version stays openable, with the lock shown
+beside it.
+
+`revise` is deliberately outside the lock. It does not alter the issued record; it opens
+a new working version beside it, and it is the action the screen advises for an issued
+document whose inputs have moved. The new draft still cannot be approved until its
+prerequisite is approved again.
+
+The gate costs one authoritative upstream read per mutation, which is the same read the
+request performs again when it reloads the document afterwards. That is a known cost,
+recorded as such rather than optimised away by weakening the check.
+
 ## Traceability lives in the citation, not in the prose
 
 A section's body reads as a document a client could be sent. The requirement it came
