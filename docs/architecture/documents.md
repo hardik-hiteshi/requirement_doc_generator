@@ -431,6 +431,20 @@ how you ask. See ADR-0039.
 - **The work breakdown has no delivery tracking.** `status` and `percentComplete`
   exist on a work package and nothing moves them: this is a plan, not a progress
   tool, and nothing in this application observes real progress.
+- **The work breakdown does not link to Feature Listing rows.** A work package traces
+  to requirement keys and estimate units, and `featureIds` is always empty — so the
+  feature half of `calculateWbsCoverage` is inert for this document, and coverage is
+  measured against the scope the estimate priced rather than against the agreed feature
+  rows. Requirement-level tracing reaches the same scope by a different route; the
+  direct feature link would make a per-feature view possible and does not exist.
+- **`clientDependencyIds` on a work package is never populated by generation.** The
+  dependency sheet is generated after the breakdown and carries the link the other way,
+  in `wbsIds`, which avoids a cycle between the two documents. The consequence is that
+  the `dependency_missing_for_task` check only fires for a work package somebody has
+  hand-edited to name a dependency key — it will never fire on generated content.
+- **`resourceCount` and `percentComplete` are declared and unused.** Both are on the
+  work-package shape and nothing sets either. They are where staffing-per-task and
+  delivery tracking would go, and neither is implemented.
 - **Client dependencies are inferred conservatively.** A row appears where an
   integration, a locked third-party technology, an unanswered clarification or a
   clearly client-facing assumption implies one. A dependency implied only by domain
