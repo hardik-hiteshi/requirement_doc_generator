@@ -106,6 +106,45 @@ are the client's own material, not metadata about it.
    time that HTTP requests would otherwise have. Bounded by the timeout and by
    one-job-at-a-time, not eliminated.
 
+## Phase 8: what a generated commercial document can do
+
+Documents 3 to 5 add a class of exposure that has nothing to do with access control:
+the application produces text somebody signs.
+
+**An invented commitment.** An acceptance condition stating a response time, an
+availability figure or a compliance standard the requirements never mentioned is a
+contractual obligation created by a text generator. Controlled by
+`UNSTATED_THRESHOLD_PATTERNS`, which compares any figure in a criterion against the
+approved requirement text, and blocks — not warns — when it appears only in the
+criterion.
+
+**An invented legal term.** A statement of work reading complete, with governing law,
+a warranty and payment terms, would be signed before anybody noticed nothing had
+created those obligations. Controlled by `PROHIBITED_LEGAL_PATTERNS` as a BLOCKING
+check, with the missing terms written into the document as _outstanding_ so their
+absence is visible rather than silent.
+
+**A laundered gap.** A missing answer restated as an assumption reads as agreed. The
+control is provenance: an assumption needs a person behind it, a model cannot express
+one (`assumptionCandidateSchema` has no status or provenance field), and
+`openQuestionsTreatedAsAssumptions` blocks when a confirmed assumption restates an
+unanswered clarification. ADR-0036.
+
+**Internal methodology disclosure.** Whether to tell a client the estimate was
+AI-assisted is a commercial decision belonging to the sender, not to whichever word
+survived a prompt. `INTERNAL_METHODOLOGY_PATTERNS` blocks model names, "AI-assisted
+development", productivity multipliers and confidence figures from every client-facing
+document.
+
+**A staffing promise.** "Two backend developers will be assigned" tells a client
+something untrue about how their project is resourced. `STAFFING_CLAIM_PATTERNS`
+blocks it; responsibilities are safe and are what the document states instead.
+
+Correction instructions remain untrusted evidence throughout, on the Phase 7 footing:
+they travel in the evidence channel, never as system instruction, and the defences
+that matter are structural — a citation check, a locked-stack comparison, a schema
+with no field for hours, a status only a person can set.
+
 ## Out of scope for Phase 2
 
 Malware scanning and upload validation (Phase 3, no uploads exist yet); CAPTCHA

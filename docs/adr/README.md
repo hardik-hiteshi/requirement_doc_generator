@@ -69,3 +69,5 @@ think is part of the value.
 | [0033](0033-shared-document-engine.md)                 | One document engine, seven documents                                | Accepted |
 | [0034](0034-document-authority.md)                     | A document quotes its inputs; it never decides them                 | Accepted |
 | [0035](0035-document-status-and-currentness.md)        | Lifecycle status and currentness are two axes                       | Accepted |
+| [0036](0036-assumption-provenance.md)                  | An assumption needs somebody behind it                              | Accepted |
+| [0037](0037-statement-of-work-boundary.md)             | The Statement of Work is contract-ready, and is not a contract      | Accepted |

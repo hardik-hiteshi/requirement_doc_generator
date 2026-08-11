@@ -104,3 +104,15 @@ context: it is the reliable way to make a suite stop being run.
 
 **`ts-jest` instead of `@swc/jest`.** Rejected: materially slower, and it would
 type-check twice (the `typecheck` gate already does that properly).
+
+## Addendum, Phase 8: what the browser can and cannot reach
+
+Phase 6 exposes no interface for supplying a team, so a browser walkthrough approves an
+estimate with recommended staffing and no schedule. The Statement of Work then states
+its duration in the only form that evidence permits — "the duration set out in the
+approved estimate" — and the browser suite asserts the relative form and the absence of
+any date rather than a week count.
+
+The integration suite supplies a team through the API, so the precise "approximately N
+working weeks" form is asserted there. Splitting it this way keeps both assertions
+honest: neither pretends the interface can reach something it cannot.
