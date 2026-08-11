@@ -107,3 +107,7 @@ export * from './documents/document-blockers';
 export * from './documents/document-run.contract';
 export * from './documents/document-routes';
 export * from './documents/document-errors';
+
+/* Phase 9 — the Work Breakdown Structure and the Client Dependency Sheet. */
+export * from './documents/work-breakdown.contract';
+export * from './documents/client-dependency.contract';

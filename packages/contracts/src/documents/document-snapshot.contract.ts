@@ -8,6 +8,8 @@ import { documentOutdatedReasonSchema } from './document-dependency';
 import { documentRowSchema } from './document-row.contract';
 import { criteriaCoverageSchema } from './acceptance-criteria.contract';
 import { assumptionSummarySchema } from './assumptions.contract';
+import { dependencySummarySchema } from './client-dependency.contract';
+import { wbsCoverageSchema, wbsReconciliationSchema } from './work-breakdown.contract';
 import { sowScopeReconciliationSchema } from './statement-of-work.contract';
 import {
   featureCoverageSchema,
@@ -48,6 +50,16 @@ export const documentBlockerKinds = [
   'blocking_assumption',
   /** The SOW's scope does not reconcile with the approved Feature Listing. */
   'scope_not_reconciled',
+  /* Phase 9 */
+  /**
+   * The work breakdown does not add up to the approved estimate.
+   *
+   * Separate from `effort_mismatch`, which is a document quoting an older set of
+   * hours. This is a breakdown whose own parts do not sum to the plan they came
+   * from — per role, not merely in total, because two roles can offset each other
+   * and leave a believable grand total.
+   */
+  'wbs_not_reconciled',
 ] as const;
 
 export type DocumentBlockerKind = (typeof documentBlockerKinds)[number];
@@ -138,6 +150,11 @@ export const documentSnapshotSchema = z
     criteriaCoverage: criteriaCoverageSchema.nullable(),
     assumptionSummary: assumptionSummarySchema.nullable(),
     scopeReconciliation: sowScopeReconciliationSchema.nullable(),
+    /** Whether the breakdown adds up to the approved estimate, role by role. */
+    wbsReconciliation: wbsReconciliationSchema.nullable(),
+    wbsCoverage: wbsCoverageSchema.nullable(),
+    /** What is outstanding on the dependency sheet, and what of it blocks work. */
+    dependencySummary: dependencySummarySchema.nullable(),
 
     /* Provenance. */
     generator: generatorMetadataSchema.nullable(),

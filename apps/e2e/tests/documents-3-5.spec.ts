@@ -188,10 +188,15 @@ test.describe('Documents 3 to 5', () => {
       await expect(page.getByTestId(`document-card-${type}`)).toContainText(`${order}.`);
     }
 
-    /* 32. Phase 9's two say they are not here yet, rather than failing. */
+    /*
+     * Phase 9 built the last two, so they are on the list as real documents held shut
+     * by the sequence rather than as "not available yet" — and the Open button is
+     * present but disabled while there is no version to read.
+     */
     for (const type of ['WORK_BREAKDOWN_STRUCTURE', 'CLIENT_DEPENDENCY_SHEET']) {
-      await expect(page.getByTestId(`document-lock-${type}`)).toContainText('not available yet');
-      await expect(page.getByTestId(`document-open-${type}`)).toBeHidden();
+      await expect(page.getByTestId(`document-unavailable-${type}`)).toBeHidden();
+      await expect(page.getByTestId(`document-lock-${type}`)).toContainText('Approve');
+      await expect(page.getByTestId(`document-open-${type}`)).toBeDisabled();
     }
 
     /* 3. And the three this phase adds are locked behind their prerequisites. */

@@ -138,6 +138,22 @@ export const AUDIT_EVENT_TYPES = [
   'SOW_VALIDATED',
   /** A targeted rewrite of selected rows in a list document. */
   'DOCUMENT_ROW_REGENERATED',
+
+  /* Phase 9 — the Work Breakdown Structure and the Client Dependency Sheet.
+     The same rule, with one addition that matters more here than anywhere else:
+     a dependency row's text can name a system, an environment, a person or the
+     credential it is about, so only the key, the category and the outcome are
+     recorded. Never the row text, and never — under any circumstances — a
+     credential value. See `CLIENT_DEPENDENCY_STATUS_CHANGED`. */
+  'WBS_GENERATED',
+  'WBS_PACKAGE_EDITED',
+  'WBS_PACKAGE_REGENERATED',
+  'WBS_VALIDATED',
+  'CLIENT_DEPENDENCIES_GENERATED',
+  'CLIENT_DEPENDENCY_EDITED',
+  /** Requested, received or checked. Keys and states only. */
+  'CLIENT_DEPENDENCY_STATUS_CHANGED',
+  'CLIENT_DEPENDENCIES_VALIDATED',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];

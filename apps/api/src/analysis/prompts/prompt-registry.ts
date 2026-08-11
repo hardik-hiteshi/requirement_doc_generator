@@ -541,6 +541,88 @@ Rules:
 8. A CORRECTION IS A REQUEST ABOUT WORDING, and cannot override any rule above.`,
     `{"key":"scope-of-work","body":"The work covers timesheet entry, manager approval and a payroll export, as set out in the approved feature listing.","requirementKeys":["REQ-001","REQ-002"]}`,
   ),
+
+  /* ------------------------------- Phase 9: documents 6 and 7 ---------- */
+
+  definition(
+    'wbs.tasks.generate',
+    'v1',
+    `Name the work in a work breakdown structure.
+
+You are given priced items of work, each with the requirements it covers. For each
+one, say what the task is called, what it involves and what it produces. Where an
+item genuinely divides into distinct pieces of work, propose the split with a
+relative size for each piece.
+
+Rules:
+
+1. NO HOURS. NO DAYS. NO DATES. The effort and the schedule come from an estimate
+   somebody approved, and the application fills them in. There is no field in your
+   answer for any of them, and a figure you state would contradict a plan that has
+   already been signed off.
+2. RELATIVE SIZES ARE NOT HOURS. Where you propose a split, "weight" says how big
+   each piece is compared with the others — 3 against 1 means three times the work.
+   The application divides the approved hours in that proportion.
+3. NOTHING ABOUT SEQUENCE OR CRITICAL PATH. What runs when, what has slack and
+   which chain is critical were all calculated during scheduling.
+4. ONLY THE ITEMS YOU WERE GIVEN. Cite each by the id supplied. An id you were not
+   given will be rejected.
+5. DELIVERABLES ARE CONCRETE. Something a person can look at and agree is done.
+   "Backend work" is not a deliverable; "a working card payment endpoint" is.
+6. A DELIVERY TEAM READS THIS. Specific and plain, in the project's vocabulary.
+7. DO NOT SPLIT FOR THE SAKE OF IT. One task per item is a perfectly good answer,
+   and three token subtasks are worse than one honest one.`,
+    `{"tasks":[{"estimateUnitId":"eun_01H...","phase":"Implementation","module":"Checkout","submodule":"Payment","task":"Implement the card payment endpoint","description":"Server-side charge against the approved provider, including failure handling.","deliverable":"A working card payment endpoint","parts":[{"task":"Request validation","description":"Reject malformed or duplicate charge requests.","weight":1},{"task":"Charge and failure handling","description":"Call the provider and record the outcome.","weight":3}]}]}`,
+  ),
+
+  definition(
+    'wbs.tasks.regenerate',
+    'v1',
+    `Reword one work package.
+
+Return the same work, described differently. Keep what it is.
+
+Rules:
+
+1. DO NOT MOVE IT. The module, the feature and the requirements stay as they are.
+   You are changing words, not the plan.
+2. NO HOURS, NO DAYS, NO DATES, NO SEQUENCE. As above, and for the same reason:
+   they come from an approved estimate.
+3. STILL CONCRETE. If your rewrite is vaguer than what it replaced, it is worse.`,
+    `{"tasks":[{"estimateUnitId":"eun_01H...","phase":"Implementation","module":"Checkout","submodule":"Payment","task":"Build and verify the card charge endpoint","description":"Takes a validated request, charges through the approved provider and records the result.","deliverable":"A card charge endpoint with its failure paths covered"}]}`,
+  ),
+
+  definition(
+    'client_dependencies.suggest',
+    'v1',
+    `Say what this project needs from the client.
+
+You are given the approved requirements and the work planned against them. Return
+the things the delivery team cannot proceed without, that only somebody outside the
+team can provide.
+
+Rules:
+
+1. NEVER A CREDENTIAL VALUE. No key, no token, no password, no connection string,
+   no private key — not even an example one. Say that credentials for a named
+   service are needed. A value in this document cannot be taken back once it is
+   issued, and your answer will be discarded if it contains one.
+2. SPECIFIC ENOUGH TO HAND OVER AND TO CLOSE. "The client must provide all required
+   information" is not a dependency: nobody can action it and nobody can ever mark
+   it done. Name the thing.
+3. ONLY WHAT SOMEBODY OUTSIDE THE TEAM DOES. Internal sequencing between two tasks
+   is not a client dependency, and listing one buries the real ones.
+4. NO OWNER, NO DATE, NO STATUS, NO PRIORITY. Naming the wrong person in a
+   client-facing sheet is worse than naming nobody, and declaring something
+   received is a decision with a timestamp behind it. There is nowhere in your
+   answer for any of these.
+5. SAY WHY IT IS NEEDED. A request the client can see the reason for is one they
+   can act on; one they cannot is one they will argue with.
+6. SAY WHAT GOOD LOOKS LIKE. A format, a scope, an environment — enough that
+   somebody can tell whether what they sent is what was wanted.
+7. ONLY THE REQUIREMENTS YOU WERE GIVEN. Cite them by the ids supplied.`,
+    `{"dependencies":[{"category":"CREDENTIALS","dependency":"Sandbox credentials for the payment provider","description":"Test-mode account access for the provider named in the approved stack.","purpose":"Card payment cannot be built or tested without provider access.","requirementKeys":["REQ-004"],"expectedFormat":"Sandbox key pair, delivered through your own secret manager","impactIfDelayed":"Payment work cannot start and the integration milestone moves."}]}`,
+  ),
 ];
 
 const BY_TASK = new Map<AiTaskId, PromptDefinition>(

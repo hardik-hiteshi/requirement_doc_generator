@@ -7,7 +7,8 @@ documents.
 The public workspace needs no account: a project is reached through a private
 recovery link.
 
-> **Current state: Phase 6 — effort estimation, capacity and timeline planning.**
+> **Current state: Phase 9 — the Work Breakdown Structure and the Client Dependency
+> Sheet, which completes all seven controlled documents.**
 > You can create a project without an account, receive a private recovery link,
 > upload and paste requirement documents, review what was extracted from them,
 > analyse them into a traceable requirement baseline — classification,
@@ -21,8 +22,13 @@ recovery link.
 > technology suggestions and the requirement assessment all run on a model you
 > host — see [self-hosted
 > inference](docs/operations/self-hosted-inference.md) — and both the stack and
-> the estimation steps work end to end with no model at all. Document generation
-> is **not** implemented — see [Roadmap](#roadmap).
+> the estimation steps work end to end with no model at all. All seven controlled
+> documents are then generated from those approved artifacts — Our Understanding,
+> Feature Listing, Acceptance Criteria, Assumptions, Statement of Work, Work
+> Breakdown Structure and Client Dependency Sheet — each locked until the one before
+> it is approved, each quoting its inputs rather than deciding them. **Export is
+> not implemented**: documents can be read, copied and previewed as CSV, and DOCX,
+> PDF and XLSX are a later phase — see [Roadmap](#roadmap).
 
 ---
 
@@ -196,10 +202,11 @@ only through an authorized API route.
 
 Seven documents, one engine. `DocumentsService` owns the status machine,
 currentness, versioning, edit protection, the dependency graph, propagation,
-validation and approval; a composer owns what is true of one document. Five are
-implemented — Our Understanding, Feature Listing, Acceptance Criteria, Assumptions,
-Statement of Work — and the Work Breakdown Structure and Client Dependency Sheet are
-declared and reported unavailable rather than hidden.
+validation and approval; a composer owns what is true of one document. As of Phase 9
+all seven are implemented: Our Understanding, Feature Listing, Acceptance Criteria,
+Assumptions, Statement of Work, Work Breakdown Structure and Client Dependency Sheet.
+The implemented-type gate remains, because the next document declared before it is
+built will need it again.
 
 Each document is locked until the one before it is approved, and a document quotes its
 inputs rather than deciding them: hours come from the approved estimate, technologies
@@ -215,44 +222,53 @@ have done real damage and does not:
   behind it; a gap is a question to ask —
   [ADR-0036](docs/adr/0036-assumption-provenance.md);
 - **the Statement of Work invents no legal or commercial term**, and names what is
-  missing as missing — [ADR-0037](docs/adr/0037-statement-of-work-boundary.md).
+  missing as missing — [ADR-0037](docs/adr/0037-statement-of-work-boundary.md);
+- **the work breakdown is the approved plan, not a second opinion about it.** Hours,
+  working days and the critical path are copied from the approved estimate and proved
+  to match it role by role —
+  [ADR-0038](docs/adr/0038-work-breakdown-projects-the-approved-plan.md);
+- **on the dependency sheet, received is not accepted**, and a credential value is
+  refused before it can be stored —
+  [ADR-0039](docs/adr/0039-received-is-not-accepted.md).
 
 ## Key decisions
 
 Recorded as [ADRs](docs/adr/), with the reasoning and the rejected alternatives:
 
-| ADR                                                          | Decision                                                                              |
-| ------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| [0001](docs/adr/0001-monorepo-with-pnpm-and-turborepo.md)    | Monorepo with pnpm + Turborepo — so a contract and both sides of it change atomically |
-| [0002](docs/adr/0002-modular-monolith.md)                    | Modular monolith, not microservices                                                   |
-| [0003](docs/adr/0003-typescript-version-pinning.md)          | TypeScript 5.9 pinned — 7.x is unsupported by the lint toolchain                      |
-| [0004](docs/adr/0004-mongodb-as-primary-store.md)            | MongoDB, with binaries in object storage and referential data in separate collections |
-| [0005](docs/adr/0005-ports-and-adapters.md)                  | Ports and adapters for every external system                                          |
-| [0006](docs/adr/0006-api-error-model-and-correlation-ids.md) | One error envelope, correlation ids end to end                                        |
-| [0007](docs/adr/0007-zod-as-single-schema-language.md)       | Zod as the single schema language                                                     |
-| [0008](docs/adr/0008-test-strategy-and-runners.md)           | Layered tests; unit suite never needs infrastructure                                  |
-| [0011](docs/adr/0011-file-storage-provider.md)               | Filesystem storage now, S3 behind the same port                                       |
-| [0012](docs/adr/0012-job-queue-provider.md)                  | A MongoDB job queue rather than Redis — one fewer stateful service                    |
-| [0013](docs/adr/0013-extraction-libraries.md)                | One extractor per format, behind a registry                                           |
-| [0014](docs/adr/0014-ocr-provider.md)                        | Tesseract as a local binary, behind an OCR port                                       |
-| [0015](docs/adr/0015-legacy-file-strategy.md)                | A conversion boundary for .doc and .xls, off by default                               |
-| [0016](docs/adr/0016-source-revision-model.md)               | Append-only content revisions with an explicit effective pointer                      |
-| [0017](docs/adr/0017-self-hosted-ai-inference.md)            | Self-hosted inference, never a hosted model vendor                                    |
-| [0018](docs/adr/0018-model-profile-strategy.md)              | Model profiles as data, not a hardcoded choice                                        |
-| [0019](docs/adr/0019-prompt-versioning.md)                   | Versioned, registered, checksummed prompts                                            |
-| [0020](docs/adr/0020-structured-output-repair.md)            | Bounded repair; unvalidated model output is never persisted                           |
-| [0021](docs/adr/0021-inference-endpoint-hardening.md)        | Connect to a validated address, not to a name                                         |
-| [0022](docs/adr/0022-chunking-and-reconciliation.md)         | Chunk, then reconcile across the chunks                                               |
-| [0023](docs/adr/0023-two-confidences.md)                     | Two confidences; only the evidence-derived one governs                                |
-| [0024](docs/adr/0024-baseline-lifecycle.md)                  | The baseline earns its numbers; versions supersede                                    |
-| [0025](docs/adr/0025-clarification-integration.md)           | A confirmed clarification is evidence, not an assumption                              |
-| [0009](docs/adr/0009-request-validation-and-mapping.md)      | Reject undeclared properties; map explicitly to domain types                          |
-| [0010](docs/adr/0010-anonymous-project-access.md)            | Anonymous access: split identifier, secret in the URL fragment, stateless session     |
-| [0033](docs/adr/0033-shared-document-engine.md)              | One document engine, seven documents                                                  |
-| [0034](docs/adr/0034-document-authority.md)                  | A document quotes its inputs; it never decides them                                   |
-| [0035](docs/adr/0035-document-status-and-currentness.md)     | Lifecycle status and currentness are two axes                                         |
-| [0036](docs/adr/0036-assumption-provenance.md)               | An assumption needs somebody behind it                                                |
-| [0037](docs/adr/0037-statement-of-work-boundary.md)          | The Statement of Work is contract-ready, and is not a contract                        |
+| ADR                                                                | Decision                                                                              |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| [0001](docs/adr/0001-monorepo-with-pnpm-and-turborepo.md)          | Monorepo with pnpm + Turborepo — so a contract and both sides of it change atomically |
+| [0002](docs/adr/0002-modular-monolith.md)                          | Modular monolith, not microservices                                                   |
+| [0003](docs/adr/0003-typescript-version-pinning.md)                | TypeScript 5.9 pinned — 7.x is unsupported by the lint toolchain                      |
+| [0004](docs/adr/0004-mongodb-as-primary-store.md)                  | MongoDB, with binaries in object storage and referential data in separate collections |
+| [0005](docs/adr/0005-ports-and-adapters.md)                        | Ports and adapters for every external system                                          |
+| [0006](docs/adr/0006-api-error-model-and-correlation-ids.md)       | One error envelope, correlation ids end to end                                        |
+| [0007](docs/adr/0007-zod-as-single-schema-language.md)             | Zod as the single schema language                                                     |
+| [0008](docs/adr/0008-test-strategy-and-runners.md)                 | Layered tests; unit suite never needs infrastructure                                  |
+| [0011](docs/adr/0011-file-storage-provider.md)                     | Filesystem storage now, S3 behind the same port                                       |
+| [0012](docs/adr/0012-job-queue-provider.md)                        | A MongoDB job queue rather than Redis — one fewer stateful service                    |
+| [0013](docs/adr/0013-extraction-libraries.md)                      | One extractor per format, behind a registry                                           |
+| [0014](docs/adr/0014-ocr-provider.md)                              | Tesseract as a local binary, behind an OCR port                                       |
+| [0015](docs/adr/0015-legacy-file-strategy.md)                      | A conversion boundary for .doc and .xls, off by default                               |
+| [0016](docs/adr/0016-source-revision-model.md)                     | Append-only content revisions with an explicit effective pointer                      |
+| [0017](docs/adr/0017-self-hosted-ai-inference.md)                  | Self-hosted inference, never a hosted model vendor                                    |
+| [0018](docs/adr/0018-model-profile-strategy.md)                    | Model profiles as data, not a hardcoded choice                                        |
+| [0019](docs/adr/0019-prompt-versioning.md)                         | Versioned, registered, checksummed prompts                                            |
+| [0020](docs/adr/0020-structured-output-repair.md)                  | Bounded repair; unvalidated model output is never persisted                           |
+| [0021](docs/adr/0021-inference-endpoint-hardening.md)              | Connect to a validated address, not to a name                                         |
+| [0022](docs/adr/0022-chunking-and-reconciliation.md)               | Chunk, then reconcile across the chunks                                               |
+| [0023](docs/adr/0023-two-confidences.md)                           | Two confidences; only the evidence-derived one governs                                |
+| [0024](docs/adr/0024-baseline-lifecycle.md)                        | The baseline earns its numbers; versions supersede                                    |
+| [0025](docs/adr/0025-clarification-integration.md)                 | A confirmed clarification is evidence, not an assumption                              |
+| [0009](docs/adr/0009-request-validation-and-mapping.md)            | Reject undeclared properties; map explicitly to domain types                          |
+| [0010](docs/adr/0010-anonymous-project-access.md)                  | Anonymous access: split identifier, secret in the URL fragment, stateless session     |
+| [0033](docs/adr/0033-shared-document-engine.md)                    | One document engine, seven documents                                                  |
+| [0034](docs/adr/0034-document-authority.md)                        | A document quotes its inputs; it never decides them                                   |
+| [0035](docs/adr/0035-document-status-and-currentness.md)           | Lifecycle status and currentness are two axes                                         |
+| [0036](docs/adr/0036-assumption-provenance.md)                     | An assumption needs somebody behind it                                                |
+| [0037](docs/adr/0037-statement-of-work-boundary.md)                | The Statement of Work is contract-ready, and is not a contract                        |
+| [0038](docs/adr/0038-work-breakdown-projects-the-approved-plan.md) | The work breakdown projects the approved plan; it never re-derives it                 |
+| [0039](docs/adr/0039-received-is-not-accepted.md)                  | Received is not accepted, and credentials are never stored                            |
 
 ## Technology
 
@@ -345,7 +361,7 @@ of secrets.
 | 6     | Estimation and timeline planning                     | **Complete** |
 | 7     | Document engine + Our Understanding, Feature Listing | **Complete** |
 | 8     | Acceptance Criteria, Assumptions, Statement of Work  | **Complete** |
-| 9     | Work Breakdown Structure, Client Dependency Sheet    | Planned      |
+| 9     | Work Breakdown Structure, Client Dependency Sheet    | **Complete** |
 | 10    | Editing, versioning, invalidation                    | Planned      |
 | 11    | Export and branding                                  | Planned      |
 | 12    | Security, abuse controls, retention                  | Planned      |

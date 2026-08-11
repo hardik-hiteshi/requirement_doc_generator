@@ -25,6 +25,10 @@ import {
   rowsAwaitingDecision,
   acceptanceCriterionSchema,
   assumptionSchema,
+  canTransitionDependency,
+  clientDependencySchema,
+  secretsInDependency,
+  workPackageSchema,
   canTransitionAssumption,
   candidateToAssumption,
   nextAssumptionKey,
@@ -62,6 +66,11 @@ import {
   type ResolveRowProposal,
   type SettleAssumption,
   type DocumentSummary,
+  type ClientDependency,
+  type DependencyStatus,
+  type ReceiveDependency,
+  type RequestDependency,
+  type ValidateDependency,
   type DocumentType,
   type DocumentValidation,
   type DocumentVersionSummary,
@@ -90,9 +99,11 @@ import {
 } from './upstream.reader';
 import { AcceptanceCriteriaComposer } from './composers/acceptance-criteria.composer';
 import { AssumptionsComposer } from './composers/assumptions.composer';
+import { ClientDependencyComposer } from './composers/client-dependency.composer';
 import { FeatureListingComposer } from './composers/feature-listing.composer';
 import { StatementOfWorkComposer } from './composers/statement-of-work.composer';
 import { UnderstandingComposer } from './composers/understanding.composer';
+import { WorkBreakdownComposer } from './composers/work-breakdown.composer';
 import type { ComposedContent, DocumentComposer } from './composers/composer.types';
 import {
   toDocumentSnapshot,
@@ -142,6 +153,8 @@ export class DocumentsService {
     private readonly acceptanceCriteria: AcceptanceCriteriaComposer,
     private readonly assumptions: AssumptionsComposer,
     private readonly statementOfWork: StatementOfWorkComposer,
+    private readonly workBreakdown: WorkBreakdownComposer,
+    private readonly clientDependencies: ClientDependencyComposer,
   ) {
     this.composers = new Map<DocumentType, DocumentComposer>([
       [understanding.type, understanding],
@@ -149,6 +162,8 @@ export class DocumentsService {
       [acceptanceCriteria.type, acceptanceCriteria],
       [assumptions.type, assumptions],
       [statementOfWork.type, statementOfWork],
+      [workBreakdown.type, workBreakdown],
+      [clientDependencies.type, clientDependencies],
     ]);
   }
 
@@ -157,9 +172,11 @@ export class DocumentsService {
   /**
    * Every document's state, whether it exists or not.
    *
-   * The unimplemented five are included and marked unavailable rather than
-   * hidden. A user who can see that Statement of Work is coming, and that it is
-   * not here yet, is better informed than one who sees two documents and wonders.
+   * Every declared document appears, with its status or the reason it is locked.
+   * Anything not yet implemented is marked unavailable rather than hidden — a user
+   * who can see a document is coming, and that it is not here yet, is better
+   * informed than one who sees a short list and wonders. As of Phase 9 all seven
+   * are implemented, so what this reports now is locking rather than absence.
    */
   async list(context: DocumentContext): Promise<readonly DocumentSummary[]> {
     const upstream = await this.upstream.read(context.projectId, context.correlationId);
@@ -1759,6 +1776,16 @@ export class DocumentsService {
       type === 'ASSUMPTIONS' ? this.assumptions.summaryFor(validationInput) : null;
     const scopeReconciliation =
       type === 'STATEMENT_OF_WORK' ? this.statementOfWork.reconciliationFor(validationInput) : null;
+    const wbsReconciliation =
+      type === 'WORK_BREAKDOWN_STRUCTURE'
+        ? this.workBreakdown.reconciliationFor(validationInput)
+        : null;
+    const wbsCoverage =
+      type === 'WORK_BREAKDOWN_STRUCTURE' ? this.workBreakdown.coverageFor(validationInput) : null;
+    const dependencySummary =
+      type === 'CLIENT_DEPENDENCY_SHEET'
+        ? this.clientDependencies.summaryFor(validationInput)
+        : null;
 
     const unapproved = DOCUMENT_DEPENDENCIES[type].documents.filter((prerequisite) => {
       const state = upstream.documentStates[prerequisite];
@@ -1784,6 +1811,8 @@ export class DocumentsService {
       criteriaCoverage,
       assumptionSummary,
       scopeReconciliation,
+      wbsReconciliation,
+      wbsCoverage,
       unapprovedPrerequisites: unapproved,
     });
 
@@ -1808,6 +1837,9 @@ export class DocumentsService {
       criteriaCoverage,
       assumptionSummary,
       scopeReconciliation,
+      wbsReconciliation,
+      wbsCoverage,
+      dependencySummary,
     });
   }
 
@@ -1845,7 +1877,8 @@ export class DocumentsService {
    * happens to land at the same index.
    */
   private static rowKey(payload: Record<string, unknown>): string {
-    const candidate = payload.criterionKey ?? payload.assumptionKey;
+    const candidate =
+      payload.criterionKey ?? payload.assumptionKey ?? payload.wbsId ?? payload.dependencyKey;
 
     return typeof candidate === 'string' ? candidate : '';
   }
@@ -2373,6 +2406,113 @@ export class DocumentsService {
     return this.reload(context, type);
   }
 
+  /* -------------------------------------------------- client dependencies */
+
+  /**
+   * The dependency lifecycle, as three deliberate acts.
+   *
+   * Each is a separate method for the same reason the statuses are separate values:
+   * asking for something, receiving it and finding that it works are three different
+   * events, and a project that treats them as one believes it is unblocked from the
+   * moment an email arrives.
+   *
+   * All three go through `editableDocument`, so an approved or issued sheet refuses
+   * them — the lifecycle is content, and content in an issued document is history.
+   */
+  async requestDependency(
+    context: DocumentContext,
+    type: DocumentType,
+    rowId: string,
+    request: RequestDependency,
+  ): Promise<DocumentSnapshot> {
+    return this.moveDependency(context, type, rowId, request.expectedVersion, 'REQUESTED', {
+      requestedAt: new Date().toISOString(),
+      ...(request.note ? { remarks: request.note } : {}),
+    });
+  }
+
+  /** Record that it turned up. Explicitly *not* that it is usable. */
+  async receiveDependency(
+    context: DocumentContext,
+    type: DocumentType,
+    rowId: string,
+    request: ReceiveDependency,
+  ): Promise<DocumentSnapshot> {
+    return this.moveDependency(
+      context,
+      type,
+      rowId,
+      request.expectedVersion,
+      request.partial ? 'PARTIALLY_RECEIVED' : 'RECEIVED',
+      {
+        receivedAt: new Date().toISOString(),
+        ...(request.note ? { remarks: request.note } : {}),
+      },
+    );
+  }
+
+  /**
+   * Record what checking it showed.
+   *
+   * The note is required by the contract in both directions. "Accepted" with nothing
+   * behind it is indistinguishable from "it arrived and nobody looked", which is the
+   * failure this whole document is arranged to prevent.
+   */
+  async validateDependency(
+    context: DocumentContext,
+    type: DocumentType,
+    rowId: string,
+    request: ValidateDependency,
+  ): Promise<DocumentSnapshot> {
+    return this.moveDependency(context, type, rowId, request.expectedVersion, request.outcome, {
+      validatedAt: new Date().toISOString(),
+      validationNote: request.note,
+    });
+  }
+
+  private async moveDependency(
+    context: DocumentContext,
+    type: DocumentType,
+    rowId: string,
+    expectedVersion: number,
+    to: DependencyStatus,
+    changes: Record<string, unknown>,
+  ): Promise<DocumentSnapshot> {
+    const record = await this.editableDocument(context, type, expectedVersion);
+    const row = await this.expectRow(context.projectId, type, record.version, rowId);
+    const dependency = row.payload as ClientDependency;
+
+    if (!canTransitionDependency(dependency.status, to)) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.DEPENDENCY_TRANSITION_INVALID, 409, undefined, {
+        from: dependency.status,
+        to,
+      });
+    }
+
+    const payload = this.parseRowPayload(
+      type,
+      { ...row.payload, ...changes, status: to },
+      row.payload,
+      { allowStatusChange: true },
+    );
+
+    await this.repository.updateRow(context.projectId, rowId, { payload });
+
+    await this.afterContentChange(context, type, record, 'CLIENT_DEPENDENCY_STATUS_CHANGED', {
+      /*
+       * The key and the states, never the row's text. A dependency's wording can name
+       * a system, an environment or a person, and audit metadata is read by people who
+       * were not cleared for the document.
+       */
+      dependencyKey: dependency.dependencyKey,
+      from: dependency.status,
+      to,
+      credentialsRequired: dependency.credentialsRequired,
+    });
+
+    return this.reload(context, type);
+  }
+
   /* ----------------------------------------------------- row internals */
 
   private async expectRow(
@@ -2418,13 +2558,87 @@ export class DocumentsService {
       }
     }
 
-    const schema = type === 'ACCEPTANCE_CRITERIA' ? acceptanceCriterionSchema : assumptionSchema;
+    /*
+     * The work breakdown's schedule is a copy of the approved plan, so hand-editing a
+     * start day here would produce a document that quietly disagrees with the estimate
+     * somebody signed. Validation would catch it, but refusing the write says where to
+     * make the change instead of leaving an unapprovable document behind.
+     *
+     * Hours are deliberately *not* guarded. Splitting a task or moving work between
+     * roles is a legitimate correction, and `reconcileWbsEffort` is the check: the
+     * document simply cannot be approved until the parts add up to what was approved.
+     */
+    if (type === 'WORK_BREAKDOWN_STRUCTURE' && previous) {
+      const derived = [
+        'relativeStartDay',
+        'relativeFinishDay',
+        'actualStartDate',
+        'actualFinishDate',
+        'workingDuration',
+        'calendarDuration',
+        'slackDays',
+        'onCriticalPath',
+      ] as const;
+
+      for (const field of derived) {
+        if (
+          candidate[field] !== undefined &&
+          JSON.stringify(candidate[field]) !== JSON.stringify(previous[field])
+        ) {
+          throw new DocumentError(DOCUMENT_ERROR_CODES.SCHEDULE_NOT_EDITABLE_HERE, 422);
+        }
+      }
+    }
+
+    /*
+     * A dependency's lifecycle moves through its own actions, which record who decided
+     * and when. Letting an ordinary edit set `status: ACCEPTED` would put the project's
+     * "we are unblocked" signal in a text field with no timestamp behind it.
+     */
+    if (type === 'CLIENT_DEPENDENCY_SHEET' && previous && !options.allowStatusChange) {
+      const guarded = ['status', 'requestedAt', 'receivedAt', 'validatedAt'] as const;
+
+      for (const field of guarded) {
+        if (
+          candidate[field] !== undefined &&
+          JSON.stringify(candidate[field]) !== JSON.stringify(previous[field])
+        ) {
+          throw new DocumentError(DOCUMENT_ERROR_CODES.DEPENDENCY_STATUS_NOT_EDITABLE_HERE, 422);
+        }
+      }
+    }
+
+    const schema =
+      type === 'ACCEPTANCE_CRITERIA'
+        ? acceptanceCriterionSchema
+        : type === 'WORK_BREAKDOWN_STRUCTURE'
+          ? workPackageSchema
+          : type === 'CLIENT_DEPENDENCY_SHEET'
+            ? clientDependencySchema
+            : assumptionSchema;
+
     const parsed = schema.safeParse(candidate);
 
     if (!parsed.success) {
       throw new DocumentError(DOCUMENT_ERROR_CODES.WRONG_DOCUMENT_SHAPE, 422, undefined, {
         problems: parsed.error.issues.map((issue) => issue.path.join('.')).slice(0, 20),
       });
+    }
+
+    /*
+     * The last gate before a credential could enter an immutable version. Checked here
+     * rather than only in validation, because validation is advisory until approval and
+     * this must never be stored at all — a version, once issued, cannot be recalled.
+     */
+    if (type === 'CLIENT_DEPENDENCY_SHEET') {
+      const secrets = secretsInDependency(parsed.data as ClientDependency);
+
+      if (secrets.length > 0) {
+        throw new DocumentError(DOCUMENT_ERROR_CODES.CREDENTIAL_VALUE_REFUSED, 422, undefined, {
+          /* What it looked like, never the text that triggered it. */
+          kinds: secrets,
+        });
+      }
     }
 
     return parsed.data;
@@ -2445,15 +2659,36 @@ export class DocumentsService {
     const allowed =
       type === 'ACCEPTANCE_CRITERIA'
         ? ['module', 'submodule', 'screen', 'actor', 'given', 'when', 'then', 'rule', 'notes']
-        : [
-            'statement',
-            'category',
-            'impact',
-            'impactAreas',
-            'impactIfFalse',
-            'validationNeeded',
-            'notes',
-          ];
+        : type === 'WORK_BREAKDOWN_STRUCTURE'
+          ? /*
+             * Wording only. Not the hours, not the schedule, not the hierarchy: a model
+             * rewriting what a task *is called* is useful, and a model moving a task or
+             * changing its days would be re-planning the project in a text field.
+             */
+            ['task', 'description', 'deliverable', 'notes']
+          : type === 'CLIENT_DEPENDENCY_SHEET'
+            ? /*
+               * Wording and expectations. Never the owner, the due date, the status or
+               * the priority — those commit a person or unblock work, and a rewrite is
+               * not the place for either.
+               */
+              [
+                'dependency',
+                'description',
+                'purpose',
+                'expectedFormat',
+                'impactIfDelayed',
+                'remarks',
+              ]
+            : [
+                'statement',
+                'category',
+                'impact',
+                'impactAreas',
+                'impactIfFalse',
+                'validationNeeded',
+                'notes',
+              ];
 
     return Object.fromEntries(
       Object.entries(candidate).filter(([field]) => allowed.includes(field)),
@@ -2864,6 +3099,9 @@ export class DocumentsService {
       rows: [],
       criteriaCoverage: null,
       assumptionSummary: null,
+      wbsReconciliation: null,
+      wbsCoverage: null,
+      dependencySummary: null,
       scopeReconciliation: null,
       validation: null,
       blockers: [

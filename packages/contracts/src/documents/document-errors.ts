@@ -45,6 +45,13 @@ export const DOCUMENT_ERROR_CODES = {
   ASSUMPTION_PROVENANCE_REQUIRED: 'ASSUMPTION_PROVENANCE_REQUIRED',
   SECTION_NOT_MODEL_WRITABLE: 'SECTION_NOT_MODEL_WRITABLE',
   CATEGORY_NOT_FOUND: 'CATEGORY_NOT_FOUND',
+  /* Phase 9 — the work breakdown and the client dependency sheet. */
+  SCHEDULE_NOT_EDITABLE_HERE: 'SCHEDULE_NOT_EDITABLE_HERE',
+  CREDENTIAL_VALUE_REFUSED: 'CREDENTIAL_VALUE_REFUSED',
+  DEPENDENCY_TRANSITION_INVALID: 'DEPENDENCY_TRANSITION_INVALID',
+  DEPENDENCY_VALIDATION_NOTE_REQUIRED: 'DEPENDENCY_VALIDATION_NOTE_REQUIRED',
+  DEPENDENCY_STATUS_NOT_EDITABLE_HERE: 'DEPENDENCY_STATUS_NOT_EDITABLE_HERE',
+  WBS_PARENT_NOT_FOUND: 'WBS_PARENT_NOT_FOUND',
 } as const;
 
 export type DocumentErrorCode = (typeof DOCUMENT_ERROR_CODES)[keyof typeof DOCUMENT_ERROR_CODES];
@@ -97,4 +104,21 @@ export const DOCUMENT_ERROR_MESSAGES: Readonly<Record<DocumentErrorCode, string>
   CATEGORY_NOT_FOUND: 'No entries in this document belong to that category.',
   MODULE_NOT_FOUND: 'No features in this document belong to that module.',
   NO_FEATURE_PROPOSAL: 'That feature has no suggested rewrite waiting.',
+  /*
+   * Like `EFFORT_NOT_EDITABLE_HERE`, this must not read as a refusal to change the
+   * plan. It can be changed — the message says where, and why doing it there keeps
+   * the breakdown and the approved schedule agreeing with each other.
+   */
+  SCHEDULE_NOT_EDITABLE_HERE:
+    'Start days, durations and the critical path come from the schedule you approved during estimation, so they are changed there rather than here. Adjust the estimate or its dependencies, re-approve, then regenerate this breakdown — that way one plan stays the plan.',
+  CREDENTIAL_VALUE_REFUSED:
+    'That looks like an actual credential. This sheet records that a credential is needed, requested, received and checked — never the value itself, because a document version cannot be unsent once it is issued. Describe what is needed instead, and send the secret through your own secret manager.',
+  DEPENDENCY_TRANSITION_INVALID:
+    'That is not a move this item can make from where it is. Something received has to be checked before it counts as accepted.',
+  DEPENDENCY_VALIDATION_NOTE_REQUIRED:
+    'Say what you checked and what it showed. Accepting or rejecting something without a note leaves no record of why the project was unblocked.',
+  DEPENDENCY_STATUS_NOT_EDITABLE_HERE:
+    'Whether something has been requested, received or accepted is recorded through the actions on the row, so the dates and the decision are captured together rather than typed in.',
+  WBS_PARENT_NOT_FOUND:
+    'That parent is not part of this breakdown, so there is nothing to add the work under.',
 };

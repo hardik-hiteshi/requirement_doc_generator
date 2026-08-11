@@ -15,9 +15,11 @@ import { DocumentsAiService } from './documents-ai.service';
 import { UpstreamReader } from './upstream.reader';
 import { AcceptanceCriteriaComposer } from './composers/acceptance-criteria.composer';
 import { AssumptionsComposer } from './composers/assumptions.composer';
+import { ClientDependencyComposer } from './composers/client-dependency.composer';
 import { FeatureListingComposer } from './composers/feature-listing.composer';
 import { StatementOfWorkComposer } from './composers/statement-of-work.composer';
 import { UnderstandingComposer } from './composers/understanding.composer';
+import { WorkBreakdownComposer } from './composers/work-breakdown.composer';
 import {
   DocumentCorrectionRecord,
   DocumentCorrectionSchema,
@@ -82,6 +84,8 @@ import {
     AcceptanceCriteriaComposer,
     AssumptionsComposer,
     StatementOfWorkComposer,
+    WorkBreakdownComposer,
+    ClientDependencyComposer,
     DocumentsService,
     DocumentsAiService,
   ],

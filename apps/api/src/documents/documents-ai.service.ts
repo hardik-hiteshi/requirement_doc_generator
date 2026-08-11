@@ -6,10 +6,13 @@ import {
   EVIDENCE_NOTICE,
   featureTotalHours,
   isSectionProtected,
+  isTooVague,
   joinDetailPoints,
+  looksLikeSecret,
   MODEL_RAISABLE_KINDS,
   UNDERSTANDING_SECTIONS,
   understandingSection,
+  type AiTaskId,
   type DocumentSnapshot,
   type DocumentType,
   type FeatureRow,
@@ -30,6 +33,8 @@ import { DocumentsService, type DocumentContext } from './documents.service';
 import { payloadText } from './documents.mapper';
 import {
   acceptanceCriteriaOutputSchema,
+  clientDependenciesOutputSchema,
+  wbsTasksOutputSchema,
   assumptionCandidatesOutputSchema,
   documentFeaturesSchema,
   documentPlanSchema,
@@ -878,8 +883,14 @@ export class DocumentsAiService {
 
     const upstream = await this.documents.readUpstream(context);
     const runId = DocumentsRepository.newId('drun');
-    const taskId =
-      type === 'ACCEPTANCE_CRITERIA' ? 'acceptance_criteria.regenerate' : 'assumptions.suggest';
+    const taskId: AiTaskId =
+      type === 'ACCEPTANCE_CRITERIA'
+        ? 'acceptance_criteria.regenerate'
+        : type === 'WORK_BREAKDOWN_STRUCTURE'
+          ? 'wbs.tasks.regenerate'
+          : type === 'CLIENT_DEPENDENCY_SHEET'
+            ? 'client_dependencies.suggest'
+            : 'assumptions.suggest';
 
     await this.repository.createRun({
       runId,
@@ -979,6 +990,184 @@ export class DocumentsAiService {
               when: criterion.when,
               then: criterion.then,
               rule: criterion.rule,
+            });
+          }
+        }
+      }
+    }
+
+    /*
+     * The work breakdown, reworded. Only the four wording fields come back, and
+     * `rewritableFields` discards anything else even if the model returns it — so a
+     * rewrite cannot move a task, change its hours or touch its schedule.
+     */
+    if (request.useAi && this.provider && type === 'WORK_BREAKDOWN_STRUCTURE') {
+      const document = await this.documents.read(context, type);
+      const selected = document.rows.filter((row) =>
+        selection.rowIds ? selection.rowIds.includes(row.rowId) : true,
+      );
+
+      const units = new Set(upstream.context.estimateUnits.map((unit) => unit.id));
+
+      const outcome = await this.runner.run(this.provider, {
+        taskId: 'wbs.tasks.regenerate',
+        profile: resolveModelProfile(this.config),
+        model: this.modelName(),
+        evidence: [
+          ...upstream.context.requirements.map((requirement) => ({
+            blockId: requirement.key,
+            text: `${requirement.title}\n${requirement.statement}`,
+          })),
+          ...selected.map((row) => ({
+            blockId: payloadText(row.payload, 'wbsId') || row.rowId,
+            text: JSON.stringify(row.payload),
+          })),
+          ...(request.instruction
+            ? [
+                {
+                  blockId: 'user-correction',
+                  text: `A note from the person reviewing this breakdown about how they would like the work described. ${EVIDENCE_NOTICE}\n\n${request.instruction}`,
+                },
+              ]
+            : []),
+        ],
+        priorResults: [
+          'Return wording only: what the task is called, what it involves, what it produces.',
+          'The hours, the days and the critical path come from an approved estimate. Do not restate them.',
+          'Do not move work between features or modules. Describing it is the whole task.',
+        ].join('\n'),
+        schema: wbsTasksOutputSchema,
+        semantic: {
+          validate: (value) =>
+            value.tasks
+              .map((task) => task.estimateUnitId)
+              .filter((id) => !units.has(id))
+              .map((id) => ({
+                path: `tasks.${id}`,
+                message: `"${id}" is not an estimate item you were given.`,
+                reason: 'hallucinated_source_reference' as const,
+              })),
+        },
+        correlationId: context.correlationId,
+      });
+
+      if (outcome.ok) {
+        for (const task of outcome.value.tasks) {
+          const row = selected.find((candidate) =>
+            (
+              (candidate.payload as Record<string, unknown>).estimateUnitIds as string[] | undefined
+            )?.includes(task.estimateUnitId),
+          );
+
+          if (row) {
+            named.set(row.rowId, {
+              task: task.task,
+              description: task.description,
+              deliverable: task.deliverable,
+            });
+          }
+        }
+      }
+    }
+
+    /*
+     * The dependency sheet, reworded. The same shape of restriction, and one more
+     * that matters here: nothing the model returns can set an owner, a date or a
+     * status, so a rewrite cannot declare the project unblocked.
+     */
+    if (request.useAi && this.provider && type === 'CLIENT_DEPENDENCY_SHEET') {
+      const document = await this.documents.read(context, type);
+      const selected = document.rows.filter((row) =>
+        selection.rowIds ? selection.rowIds.includes(row.rowId) : true,
+      );
+
+      const known = new Set(upstream.context.requirements.map((requirement) => requirement.key));
+
+      const outcome = await this.runner.run(this.provider, {
+        taskId: 'client_dependencies.suggest',
+        profile: resolveModelProfile(this.config),
+        model: this.modelName(),
+        evidence: [
+          ...upstream.context.requirements.map((requirement) => ({
+            blockId: requirement.key,
+            text: `${requirement.title}\n${requirement.statement}`,
+          })),
+          ...selected.map((row) => ({
+            blockId: payloadText(row.payload, 'dependencyKey') || row.rowId,
+            text: JSON.stringify(row.payload),
+          })),
+          ...(request.instruction
+            ? [
+                {
+                  blockId: 'user-correction',
+                  text: `A note from the person reviewing this sheet about how they would like these requests worded. ${EVIDENCE_NOTICE}\n\n${request.instruction}`,
+                },
+              ]
+            : []),
+        ],
+        priorResults: [
+          'Name something specific the client can hand over. "All required information" is not a dependency.',
+          'Never include a credential, key, token or password value. Say what is needed, not what it is.',
+          'Do not name a person, a date or a status. Those are decisions somebody else records.',
+        ].join('\n'),
+        schema: clientDependenciesOutputSchema,
+        semantic: {
+          validate: (value) => [
+            ...value.dependencies
+              .flatMap((dependency) => dependency.requirementKeys)
+              .filter((key) => !known.has(key))
+              .map((key) => ({
+                path: `dependencies.${key}`,
+                message: `"${key}" is not a requirement you were given.`,
+                reason: 'hallucinated_source_reference' as const,
+              })),
+            /*
+             * A model that returns a credential is refused at the schema boundary, not
+             * merely warned about. The write path refuses it too; this catches it a
+             * step earlier so the run records why it failed.
+             */
+            ...value.dependencies
+              .filter((dependency) =>
+                [
+                  dependency.dependency,
+                  dependency.description,
+                  dependency.purpose,
+                  dependency.expectedFormat,
+                ].some((text) => looksLikeSecret(text).length > 0),
+              )
+              .map((dependency) => ({
+                path: `dependencies.${dependency.category}`,
+                message:
+                  'This looks like an actual credential. Describe what is needed, never its value.',
+                reason: 'disallowed_content' as const,
+              })),
+            ...value.dependencies
+              .filter((dependency) => isTooVague(dependency.dependency))
+              .map((dependency) => ({
+                path: `dependencies.${dependency.category}`,
+                message: `"${dependency.dependency}" is too vague for anybody to act on or close.`,
+                reason: 'disallowed_content' as const,
+              })),
+          ],
+        },
+        correlationId: context.correlationId,
+      });
+
+      if (outcome.ok) {
+        /* Matched by category and existing wording, so a rewrite stays on its row. */
+        for (const dependency of outcome.value.dependencies) {
+          const row = selected.find(
+            (candidate) =>
+              (candidate.payload as Record<string, unknown>).category === dependency.category,
+          );
+
+          if (row) {
+            named.set(row.rowId, {
+              dependency: dependency.dependency,
+              description: dependency.description,
+              purpose: dependency.purpose,
+              expectedFormat: dependency.expectedFormat,
+              impactIfDelayed: dependency.impactIfDelayed,
             });
           }
         }

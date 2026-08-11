@@ -1,8 +1,16 @@
-import { UNDERSTANDING_SECTIONS, type EstimateUnit, type RequirementItem } from '@wdrg/contracts';
+import {
+  UNDERSTANDING_SECTIONS,
+  type ClientDependency,
+  type EstimateUnit,
+  type RequirementItem,
+  type WorkPackage,
+} from '@wdrg/contracts';
 
+import { ClientDependencyComposer } from './composers/client-dependency.composer';
 import { FeatureListingComposer } from './composers/feature-listing.composer';
 import { UnderstandingComposer } from './composers/understanding.composer';
-import type { UpstreamContext } from './composers/composer.types';
+import { WorkBreakdownComposer } from './composers/work-breakdown.composer';
+import type { UpstreamContext, UpstreamPlan } from './composers/composer.types';
 
 /**
  * The composers, without a database.
@@ -85,6 +93,7 @@ function context(overrides: Partial<UpstreamContext> = {}): UpstreamContext {
     requirements,
     allRequirements: overrides.allRequirements ?? requirements,
     clarifications: [],
+    openClarifications: [],
     stack: {
       id: 'stk_1',
       version: 1,
@@ -97,12 +106,16 @@ function context(overrides: Partial<UpstreamContext> = {}): UpstreamContext {
     estimateUnits: [unit()],
     upstreamBlockers: [],
     timeline: { basis: 'RELATIVE', workingWeeks: 4, acknowledgedRisk: false },
+    plan: null,
     /* No approved documents by default: each suite fills in what it needs. */
     documents: {
       understanding: null,
       featureListing: null,
       acceptanceCriteria: null,
       assumptions: null,
+      statementOfWork: null,
+      workBreakdown: null,
+      clientDependencies: null,
     },
     ...overrides,
   };
@@ -443,6 +456,588 @@ describe('FeatureListingComposer', () => {
       findings.some(
         (finding) =>
           finding.kind === 'unknown_technology_reference' && finding.severity === 'BLOCKING',
+      ),
+    ).toBe(true);
+  });
+});
+
+/* ==================================================== the work breakdown */
+
+/**
+ * The breakdown, against a plan.
+ *
+ * Every assertion here is about faithfulness rather than cleverness: the hours, the
+ * days and the critical path all have to come out the other side unchanged, because
+ * the document's whole claim is that it is the approved plan in a readable shape.
+ */
+function plan(overrides: Partial<UpstreamPlan> = {}): UpstreamPlan {
+  return {
+    effortByRole: { BACKEND: 8, FRONTEND: 6, QA: 4 },
+    totalHours: 18,
+    tasks: [
+      {
+        taskId: 'eu_1',
+        startDay: 1,
+        endDay: 3,
+        durationDays: 3,
+        role: 'BACKEND',
+        hours: 18,
+        predecessorIds: [],
+        slackDays: 0,
+        onCriticalPath: true,
+      },
+    ],
+    milestones: [
+      {
+        id: 'ms_1',
+        kind: 'module_complete',
+        label: 'Timesheets complete',
+        day: 3,
+        taskIds: ['eu_1'],
+        userDefined: false,
+      },
+    ],
+    criticalPath: ['eu_1'],
+    totalWorkingDays: 3,
+    relativeOnly: true,
+    ...overrides,
+  };
+}
+
+describe('WorkBreakdownComposer', () => {
+  const composer = new WorkBreakdownComposer();
+
+  const packages = (ctx: UpstreamContext): readonly WorkPackage[] =>
+    composer.compose(ctx).rows.map((row) => row.payload as WorkPackage);
+
+  it('builds a hierarchy from the estimate’s own grouping', () => {
+    const rows = packages(context({ plan: plan() }));
+
+    expect(rows.map((row) => row.level)).toEqual(['PROJECT', 'PHASE', 'MODULE', 'FEATURE', 'TASK']);
+    expect(rows.map((row) => row.wbsId)).toEqual(['1', '1.1', '1.1.1', '1.1.1.1', '1.1.1.1.1']);
+  });
+
+  it('omits the submodule tier when the estimate has no submodules', () => {
+    /* A tier of empty containers reads as structure and is not. */
+    expect(packages(context({ plan: plan() })).some((row) => row.level === 'SUBMODULE')).toBe(
+      false,
+    );
+  });
+
+  it('adds a submodule tier when the estimate has one', () => {
+    const rows = packages(
+      context({ plan: plan(), estimateUnits: [unit({ submodule: 'Weekly entry' })] }),
+    );
+
+    expect(rows.some((row) => row.level === 'SUBMODULE' && row.submodule === 'Weekly entry')).toBe(
+      true,
+    );
+  });
+
+  it('copies the approved hours onto the leaf, role by role', () => {
+    const leaf = packages(context({ plan: plan() })).find((row) => row.level === 'TASK')!;
+
+    expect(leaf.effort).toEqual({ BACKEND: 8, FRONTEND: 6, QA: 4 });
+    expect(leaf.totalEffort).toBe(18);
+  });
+
+  it('copies the schedule and the critical path rather than deriving them', () => {
+    const leaf = packages(context({ plan: plan() })).find((row) => row.level === 'TASK')!;
+
+    expect(leaf.relativeStartDay).toBe(1);
+    expect(leaf.relativeFinishDay).toBe(3);
+    expect(leaf.workingDuration).toBe(3);
+    expect(leaf.onCriticalPath).toBe(true);
+    expect(leaf.parallelizable).toBe(false);
+  });
+
+  it('marks work the plan gave slack to as able to run in parallel', () => {
+    const rows = packages(
+      context({
+        plan: plan({
+          tasks: [
+            {
+              taskId: 'eu_1',
+              startDay: 1,
+              endDay: 3,
+              durationDays: 3,
+              role: 'BACKEND',
+              hours: 18,
+              predecessorIds: [],
+              slackDays: 4,
+              onCriticalPath: false,
+            },
+          ],
+          criticalPath: [],
+        }),
+      }),
+    );
+
+    expect(rows.find((row) => row.level === 'TASK')!.parallelizable).toBe(true);
+  });
+
+  it('publishes working days and no dates when the project has no start date', () => {
+    const rows = packages(context({ plan: plan() }));
+
+    /* Turning day 3 into a Tuesday would invent the commencement. */
+    expect(rows.every((row) => row.actualStartDate === undefined)).toBe(true);
+    expect(rows.every((row) => row.actualFinishDate === undefined)).toBe(true);
+  });
+
+  it('publishes dates when the approved plan has them', () => {
+    const rows = packages(
+      context({
+        plan: plan({
+          relativeOnly: false,
+          startDate: '2026-09-01',
+          tasks: [
+            {
+              taskId: 'eu_1',
+              startDay: 1,
+              endDay: 3,
+              durationDays: 3,
+              role: 'BACKEND',
+              hours: 18,
+              predecessorIds: [],
+              slackDays: 0,
+              onCriticalPath: true,
+              startDate: '2026-09-01',
+              endDate: '2026-09-03',
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(rows.find((row) => row.level === 'TASK')!.actualStartDate).toBe('2026-09-01');
+  });
+
+  it('cites requirements by their key, not the estimate’s internal id', () => {
+    /*
+     * The translation that is invisible when it is wrong: every row would look fine
+     * and every citation check would report an unknown requirement.
+     */
+    const leaf = packages(context({ plan: plan() })).find((row) => row.level === 'TASK')!;
+
+    expect(leaf.requirementIds).toEqual(['REQ-001']);
+  });
+
+  it('rolls a container up from its children', () => {
+    const rows = packages(
+      context({
+        plan: plan({
+          effortByRole: { BACKEND: 16, FRONTEND: 12, QA: 8 },
+          totalHours: 36,
+          tasks: [
+            {
+              taskId: 'eu_1',
+              startDay: 1,
+              endDay: 3,
+              durationDays: 3,
+              role: 'BACKEND',
+              hours: 18,
+              predecessorIds: [],
+              slackDays: 0,
+              onCriticalPath: true,
+            },
+            {
+              taskId: 'eu_2',
+              startDay: 2,
+              endDay: 5,
+              durationDays: 4,
+              role: 'BACKEND',
+              hours: 18,
+              predecessorIds: [],
+              slackDays: 0,
+              onCriticalPath: true,
+            },
+          ],
+          criticalPath: ['eu_1', 'eu_2'],
+          totalWorkingDays: 5,
+        }),
+        estimateUnits: [
+          unit(),
+          unit({ id: 'eu_2', key: 'EST-002', feature: 'Approve a timesheet' }),
+        ],
+      }),
+    );
+
+    const module = rows.find((row) => row.level === 'MODULE')!;
+
+    expect(module.totalEffort).toBe(36);
+    /* The span the work occupies, not the sum of its durations. */
+    expect(module.relativeStartDay).toBe(1);
+    expect(module.relativeFinishDay).toBe(5);
+    expect(module.workingDuration).toBe(5);
+  });
+
+  it('separates project overhead from feature work', () => {
+    const rows = packages(
+      context({
+        plan: plan({
+          effortByRole: { BACKEND: 8, FRONTEND: 6, QA: 4, DEVOPS: 6 },
+          tasks: [
+            ...plan().tasks,
+            {
+              taskId: 'eu_ci',
+              startDay: 1,
+              endDay: 1,
+              durationDays: 1,
+              role: 'DEVOPS',
+              hours: 6,
+              predecessorIds: [],
+              slackDays: 2,
+              onCriticalPath: false,
+            },
+          ],
+        }),
+        estimateUnits: [
+          unit(),
+          unit({
+            id: 'eu_ci',
+            key: 'EST-002',
+            feature: 'Pipeline',
+            overheadActivity: 'ci_cd',
+            effort: { DEVOPS: 6 },
+            totalHours: 6,
+            requirementIds: [],
+          }),
+        ],
+      }),
+    );
+
+    /* Two days of CI work a client cannot see is two days that get cut. */
+    expect(rows.some((row) => row.level === 'PHASE' && row.phase === 'Project overhead')).toBe(
+      true,
+    );
+  });
+
+  it('maps predecessors to WBS ids rather than leaving estimate ids on the sheet', () => {
+    const rows = packages(
+      context({
+        plan: plan({
+          effortByRole: { BACKEND: 16, FRONTEND: 12, QA: 8 },
+          tasks: [
+            ...plan().tasks,
+            {
+              taskId: 'eu_2',
+              startDay: 4,
+              endDay: 6,
+              durationDays: 3,
+              role: 'BACKEND',
+              hours: 18,
+              predecessorIds: ['eu_1'],
+              slackDays: 0,
+              onCriticalPath: true,
+            },
+          ],
+          criticalPath: ['eu_1', 'eu_2'],
+          totalWorkingDays: 6,
+        }),
+        estimateUnits: [
+          unit(),
+          unit({ id: 'eu_2', key: 'EST-002', feature: 'Approve a timesheet' }),
+        ],
+      }),
+    );
+
+    /* The leaf, not a rolled-up container — those list every unit beneath them. */
+    const second = rows.find(
+      (row) => row.level === 'TASK' && row.estimateUnitIds.includes('eu_2'),
+    )!;
+
+    expect(second.predecessors).toEqual(['1.1.1.1.1']);
+    expect(second.dependencyType).toBe('FINISH_TO_START');
+  });
+
+  it('produces nothing at all without an approved plan', () => {
+    expect(composer.compose(context({ plan: null })).rows).toEqual([]);
+  });
+
+  /* ------------------------------------------------------- validation */
+
+  const validate = (ctx: UpstreamContext, rows: readonly WorkPackage[]) =>
+    composer.validate({
+      context: ctx,
+      sections: [],
+      features: [],
+      rows: rows.map((payload, index) => ({
+        rowId: `drw_${index}`,
+        kind: 'WORK_PACKAGE' as const,
+        order: index,
+        origin: 'GENERATED' as const,
+        references: [],
+        payload,
+        updatedAt: '2026-08-10T00:00:00.000Z',
+      })),
+      excludedRequirementIds: [],
+      baselineCurrent: true,
+    });
+
+  it('passes reconciliation on its own output', () => {
+    const ctx = context({ plan: plan() });
+    const findings = validate(ctx, packages(ctx));
+
+    expect(
+      findings.some((finding) => finding.kind === 'effort_mismatch' && finding.severity === 'PASS'),
+    ).toBe(true);
+  });
+
+  it('blocks when the hours no longer add up to the approved estimate', () => {
+    const ctx = context({ plan: plan() });
+    const rows = packages(ctx).map((row) =>
+      row.level === 'TASK' ? { ...row, effort: { BACKEND: 40 }, totalEffort: 40 } : row,
+    );
+
+    const finding = validate(ctx, rows).find((entry) => entry.kind === 'effort_mismatch');
+
+    expect(finding?.severity).toBe('BLOCKING');
+  });
+
+  it('blocks a task that claims the critical path when the plan gave it slack', () => {
+    const ctx = context({ plan: plan({ criticalPath: [] }) });
+    const rows = packages(ctx);
+
+    expect(
+      validate(ctx, rows).some(
+        (finding) => finding.kind === 'critical_path_mismatch' && finding.severity === 'BLOCKING',
+      ),
+    ).toBe(true);
+  });
+
+  it('blocks work scheduled past the end of the approved plan', () => {
+    const ctx = context({ plan: plan() });
+    const rows = packages(ctx).map((row) =>
+      row.level === 'TASK' ? { ...row, relativeFinishDay: 40 } : row,
+    );
+
+    expect(
+      validate(ctx, rows).some(
+        (finding) => finding.kind === 'schedule_beyond_plan' && finding.severity === 'BLOCKING',
+      ),
+    ).toBe(true);
+  });
+
+  it('blocks a calendar date on a project with no agreed start', () => {
+    const ctx = context({ plan: plan() });
+    const rows = packages(ctx).map((row) =>
+      row.level === 'TASK' ? { ...row, actualStartDate: '2026-09-01' } : row,
+    );
+
+    expect(
+      validate(ctx, rows).some(
+        (finding) => finding.kind === 'invented_date' && finding.severity === 'BLOCKING',
+      ),
+    ).toBe(true);
+  });
+
+  it('blocks a broken hierarchy', () => {
+    const ctx = context({ plan: plan() });
+    const rows = packages(ctx).map((row) =>
+      row.level === 'TASK' ? { ...row, parentId: '9.9' } : row,
+    );
+
+    expect(
+      validate(ctx, rows).some(
+        (finding) => finding.kind === 'structure_invalid' && finding.severity === 'BLOCKING',
+      ),
+    ).toBe(true);
+  });
+
+  it('says so plainly when there is no approved estimate', () => {
+    const findings = validate(context({ plan: null }), []);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]!.kind).toBe('estimate_missing');
+  });
+});
+
+/* ============================================= the client dependency sheet */
+
+/**
+ * A credential-shaped string, assembled at runtime.
+ *
+ * A literal here would be flagged by every secret scanner that reads this repository
+ * — including the one on the push path — for a string that is only ever fed to a
+ * detector. Joined, the test sees the identical value.
+ */
+function stripeShaped(): string {
+  return ['sk', 'live', '4eC39HqLyjWDarjtT1zdp7dc'].join('_');
+}
+
+describe('ClientDependencyComposer', () => {
+  const composer = new ClientDependencyComposer();
+
+  const integration = requirement({
+    id: 'req_2',
+    key: 'REQ-002',
+    title: 'Payroll export',
+    statement: 'Timesheet totals must be sent to Sage Payroll each month.',
+    category: 'integration',
+  });
+
+  const dependencies = (ctx: UpstreamContext): readonly ClientDependency[] =>
+    composer.compose(ctx).rows.map((row) => row.payload as ClientDependency);
+
+  it('raises a documentation-and-access row for an approved integration', () => {
+    const rows = dependencies(
+      context({ plan: plan(), requirements: [requirement(), integration] }),
+    );
+
+    const row = rows.find((entry) => entry.category === 'API_DOCUMENTATION');
+
+    expect(row).toBeDefined();
+    expect(row!.requirementIds).toEqual(['REQ-002']);
+    expect(row!.sourceKinds).toContain('REQUIREMENT_BASELINE');
+    expect(row!.dependencyKey).toMatch(/^CD-\d{3}$/);
+  });
+
+  it('asks for an account for a third-party service in the locked stack', () => {
+    const rows = dependencies(
+      context({
+        plan: plan(),
+        stack: {
+          id: 'stk_1',
+          version: 1,
+          status: 'LOCKED',
+          components: [
+            {
+              category: 'payment',
+              technologyId: 'stripe',
+              technologyName: 'Stripe',
+              status: 'LOCKED',
+            },
+          ],
+        },
+      }),
+    );
+
+    const row = rows.find((entry) => entry.category === 'CREDENTIALS');
+
+    expect(row?.dependency).toContain('Stripe');
+    expect(row?.credentialsRequired).toBe(true);
+    expect(row?.sourceKinds).toContain('TECHNOLOGY_STACK');
+  });
+
+  it('does not ask the client for infrastructure a delivery team provisions', () => {
+    /* Padding the sheet is how the real dependency gets missed among the fake ones. */
+    const rows = dependencies(context({ plan: plan() }));
+
+    expect(rows.some((entry) => entry.dependency.includes('NestJS'))).toBe(false);
+  });
+
+  it('turns an unanswered clarification into a dependency on the client', () => {
+    const rows = dependencies(
+      context({
+        plan: plan(),
+        openClarifications: [
+          {
+            id: 'clr_1',
+            label: 'CLR-001',
+            question: 'Which payroll periods should the export cover?',
+            requirementIds: ['REQ-001'],
+            blocking: true,
+          },
+        ],
+      }),
+    );
+
+    const row = rows.find((entry) => entry.sourceKinds.includes('OPEN_CLARIFICATION'));
+
+    expect(row?.priority).toBe('CRITICAL');
+    expect(row?.dependency).toContain('payroll periods');
+  });
+
+  it('starts everything unrequested, with nobody named', () => {
+    const rows = dependencies(
+      context({ plan: plan(), requirements: [requirement(), integration] }),
+    );
+
+    for (const row of rows) {
+      expect(row.status).toBe('NOT_REQUESTED');
+      /* Naming the wrong person in a client-facing sheet is worse than naming nobody. */
+      expect(row.clientOwner).toBe('');
+      expect(row.internalOwner).toBe('');
+    }
+  });
+
+  it('states timing relative to commencement when the plan has no dates', () => {
+    const rows = dependencies(
+      context({ plan: plan(), requirements: [requirement(), integration] }),
+    );
+
+    for (const row of rows) {
+      expect(row.actualDueDate).toBeUndefined();
+      expect(row.relativeDue.length).toBeGreaterThan(0);
+    }
+  });
+
+  /* ------------------------------------------------------- validation */
+
+  const validate = (ctx: UpstreamContext, rows: readonly ClientDependency[]) =>
+    composer.validate({
+      context: ctx,
+      sections: [],
+      features: [],
+      rows: rows.map((payload, index) => ({
+        rowId: `drw_${index}`,
+        kind: 'CLIENT_DEPENDENCY' as const,
+        order: index,
+        origin: 'GENERATED' as const,
+        references: [],
+        payload,
+        updatedAt: '2026-08-10T00:00:00.000Z',
+      })),
+      excludedRequirementIds: [],
+      baselineCurrent: true,
+    });
+
+  it('passes the credential check on its own output', () => {
+    const ctx = context({ plan: plan(), requirements: [requirement(), integration] });
+
+    expect(
+      validate(ctx, dependencies(ctx)).some(
+        (finding) => finding.kind === 'credential_value_present' && finding.severity === 'PASS',
+      ),
+    ).toBe(true);
+  });
+
+  it('blocks a row that carries an actual credential', () => {
+    const ctx = context({ plan: plan(), requirements: [requirement(), integration] });
+    const rows = dependencies(ctx).map((row, index) =>
+      index === 0 ? { ...row, remarks: `they sent ${stripeShaped()}` } : row,
+    );
+
+    expect(
+      validate(ctx, rows).some(
+        (finding) => finding.kind === 'credential_value_present' && finding.severity === 'BLOCKING',
+      ),
+    ).toBe(true);
+  });
+
+  it('blocks a row nobody could action or close', () => {
+    const ctx = context({ plan: plan(), requirements: [requirement(), integration] });
+    const rows = dependencies(ctx).map((row, index) =>
+      index === 0 ? { ...row, dependency: 'Client must provide all required information' } : row,
+    );
+
+    expect(
+      validate(ctx, rows).some(
+        (finding) => finding.kind === 'dependency_vague' && finding.severity === 'BLOCKING',
+      ),
+    ).toBe(true);
+  });
+
+  it('blocks a row that is accepted with nothing recorded about the check', () => {
+    const ctx = context({ plan: plan(), requirements: [requirement(), integration] });
+    const rows = dependencies(ctx).map((row, index) =>
+      index === 0 ? { ...row, status: 'ACCEPTED' as const, validationNote: '' } : row,
+    );
+
+    expect(
+      validate(ctx, rows).some(
+        (finding) =>
+          finding.kind === 'dependency_status_invalid' && finding.severity === 'BLOCKING',
       ),
     ).toBe(true);
   });

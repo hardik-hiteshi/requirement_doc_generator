@@ -106,6 +106,34 @@ export const VALIDATION_KINDS = [
   'unsupported_statement',
   /** The same concept named two ways. Model-assisted. */
   'terminology_inconsistency',
+  /* ---- Phase 9: Work Breakdown Structure ---- */
+  /** There is no approved estimate for a breakdown to be based on. */
+  'estimate_missing',
+  /** The hierarchy or the ordering is broken: a cycle, an orphan, a bad predecessor. */
+  'structure_invalid',
+  /** A task disagrees with the approved plan about being on the critical path. */
+  'critical_path_mismatch',
+  /** Work scheduled past the end of the approved plan. */
+  'schedule_beyond_plan',
+  /** A calendar date on a project whose approved plan has no start date. */
+  'invented_date',
+  /** A work package for scope somebody deliberately excluded. */
+  'work_for_excluded_scope',
+  /* ---- Phase 9: Client Dependency Sheet ---- */
+  /** A dependency too vague for anybody to action or close. */
+  'dependency_vague',
+  /** A dependency that traces to no approved requirement, task or decision. */
+  'dependency_ungrounded',
+  /** Text that looks like an actual credential rather than a description of one. */
+  'credential_value_present',
+  /** An owner, a date or a status nobody supplied. */
+  'dependency_detail_invented',
+  /** A blocking dependency that no work package waits for. */
+  'dependency_unlinked',
+  /** A task waits on a client dependency the sheet does not contain. */
+  'dependency_missing_for_task',
+  /** A status that cannot have been reached from the one before it. */
+  'dependency_status_invalid',
 ] as const;
 
 export type ValidationKind = (typeof VALIDATION_KINDS)[number];

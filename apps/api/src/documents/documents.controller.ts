@@ -29,7 +29,10 @@ import {
   regenerateRowSchema,
   rejectAssumptionSchema,
   resolveRowProposalSchema,
+  receiveDependencySchema,
+  requestDependencySchema,
   settleAssumptionSchema,
+  validateDependencySchema,
   type AddRow,
   type ConfirmAssumption,
   type DocumentRow,
@@ -39,7 +42,10 @@ import {
   type RegenerateRowGroup,
   type RejectAssumption,
   type ResolveRowProposal,
+  type ReceiveDependency,
+  type RequestDependency,
   type SettleAssumption,
+  type ValidateDependency,
   acknowledgeFindingSchema,
   applyCorrectionSchema,
   approveDocumentSchema,
@@ -141,7 +147,7 @@ export class DocumentsController {
   @ApiOperation({
     summary: 'Every document and its state',
     description:
-      'All seven controlled documents, in order, with their status and — where they are not yet available — why. The five that Phase 7 does not implement are reported as unavailable rather than hidden.',
+      'All seven controlled documents, in order, with their status and — where they cannot be worked on yet — why. A document locked behind an unapproved prerequisite is reported as locked rather than hidden.',
   })
   @ApiOkResponse({ description: 'The document list.' })
   async list(
@@ -647,6 +653,75 @@ export class DocumentsController {
   ): Promise<{ document: DocumentSnapshot }> {
     return {
       document: await this.documents.settleAssumption(
+        context(request),
+        documentType(type),
+        rowId,
+        body,
+      ),
+    };
+  }
+
+  @Post(':type/rows/:rowId/request')
+  @ApiOperation({
+    summary: 'Record that a client dependency has been asked for',
+    description:
+      'Sets the status and stamps when it was requested, so the sheet is the record of what was chased and when rather than somebody’s recollection.',
+  })
+  @ApiCreatedResponse({ description: 'The document with the request recorded.' })
+  async requestDependency(
+    @Param('type') type: string,
+    @Param('rowId') rowId: string,
+    @Body(new ZodValidationPipe(requestDependencySchema)) body: RequestDependency,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.requestDependency(
+        context(request),
+        documentType(type),
+        rowId,
+        body,
+      ),
+    };
+  }
+
+  @Post(':type/rows/:rowId/receive')
+  @ApiOperation({
+    summary: 'Record that a client dependency arrived',
+    description:
+      'Arrival only. It does not mean the item is usable — credentials turn up that do not work, and exports arrive in the wrong shape. Checking it is a separate action.',
+  })
+  @ApiCreatedResponse({ description: 'The document with the arrival recorded.' })
+  async receiveDependency(
+    @Param('type') type: string,
+    @Param('rowId') rowId: string,
+    @Body(new ZodValidationPipe(receiveDependencySchema)) body: ReceiveDependency,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.receiveDependency(
+        context(request),
+        documentType(type),
+        rowId,
+        body,
+      ),
+    };
+  }
+
+  @Post(':type/rows/:rowId/validate')
+  @ApiOperation({
+    summary: 'Record what checking a client dependency showed',
+    description:
+      'Accepted or rejected, with a note either way. This is the only thing that unblocks the work waiting on it, and the note is what makes the decision auditable later.',
+  })
+  @ApiCreatedResponse({ description: 'The document with the outcome recorded.' })
+  async validateDependency(
+    @Param('type') type: string,
+    @Param('rowId') rowId: string,
+    @Body(new ZodValidationPipe(validateDependencySchema)) body: ValidateDependency,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.validateDependency(
         context(request),
         documentType(type),
         rowId,

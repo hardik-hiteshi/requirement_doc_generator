@@ -256,14 +256,19 @@ describe('Documents 3–5 (e2e)', () => {
     }, 300_000);
 
     /* 34. */
-    it('refuses to generate the two documents Phase 9 owns', async () => {
+    it('keeps the two documents after this one locked behind their prerequisites', async () => {
+      /*
+       * Phase 9 built these, so they are implemented and no longer refused outright.
+       * What still holds them shut is the sequence: the work breakdown waits on an
+       * approved statement of work, and the dependency sheet waits on the breakdown.
+       */
       const session = await throughAssumptions();
 
       for (const type of ['WORK_BREAKDOWN_STRUCTURE', 'CLIENT_DEPENDENCY_SHEET']) {
         const entry = (await documents(session)).find((candidate) => candidate.type === type)!;
 
-        expect(entry.implemented).toBe(false);
-        expect(entry.lock?.reason).toBe('not_implemented');
+        expect(entry.implemented).toBe(true);
+        expect(entry.lock?.reason).toBe('prerequisite_document');
 
         await session.agent
           .post(DOCUMENT_ROUTES.generate(type))
@@ -271,13 +276,12 @@ describe('Documents 3–5 (e2e)', () => {
           .send({ useAi: false, expectedVersion: 0 })
           .expect(422);
 
-        await session.agent.get(DOCUMENT_ROUTES.document(type)).expect(422);
-
+        /* Nothing was ever generated, so there is no document to approve. */
         await session.agent
           .post(DOCUMENT_ROUTES.approve(type))
           .set('x-csrf-token', session.csrf)
           .send({ acknowledged: true, expectedVersion: 0 })
-          .expect(422);
+          .expect(404);
       }
     }, 300_000);
 

@@ -7,12 +7,16 @@ import {
   SETTLED_CLARIFICATION_STATUSES,
   type AcceptanceCriterion,
   type Assumption,
+  type ClientDependency,
   type DocumentOutdatedReason,
   type DocumentState,
   type DocumentStatus,
   type DocumentType,
+  type Milestone,
   type RequirementItem,
+  type ScheduledTask,
   type SowTimeline,
+  type WorkPackage,
 } from '@wdrg/contracts';
 
 import { AnalysisRepository } from '../analysis/analysis.repository';
@@ -23,7 +27,7 @@ import { ProjectRepository } from '../projects/project.repository';
 import { StackRepository } from '../stack/stack.repository';
 import { DocumentsRepository } from './documents.repository';
 import { toFeatureRow } from './documents.mapper';
-import type { UpstreamContext, UpstreamDocuments } from './composers/composer.types';
+import type { UpstreamContext, UpstreamDocuments, UpstreamPlan } from './composers/composer.types';
 
 export interface UpstreamSnapshot {
   readonly context: UpstreamContext;
@@ -176,7 +180,30 @@ export class UpstreamReader {
         requirement.status !== 'superseded',
     );
 
-    const clarifications = (await this.analysis.listClarifications(projectId))
+    const allClarifications = await this.analysis.listClarifications(projectId);
+
+    /*
+     * Requirement keys, not internal ids. A clarification stores `relatedItemIds`,
+     * and a document cites `REQ-004` — the ids mean nothing to a reader and nothing
+     * to the citation checks, which compare against keys.
+     */
+    const keyById = new Map(
+      allRequirements.map((requirement) => [requirement.id, requirement.key]),
+    );
+
+    const openClarifications = allClarifications
+      .filter((clarification) => clarification.status === 'UNANSWERED')
+      .map((clarification) => ({
+        id: clarification.clarificationId,
+        label: clarification.key,
+        question: clarification.question,
+        requirementIds: clarification.relatedItemIds
+          .map((id) => keyById.get(id))
+          .filter((key): key is string => key !== undefined),
+        blocking: clarification.impact === 'blocking',
+      }));
+
+    const clarifications = allClarifications
       .filter((clarification) =>
         (SETTLED_CLARIFICATION_STATUSES as readonly string[]).includes(clarification.status),
       )
@@ -243,6 +270,7 @@ export class UpstreamReader {
         requirements,
         allRequirements,
         clarifications,
+        openClarifications,
         stack: locked
           ? {
               id: locked.snapshotId,
@@ -269,6 +297,7 @@ export class UpstreamReader {
           summary: String((blocker as { summary?: string }).summary ?? ''),
         })),
         timeline: approvedEstimate ? this.timelineFrom(approvedEstimate, project) : null,
+        plan: approvedEstimate ? this.planFrom(approvedEstimate) : null,
         documents: await this.approvedDocuments(projectId, documentRecords, {
           ...(approvedBaselineVersion !== undefined
             ? { baselineVersion: approvedBaselineVersion }
@@ -356,6 +385,59 @@ export class UpstreamReader {
   }
 
   /**
+   * The approved plan, read straight off the snapshot.
+   *
+   * Phase 6's `approve` persists the totals, the schedule and the milestones as they
+   * stood, which is what makes this a read rather than a recalculation — and what
+   * lets the Work Breakdown Structure be a projection of an approved plan instead of
+   * a second opinion about it.
+   */
+  private planFrom(estimate: {
+    schedule?: Record<string, unknown>;
+    milestones?: Record<string, unknown>[];
+    effortByRole?: Record<string, unknown>;
+    totalEffort?: Record<string, unknown>;
+  }): UpstreamPlan {
+    const schedule = (estimate.schedule ?? {}) as {
+      tasks?: ScheduledTask[];
+      totalWorkingDays?: number;
+      criticalPath?: string[];
+      startDate?: string;
+      finishDate?: string;
+      relativeOnly?: boolean;
+    };
+
+    const effortByRole = Object.fromEntries(
+      Object.entries(estimate.effortByRole ?? {}).map(([role, hours]) => [
+        role,
+        Number(hours) || 0,
+      ]),
+    );
+
+    const total = (estimate.totalEffort ?? {}) as { hours?: number };
+
+    return {
+      effortByRole,
+      totalHours:
+        typeof total.hours === 'number'
+          ? total.hours
+          : Object.values(effortByRole).reduce((sum, hours) => sum + hours, 0),
+      tasks: schedule.tasks ?? [],
+      milestones: (estimate.milestones ?? []) as unknown as Milestone[],
+      criticalPath: schedule.criticalPath ?? [],
+      totalWorkingDays: schedule.totalWorkingDays ?? 0,
+      ...(schedule.startDate ? { startDate: schedule.startDate } : {}),
+      ...(schedule.finishDate ? { finishDate: schedule.finishDate } : {}),
+      /*
+       * Absent means relative. A missing flag must not be read as "dates are fine" —
+       * that would let the breakdown publish calendar dates for a project with no
+       * agreed start.
+       */
+      relativeOnly: schedule.relativeOnly !== false,
+    };
+  }
+
+  /**
    * Content of earlier documents, and only where they are authority.
    *
    * A document appears here **only** when it is approved or issued *and* current.
@@ -390,23 +472,43 @@ export class UpstreamReader {
     const featureListing = authoritative.get('FEATURE_LISTING');
     const acceptanceCriteria = authoritative.get('ACCEPTANCE_CRITERIA');
     const assumptions = authoritative.get('ASSUMPTIONS');
+    const statementOfWork = authoritative.get('STATEMENT_OF_WORK');
+    const workBreakdown = authoritative.get('WORK_BREAKDOWN_STRUCTURE');
+    const clientDependencies = authoritative.get('CLIENT_DEPENDENCY_SHEET');
 
-    const [understandingSections, features, criteriaRows, assumptionRows, exclusions] =
-      await Promise.all([
-        understanding
-          ? this.documents.listSections(projectId, 'OUR_UNDERSTANDING', understanding.version)
-          : Promise.resolve([]),
-        featureListing
-          ? this.documents.listFeatures(projectId, 'FEATURE_LISTING', featureListing.version)
-          : Promise.resolve([]),
-        acceptanceCriteria
-          ? this.documents.listRows(projectId, 'ACCEPTANCE_CRITERIA', acceptanceCriteria.version)
-          : Promise.resolve([]),
-        assumptions
-          ? this.documents.listRows(projectId, 'ASSUMPTIONS', assumptions.version)
-          : Promise.resolve([]),
-        featureListing ? this.documents.find(projectId, 'FEATURE_LISTING') : Promise.resolve(null),
-      ]);
+    const [
+      understandingSections,
+      features,
+      criteriaRows,
+      assumptionRows,
+      exclusions,
+      sowSections,
+      wbsRows,
+      dependencyRows,
+    ] = await Promise.all([
+      understanding
+        ? this.documents.listSections(projectId, 'OUR_UNDERSTANDING', understanding.version)
+        : Promise.resolve([]),
+      featureListing
+        ? this.documents.listFeatures(projectId, 'FEATURE_LISTING', featureListing.version)
+        : Promise.resolve([]),
+      acceptanceCriteria
+        ? this.documents.listRows(projectId, 'ACCEPTANCE_CRITERIA', acceptanceCriteria.version)
+        : Promise.resolve([]),
+      assumptions
+        ? this.documents.listRows(projectId, 'ASSUMPTIONS', assumptions.version)
+        : Promise.resolve([]),
+      featureListing ? this.documents.find(projectId, 'FEATURE_LISTING') : Promise.resolve(null),
+      statementOfWork
+        ? this.documents.listSections(projectId, 'STATEMENT_OF_WORK', statementOfWork.version)
+        : Promise.resolve([]),
+      workBreakdown
+        ? this.documents.listRows(projectId, 'WORK_BREAKDOWN_STRUCTURE', workBreakdown.version)
+        : Promise.resolve([]),
+      clientDependencies
+        ? this.documents.listRows(projectId, 'CLIENT_DEPENDENCY_SHEET', clientDependencies.version)
+        : Promise.resolve([]),
+    ]);
 
     return {
       understanding: understanding
@@ -440,6 +542,35 @@ export class UpstreamReader {
         ? {
             version: assumptions.version,
             assumptions: assumptionRows.map((row) => row.payload as unknown as Assumption),
+          }
+        : null,
+      statementOfWork: statementOfWork
+        ? {
+            version: statementOfWork.version,
+            sections: sowSections.map((section) => ({
+              key: section.key,
+              title: section.title,
+              body: section.body,
+            })),
+          }
+        : null,
+      workBreakdown: workBreakdown
+        ? {
+            version: workBreakdown.version,
+            /*
+             * Excluded packages are kept. The dependency sheet needs to know a task
+             * was deliberately dropped, so it does not go on asking the client for
+             * something nobody is going to build.
+             */
+            packages: wbsRows.map((row) => row.payload as WorkPackage),
+          }
+        : null,
+      clientDependencies: clientDependencies
+        ? {
+            version: clientDependencies.version,
+            dependencies: dependencyRows
+              .filter((row) => !row.excludedReason)
+              .map((row) => row.payload as ClientDependency),
           }
         : null,
     };

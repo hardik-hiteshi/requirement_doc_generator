@@ -2,7 +2,9 @@ import { z } from 'zod';
 
 import {
   assumptionCandidateSchema,
+  clientDependencyDraftSchema,
   sowSectionDraftSchema,
+  wbsTaskDraftSchema,
   MODEL_RAISABLE_KINDS,
 } from '@wdrg/contracts';
 
@@ -192,3 +194,44 @@ export type AssumptionCandidatesOutput = z.infer<typeof assumptionCandidatesOutp
 export const sowSectionOutputSchema = sowSectionDraftSchema;
 
 export type SowSectionOutput = z.infer<typeof sowSectionOutputSchema>;
+
+/* ------------------------------------ Phase 9: work breakdown structure */
+
+/**
+ * Task wording and an optional decomposition.
+ *
+ * The schema is `wbsTaskDraftSchema` from the contracts, unchanged, because what it
+ * *lacks* is the safety property and that belongs stated in one place: no hours, no
+ * days, no dates, no critical-path flag, no status. A model can say a unit of work
+ * splits into validation, business logic and persistence, and give their relative
+ * sizes; the application divides the approved hours across them so the parts still
+ * sum to what was approved.
+ *
+ * A model that tries to state forty hours produces a parse failure, not a plausible
+ * figure that quietly disagrees with the estimate.
+ */
+export const wbsTasksOutputSchema = z
+  .object({ tasks: z.array(wbsTaskDraftSchema).max(400) })
+  .strict();
+
+export type WbsTasksOutput = z.infer<typeof wbsTasksOutputSchema>;
+
+/* ------------------------------------- Phase 9: client dependency sheet */
+
+/**
+ * Client dependencies a model believes the approved scope implies.
+ *
+ * `clientDependencyDraftSchema` unchanged, for the same reason: it has no owner, no
+ * due date, no status, no priority and no blocking classification. Those either
+ * commit a named person or declare work unblocked, and neither is a judgement to take
+ * from a generated suggestion.
+ *
+ * Nor is there anywhere to put a credential. The application refuses secret-shaped
+ * text on every write path regardless, but a field that does not exist cannot be
+ * filled in by accident.
+ */
+export const clientDependenciesOutputSchema = z
+  .object({ dependencies: z.array(clientDependencyDraftSchema).max(200) })
+  .strict();
+
+export type ClientDependenciesOutput = z.infer<typeof clientDependenciesOutputSchema>;

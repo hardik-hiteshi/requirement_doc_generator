@@ -301,6 +301,59 @@ rather than quietly substituting a safer one.
 never "two developers will be assigned", unless your capacity plan actually
 established that.
 
+## 6. Work Breakdown Structure
+
+The plan you approved during estimation, arranged as work a delivery team can pick up:
+project, phase, module, feature, task, indented so you can see what sits under what.
+
+**The hours are the hours you approved.** Not recalculated, not re-rounded — copied,
+and then checked. The first thing on the screen says whether the breakdown adds up to
+your estimate role by role, and if it does not, it says which roles disagree and by how
+much. A breakdown that quietly totalled something else would be planned against and
+then found wrong.
+
+**Days, not dates, unless you agreed a start date.** With no start date the plan reads
+"days 4 to 9", because turning day 9 into a Tuesday would be inventing a commencement
+you never agreed. Agree one and the real dates appear.
+
+**The critical path is marked where the schedule put it.** So is the work that has
+slack and can run alongside something else.
+
+**You can reword anything and change the plan nowhere.** Rename a task, describe it
+better, say what it produces. Try to move a start day and it says so, and points at the
+estimation step — change it there, re-approve, regenerate, and the two documents still
+agree. You _can_ move hours between roles or split a task; the document then tells you
+it no longer adds up, and cannot be approved until it does.
+
+## 7. Client Dependency Sheet
+
+What the project needs from you, and by when.
+
+**Asked for, arrived, and working are three different things.** An item you have sent
+shows as "Received, not checked" until somebody has actually tried it, because
+credentials arrive that were issued for the wrong environment and exports arrive in the
+wrong encoding. Accepting an item asks what you checked and what it showed — that note
+is what makes "we were unblocked on the 14th" mean something later.
+
+**Every row is specific enough to hand over and to close.** No "client to provide all
+required information": that is a line nobody can action and nobody can ever tick off.
+Each row says what is needed, why, what good looks like, and what happens if it is late.
+
+**Credentials are described, never carried.** A row will say that sandbox credentials
+for your payment provider are needed, and where each stands. It never contains the key
+itself — this sheet gets exported and emailed, and an issued version cannot be recalled.
+Send secrets through your own secret manager.
+
+**Nobody is named until you name them.** An owner guessed wrong in a client-facing sheet
+is worse than an owner left blank.
+
+**Unanswered questions are on it.** A clarification nobody has come back on is a
+dependency on you, and leaving it off is how a project waits quietly for an answer
+nobody knows is outstanding.
+
+**You can issue it with things still outstanding.** That is the point — it is what you
+send in order to ask.
+
 ## What it is not, yet
 
 Copy-to-clipboard and the strict CSV preview work now. **Full DOCX, PDF and XLSX

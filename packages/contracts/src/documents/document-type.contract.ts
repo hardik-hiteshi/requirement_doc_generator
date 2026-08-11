@@ -3,15 +3,16 @@ import { z } from 'zod';
 /**
  * The seven controlled documents this application produces.
  *
- * All seven are named here, and only two are implemented. That is deliberate:
- * the dependency graph, the outdated propagation and the UI's locked-step list
- * all need to know what exists eventually, and discovering document five while
- * building it is how an engine acquires a special case per document.
+ * All seven were named here from the first document onwards, while only two were
+ * built. That was deliberate: the dependency graph, the outdated propagation and the
+ * UI's locked-step list all need to know what exists eventually, and discovering
+ * document five while building it is how an engine acquires a special case per
+ * document.
  *
- * `IMPLEMENTED_DOCUMENT_TYPES` is the honest half. Nothing outside it can be
- * generated, read, validated or approved — the service refuses, the routes
- * reject, and the UI shows the step as unavailable rather than as a button that
- * fails. A named type is a declared intention, not a feature.
+ * As of Phase 9 all seven are built, so `IMPLEMENTED_DOCUMENT_TYPES` now lists the
+ * same seven. The distinction stays because it is load-bearing — the service, the
+ * routes and the screen all gate on it — and because the next document type added to
+ * this list will be declared before it works, exactly as these were.
  */
 export const DOCUMENT_TYPES = [
   'OUR_UNDERSTANDING',
@@ -27,13 +28,15 @@ export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 export const documentTypeSchema = z.enum(DOCUMENT_TYPES);
 
 /**
- * The documents that are actually built. Everything else is declared only.
+ * The documents that are actually built.
  *
- * Phases 7 and 8 between them cover the first five. The Work Breakdown Structure
- * and the Client Dependency Sheet are declared in `DOCUMENT_TYPES` so the graph and
- * the interface know they exist, and nothing can generate, validate or approve one:
- * the service refuses, the routes reject, and the screen shows the step as
- * unavailable rather than as a button that fails.
+ * Phase 7 built the first two, Phase 8 the next three, and Phase 9 the Work Breakdown
+ * Structure and the Client Dependency Sheet — so this is now the complete seven.
+ *
+ * The gate itself remains: nothing outside this list can be generated, read,
+ * validated or approved, because the service refuses, the routes reject, and the
+ * screen shows the step as unavailable rather than as a button that fails. An empty
+ * gap between these two lists is the healthy state, not a reason to delete the gate.
  */
 export const IMPLEMENTED_DOCUMENT_TYPES = [
   'OUR_UNDERSTANDING',
@@ -41,6 +44,8 @@ export const IMPLEMENTED_DOCUMENT_TYPES = [
   'ACCEPTANCE_CRITERIA',
   'ASSUMPTIONS',
   'STATEMENT_OF_WORK',
+  'WORK_BREAKDOWN_STRUCTURE',
+  'CLIENT_DEPENDENCY_SHEET',
 ] as const;
 
 export type ImplementedDocumentType = (typeof IMPLEMENTED_DOCUMENT_TYPES)[number];

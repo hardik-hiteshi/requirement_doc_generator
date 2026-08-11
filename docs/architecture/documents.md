@@ -391,12 +391,52 @@ validation and approval all work; the prose is plainer. `DocumentsAiService` tak
 the provider `@Optional()`, so the module starts normally with none, and
 `useAi: false` is a first-class request rather than a fallback.
 
+## Documents 6 and 7 — the plan, and what the client owes
+
+Both use the shared row channel; neither adds a service, a status system or an
+endpoint family of its own.
+
+**The Work Breakdown Structure is a projection.** `UpstreamPlan` carries the approved
+Phase 6 plan — scheduled tasks with their days, slack and critical-path flags, plus the
+milestone list — and every figure the breakdown publishes is copied from it. The
+hierarchy comes from the estimate's own module, submodule and feature grouping, with a
+tier appearing only where the data justifies one; overhead activities become a separate
+phase so work like CI setup is visible rather than buried in a feature.
+
+`reconcileWbsEffort` proves the copy per role and in total, at hundredths of an hour
+because Phase 6's figures are fractional. A mismatch is BLOCKING and the document stays
+readable. `allocateEffort` splits a task by largest remainder in hundredths, so
+decomposition preserves the approved total exactly. Editing a start day or a
+critical-path flag is refused with `SCHEDULE_NOT_EDITABLE_HERE`; editing hours is
+allowed, because reconciliation is the check and restructuring work is legitimate. See
+ADR-0038.
+
+**The Client Dependency Sheet tracks arrival and acceptance separately.** Nine statuses,
+with `ACCEPTED` reachable only from `RECEIVED` or `VALIDATING`, and three endpoints —
+`request`, `receive`, `validate` — each stamping its own timestamp. Accepting or
+rejecting requires a note. `looksLikeSecret` refuses credential-shaped text in
+`parseRowPayload`, before storage rather than at approval, and the generation schema has
+nowhere to put a value. Rows are grounded in the approved baseline, the locked stack, the
+work breakdown, confirmed assumptions or unanswered clarifications; `isTooVague` refuses
+wording nobody can close. Outstanding items are reported, never a blocker — the sheet is
+how you ask. See ADR-0039.
+
 ## Known limitations
 
-- **Five of seven documents are declared, not implemented.** They are visible and
-  marked unavailable; nothing can generate, read or approve them.
+- **Export is a later phase.** See below.
 - **Export is Phase 11.** Copy-to-clipboard and the strict CSV serialisation exist
-  because the CSV schema is a Phase 7 requirement. DOCX, PDF and XLSX do not.
+  because the CSV schema is a Phase 7 requirement. DOCX, PDF and XLSX do not — and
+  the work breakdown and dependency sheet have no spreadsheet export yet, which is
+  the form both will most often be wanted in.
+- **The work breakdown has no delivery tracking.** `status` and `percentComplete`
+  exist on a work package and nothing moves them: this is a plan, not a progress
+  tool, and nothing in this application observes real progress.
+- **Client dependencies are inferred conservatively.** A row appears where an
+  integration, a locked third-party technology, an unanswered clarification or a
+  clearly client-facing assumption implies one. A dependency implied only by domain
+  knowledge — a payment provider that requires a signed merchant agreement — is not
+  found, because a false request the client cannot satisfy is worse than a missing
+  one they will raise.
 - **The deterministic module and screen names are crude** — derived from the
   requirement's own words. A model does this far better; what matters is that the
   fallback is derived rather than invented.
