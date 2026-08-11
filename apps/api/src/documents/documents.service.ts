@@ -1736,7 +1736,10 @@ export class DocumentsService {
 
     const blockers = calculateDocumentBlockers({
       generated:
-        content.sections.length > 0 || content.features.length > 0 || content.rows.length > 0,
+        content.sections.length > 0 ||
+        content.features.length > 0 ||
+        content.rows.length > 0 ||
+        composer.mayBeEmpty === true,
       sections: content.sections,
       pendingFeatureIds: DocumentsService.featuresAwaitingDecision(content.features),
       pendingRowIds: rowsAwaitingDecision(content.rows),

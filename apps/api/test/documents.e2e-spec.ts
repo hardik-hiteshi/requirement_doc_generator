@@ -196,13 +196,17 @@ describe('Documents (e2e)', () => {
       expect(list.find((entry) => entry.type === 'FEATURE_LISTING')?.lock).toBeNull();
     }, 240_000);
 
-    it('shows the five unimplemented documents as unavailable, never as broken', async () => {
+    it('shows the unimplemented documents as unavailable, never as broken', async () => {
       const session = await project();
       const list = await documents(session);
 
       const unavailable = list.filter((entry) => !entry.implemented);
 
-      expect(unavailable).toHaveLength(5);
+      /* The Work Breakdown Structure and the Client Dependency Sheet — Phase 9. */
+      expect(unavailable.map((entry) => entry.type)).toEqual([
+        'WORK_BREAKDOWN_STRUCTURE',
+        'CLIENT_DEPENDENCY_SHEET',
+      ]);
       for (const entry of unavailable) {
         expect(entry.lock?.reason).toBe('not_implemented');
         expect(entry.status).toBe('NOT_STARTED');

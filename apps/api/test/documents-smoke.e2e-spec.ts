@@ -56,7 +56,7 @@ describe('Documents wiring (e2e)', () => {
     return { agent, csrf };
   }
 
-  it('lists all seven documents, with five marked unavailable', async () => {
+  it('lists all seven documents, with the last two marked unavailable', async () => {
     const { agent } = await session();
     const response = await agent.get(DOCUMENT_ROUTES.documents).expect(200);
 
@@ -72,8 +72,8 @@ describe('Documents wiring (e2e)', () => {
       'OUR_UNDERSTANDING',
       'FEATURE_LISTING',
     ]);
-    expect(documents.filter((document) => document.implemented)).toHaveLength(2);
-    expect(documents.filter((document) => !document.implemented)).toHaveLength(5);
+    expect(documents.filter((document) => document.implemented)).toHaveLength(5);
+    expect(documents.filter((document) => !document.implemented)).toHaveLength(2);
 
     /* Nothing is unlocked yet: there is no approved baseline. */
     for (const document of documents) {
@@ -81,9 +81,9 @@ describe('Documents wiring (e2e)', () => {
       expect(document.lock).not.toBeNull();
     }
 
-    expect(documents.find((document) => document.type === 'STATEMENT_OF_WORK')?.lock?.reason).toBe(
-      'not_implemented',
-    );
+    expect(
+      documents.find((document) => document.type === 'WORK_BREAKDOWN_STRUCTURE')?.lock?.reason,
+    ).toBe('not_implemented');
     expect(documents.find((document) => document.type === 'OUR_UNDERSTANDING')?.lock?.reason).toBe(
       'upstream_missing',
     );
@@ -93,7 +93,7 @@ describe('Documents wiring (e2e)', () => {
     const { agent, csrf } = await session();
 
     const response = await agent
-      .post(DOCUMENT_ROUTES.generate('STATEMENT_OF_WORK'))
+      .post(DOCUMENT_ROUTES.generate('WORK_BREAKDOWN_STRUCTURE'))
       .set('x-csrf-token', csrf)
       .send({ useAi: false, expectedVersion: 0 })
       .expect(422);

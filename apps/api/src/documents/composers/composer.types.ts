@@ -210,6 +210,18 @@ export interface DocumentComposer {
    * which has its own storage.
    */
   readonly rowKind?: DocumentRow['kind'];
+  /**
+   * Whether an empty document is a legitimate result rather than a failure.
+   *
+   * True for Assumptions alone. Every other document is answerable for covering
+   * something — requirements, features, the agreed scope — so no content means
+   * something went wrong. Assumptions is answerable for recording only what
+   * somebody has stood behind, and when nobody has stood behind anything the
+   * correct document is empty. Without this flag the blocker calculation reads
+   * "no content" as "not generated" and refuses to approve a document that is
+   * exactly right.
+   */
+  readonly mayBeEmpty?: boolean;
 
   /**
    * The document, assembled from approved artifacts and nothing else.

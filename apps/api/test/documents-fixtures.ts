@@ -233,7 +233,7 @@ export async function approvedEstimateProject(
     })
     .expect(200);
 
-  /* An estimate, run deterministically and approved. */
+  /* An estimate, run deterministically. */
   const initial = (await agent.get(ESTIMATION_ROUTES.estimate).expect(200)).body
     .snapshot as EstimateSnapshot;
 
@@ -245,10 +245,39 @@ export async function approvedEstimateProject(
       .expect(201)
   ).body.snapshot as EstimateSnapshot;
 
+  /*
+   * A team, so Phase 6 can produce a schedule.
+   *
+   * After the run, because the roles a project may be staffed with come from its
+   * own locked stack — staffing a role this project has no work for is refused —
+   * and the run is what reveals which roles were priced. Without a team the
+   * estimate has hours but no duration, and Phase 8's Statement of Work states
+   * working weeks, so the fixture has to reach the point where those exist.
+   */
+  const roles = [...new Set(estimated.estimates.flatMap((unit) => Object.keys(unit.effort)))];
+
+  const staffed = (
+    await agent
+      .put(ESTIMATION_ROUTES.team)
+      .set('x-csrf-token', csrf)
+      .send({
+        lines: roles.map((role) => ({
+          role,
+          people: 1,
+          productiveHoursPerDay: 6,
+          workingDaysPerWeek: 5,
+          availability: 1,
+          availableFromDay: 0,
+        })),
+        expectedVersion: estimated.recordVersion,
+      })
+      .expect(200)
+  ).body.snapshot as EstimateSnapshot;
+
   await agent
     .post(ESTIMATION_ROUTES.approve)
     .set('x-csrf-token', csrf)
-    .send({ acknowledgedAiAssistance: true, expectedVersion: estimated.recordVersion })
+    .send({ acknowledgedAiAssistance: true, expectedVersion: staffed.recordVersion })
     .expect(200);
 
   return session;
@@ -377,6 +406,171 @@ export function registerRenamedModule(
         description: 'A user performs the action | The system records what happened',
         requirementIds: [key],
       })),
+    }),
+  );
+}
+
+/* ================================================ Phase 8 fixtures ======= */
+
+/**
+ * A model that writes acceptance conditions.
+ *
+ * Deliberately plain and observable, because that is what a good one looks like:
+ * something a reader could watch happen and agree had happened.
+ */
+export function registerAcceptanceCriteria(
+  provider: DeterministicProvider,
+  criteria: readonly {
+    readonly featureId: string;
+    readonly requirementIds: readonly string[];
+    readonly given?: string;
+    readonly when?: string;
+    readonly then: string;
+    readonly rule?: string;
+  }[],
+): void {
+  const payload = JSON.stringify({
+    criteria: criteria.map((criterion) => ({
+      featureId: criterion.featureId,
+      requirementIds: [...criterion.requirementIds],
+      given: criterion.given ?? '',
+      when: criterion.when ?? '',
+      then: criterion.then,
+      rule: criterion.rule ?? '',
+    })),
+  });
+
+  provider.register('acceptance_criteria.generate', payload);
+  provider.register('acceptance_criteria.regenerate', payload);
+}
+
+/**
+ * A model that tries to add a commitment nobody agreed to.
+ *
+ * The single most expensive failure this document can have: a response time in an
+ * acceptance condition is a service level, and it would be signed.
+ */
+export function registerThresholdInventingCriteria(
+  provider: DeterministicProvider,
+  featureId: string,
+  requirementKey: string,
+): void {
+  const payload = JSON.stringify({
+    criteria: [
+      {
+        featureId,
+        requirementIds: [requirementKey],
+        given: '',
+        when: 'a timesheet is submitted',
+        then: 'the system responds within 2 seconds and is 99.9% available',
+        rule: '',
+      },
+    ],
+  });
+
+  provider.register('acceptance_criteria.generate', payload);
+  provider.register('acceptance_criteria.regenerate', payload);
+}
+
+/** A model suggesting things the plan appears to be resting on. */
+export function registerAssumptionCandidates(
+  provider: DeterministicProvider,
+  candidates: readonly {
+    readonly statement: string;
+    readonly category?: string;
+    readonly requirementKeys?: readonly string[];
+    readonly impact?: string;
+  }[],
+): void {
+  provider.register(
+    'assumptions.suggest',
+    JSON.stringify({
+      assumptions: candidates.map((candidate) => ({
+        statement: candidate.statement,
+        category: candidate.category ?? 'CLIENT',
+        reasoning: 'The requirements describe the outcome but not who provides this.',
+        requirementKeys: [...(candidate.requirementKeys ?? [])],
+        impact: candidate.impact ?? 'MEDIUM',
+        impactAreas: ['SCOPE'],
+        impactIfFalse: 'The work would have to be added to the scope and estimated.',
+        validationNeeded: 'Ask the client to confirm.',
+      })),
+    }),
+  );
+}
+
+/**
+ * A model that tries to return an assumption as though it were already agreed.
+ *
+ * Every one of these fields is absent from `assumptionCandidateSchema`, so the
+ * response is rejected before storage rather than filtered afterwards.
+ */
+export function registerSelfConfirmingAssumption(
+  provider: DeterministicProvider,
+  statement: string,
+): void {
+  provider.register(
+    'assumptions.suggest',
+    JSON.stringify({
+      assumptions: [
+        {
+          statement,
+          category: 'CLIENT',
+          reasoning: 'It seemed safe.',
+          requirementKeys: [],
+          impact: 'LOW',
+          impactAreas: [],
+          impactIfFalse: '',
+          validationNeeded: '',
+          /* None of these exist in the schema. */
+          status: 'CONFIRMED',
+          provenance: 'CLIENT_STATED',
+          owner: 'The client',
+          confirmedBy: 'USER',
+        },
+      ],
+    }),
+  );
+}
+
+/** A model that writes one SOW section. */
+export function registerSowSection(
+  provider: DeterministicProvider,
+  key: string,
+  body: string,
+  requirementKeys: readonly string[] = [],
+): void {
+  provider.register(
+    'sow.section.generate',
+    JSON.stringify({ key, body, requirementKeys: [...requirementKeys] }),
+  );
+}
+
+/**
+ * A clarification question, so the assumption workflow has something to work on.
+ *
+ * Phase 4 raises these; Phase 8 reads the answer's `isAssumption` flag, which is a
+ * decision a person made at the time rather than anything this phase infers.
+ */
+export function registerClarificationQuestion(
+  provider: DeterministicProvider,
+  question: string,
+  requirementKey: string,
+  blocking = false,
+): void {
+  provider.register(
+    'clarification.generate',
+    JSON.stringify({
+      questions: [
+        {
+          id: 'q1',
+          question,
+          reason: 'The requirements do not say.',
+          category: 'MISSING_DETAIL',
+          impact: blocking ? 'BLOCKING' : 'IMPORTANT',
+          itemIds: [requirementKey],
+        },
+      ],
     }),
   );
 }

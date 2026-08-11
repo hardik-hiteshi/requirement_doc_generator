@@ -55,7 +55,13 @@ import { z } from 'zod';
  */
 export const SOW_SECTIONS = [
   { key: 'project-overview', title: 'Project Overview', order: 1, required: true },
-  { key: 'objective', title: 'Project Objective', order: 2, required: true },
+  /*
+   * Not required. If the approved requirements state no business objective, this
+   * document cannot state one either — inventing a purpose for somebody's project
+   * is exactly what the rest of this file exists to prevent. The section is omitted
+   * with a reason, and a reviewer can write it themselves.
+   */
+  { key: 'objective', title: 'Project Objective', order: 2, required: false },
   { key: 'scope-of-work', title: 'Scope of Work', order: 3, required: true },
   { key: 'functional-scope', title: 'Functional Scope', order: 4, required: true },
   { key: 'deliverables', title: 'Deliverables', order: 5, required: true },
@@ -165,11 +171,20 @@ export function prohibitedLegalTerms(text: string): readonly string[] {
 }
 
 /** Commercial terms a real SOW needs, which this application cannot supply. */
+/**
+ * Commercial terms a real SOW needs, which this application cannot supply.
+ *
+ * Worded as categories rather than as clause names on purpose. "Contractual and
+ * legal provisions" says what is missing; writing "governing law, liability and
+ * warranty" would put clause language into the document, which is the very thing
+ * `PROHIBITED_LEGAL_PATTERNS` exists to catch — and a checker that had to exempt
+ * its own text would be a checker with a hole in it.
+ */
 export const OUTSTANDING_COMMERCIAL_TERMS: readonly string[] = [
-  'Commercial terms — price, payment schedule and invoicing',
-  'Contractual terms — governing law, liability, warranty and termination',
-  'Intellectual-property ownership and licensing',
-  'Support and maintenance arrangements after delivery',
+  'Pricing, invoicing and commercial arrangements',
+  'Contractual and legal provisions, to be agreed with your own advisers',
+  'Ownership and licensing of the delivered software',
+  'Arrangements for support after delivery',
 ];
 
 /* -------------------------------------------------- internal methodology */

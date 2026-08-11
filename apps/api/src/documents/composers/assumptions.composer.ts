@@ -58,6 +58,8 @@ export class AssumptionsComposer implements DocumentComposer {
   readonly shape = 'ROWS' as const;
   readonly requiredSectionKeys = [];
   readonly rowKind = 'ASSUMPTION' as const;
+  /* An empty Assumptions document is the correct answer, not a failed one. */
+  readonly mayBeEmpty = true;
 
   compose(context: UpstreamContext): ComposedContent {
     const rows: ComposedRow[] = [];

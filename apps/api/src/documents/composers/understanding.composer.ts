@@ -95,17 +95,35 @@ export class UnderstandingComposer implements DocumentComposer {
    * than filled from the nearest thing.
    */
   private requirementsFor(key: string, context: UpstreamContext): readonly RequirementItem[] {
-    const byCategory = (...categories: string[]): readonly RequirementItem[] =>
-      context.requirements.filter((requirement) => categories.includes(requirement.category));
+    /*
+     * A requirement that says something is *not* being built cannot also be listed
+     * as something that is. Phase 4 classifies "Payroll processing is out of scope"
+     * as functional — it is about a function — so without this the same requirement
+     * lands under both headings and the document contradicts itself. Validation
+     * catches that, correctly, and then blames the reviewer for a contradiction the
+     * composer wrote. So the exclusions are removed from every inclusion heading
+     * here, at the point the document is assembled.
+     */
+    const excluded = new Set(this.explicitExclusions(context).map((requirement) => requirement.id));
 
+    const byCategory = (...categories: string[]): readonly RequirementItem[] =>
+      context.requirements.filter(
+        (requirement) => categories.includes(requirement.category) && !excluded.has(requirement.id),
+      );
+
+    /* Word-matched headings are inclusion headings too, so they exclude as well. */
     const matching = (pattern: RegExp): readonly RequirementItem[] =>
       context.requirements.filter(
-        (requirement) => pattern.test(requirement.title) || pattern.test(requirement.statement),
+        (requirement) =>
+          !excluded.has(requirement.id) &&
+          (pattern.test(requirement.title) || pattern.test(requirement.statement)),
       );
 
     switch (key) {
       case 'project-overview':
-        return context.requirements.slice(0, 8);
+        return context.requirements
+          .filter((requirement) => !excluded.has(requirement.id))
+          .slice(0, 8);
       case 'business-objective':
         return matching(/\b(objective|goal|so that|in order to|reduce|improve|increase)\b/i);
       case 'solution-understanding':
@@ -129,7 +147,7 @@ export class UnderstandingComposer implements DocumentComposer {
       case 'constraints':
         return byCategory('constraint');
       case 'out-of-scope':
-        return matching(/\b(out of scope|not included|excluded|will not|no support for)\b/i);
+        return this.explicitExclusions(context);
       case 'clarifications':
         // Clarifications are their own evidence; requirement selection does not
         // apply, and the body is built from the confirmed answers directly.
@@ -139,6 +157,20 @@ export class UnderstandingComposer implements DocumentComposer {
       default:
         return [];
     }
+  }
+
+  /**
+   * Requirements whose own words say something is not being built.
+   *
+   * One definition, used both to fill the out-of-scope heading and to keep those
+   * requirements out of the inclusion headings — so the two can never disagree.
+   */
+  private explicitExclusions(context: UpstreamContext): readonly RequirementItem[] {
+    const pattern = /\b(out of scope|not included|excluded|will not|no support for)\b/i;
+
+    return context.requirements.filter(
+      (requirement) => pattern.test(requirement.title) || pattern.test(requirement.statement),
+    );
   }
 
   /** A plain, checkable body. The model's job is to make this read well. */
