@@ -1039,7 +1039,16 @@ export class DocumentsService {
       status: 'FINAL',
       finalAt: now,
     });
-    await this.repository.updateVersion(context.projectId, type, record.version, { finalAt: now });
+    /*
+     * The archived row records it too. A version carrying `finalAt` while its status
+     * still said APPROVED was a row that contradicted itself, and "which version did
+     * the client receive?" has to be answerable from the history alone rather than by
+     * knowing that a later revise would have corrected it.
+     */
+    await this.repository.updateVersion(context.projectId, type, record.version, {
+      status: 'FINAL',
+      finalAt: now,
+    });
 
     await this.audit.record({
       type: 'DOCUMENT_MARKED_FINAL',
@@ -1278,6 +1287,26 @@ export class DocumentsService {
   }
 
   /** A document that exists, is not issued, and matches the caller's version. */
+  /**
+   * The single gate every mutation goes through.
+   *
+   * Two conditions, and the difference between them matters.
+   *
+   * **Status** decides whether this document's content may change at all. An issued
+   * document may not, ever.
+   *
+   * **The lock** decides whether the workflow has reached this document yet. A
+   * document whose prerequisite has been withdrawn is not a document to patch: the
+   * foundation it was built on is no longer agreed, so an edit would produce content
+   * resting on nothing. Approving it is refused for the same reason, and generation
+   * has always been.
+   *
+   * Reading is gated by neither, and that is deliberate. `read`, `version`,
+   * `listVersions`, `compare` and the CSV go nowhere near this method. An approved or
+   * issued document stays readable when the step above it is reopened, because
+   * hiding a record somebody may have to produce — at the moment its context has
+   * become contentious — is precisely when it must not disappear.
+   */
   private async editableDocument(
     context: DocumentContext,
     type: DocumentType,
@@ -1295,6 +1324,9 @@ export class DocumentsService {
         409,
       );
     }
+
+    const upstream = await this.upstream.read(context.projectId, context.correlationId);
+    this.assertUnlocked(type, upstream);
 
     return record;
   }

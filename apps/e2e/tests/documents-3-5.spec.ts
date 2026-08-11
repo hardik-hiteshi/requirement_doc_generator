@@ -451,6 +451,15 @@ test.describe('Documents 3 to 5', () => {
     await expect(page.getByTestId('document-status-STATEMENT_OF_WORK')).toHaveText('Issued');
     await expect(page.getByTestId('document-outdated-STATEMENT_OF_WORK')).toBeVisible();
 
+    /*
+     * The record stays reachable. Its prerequisite has been withdrawn, so the lock is
+     * showing and nothing here may be written — but a document somebody may have to
+     * produce must not disappear behind a disabled button at the moment its context
+     * has become contentious.
+     */
+    await expect(page.getByTestId('document-lock-STATEMENT_OF_WORK')).toBeVisible();
+    await expect(page.getByTestId('document-open-STATEMENT_OF_WORK')).toBeEnabled();
+
     await openDocument(page, 'STATEMENT_OF_WORK');
     await expect(page.getByTestId('detail-currentness')).toHaveText('Out of date');
     await expect(page.getByTestId('section-body-technology')).toHaveText(issued!.trim());

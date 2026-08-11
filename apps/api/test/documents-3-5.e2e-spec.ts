@@ -1293,7 +1293,145 @@ describe('Documents 3–5 (e2e)', () => {
         .expect(409);
     }, 300_000);
 
+    /*
+     * The readability rule, stated as a test because it is the one property that
+     * cannot be recovered after the fact: a record nobody can open is a record that
+     * does not exist, and the moment a prerequisite is withdrawn is exactly when
+     * somebody needs to read what was already agreed or sent.
+     */
+    it('keeps an approved document readable, and unwritable, when its prerequisite is withdrawn', async () => {
+      const session = await throughAssumptions();
+      const before = await read(session, 'ASSUMPTIONS');
+      const criteria = await read(session, 'ACCEPTANCE_CRITERIA');
+
+      /* Withdraw the document Assumptions is built on. */
+      await session.agent
+        .post(DOCUMENT_ROUTES.reopen('ACCEPTANCE_CRITERIA'))
+        .set('x-csrf-token', session.csrf)
+        .send({ reason: 'Changes wanted.', expectedVersion: criteria.recordVersion })
+        .expect(201);
+
+      /* 1. Still readable, in every form. */
+      const after = await read(session, 'ASSUMPTIONS');
+
+      expect(after.status).toBe('APPROVED');
+      expect(after.currentness).toBe('OUTDATED');
+      expect(after.rows).toHaveLength(before.rows.length);
+
+      await session.agent
+        .get(DOCUMENT_ROUTES.version('ASSUMPTIONS', String(before.version)))
+        .expect(200);
+      await session.agent.get(DOCUMENT_ROUTES.versions('ASSUMPTIONS')).expect(200);
+
+      /* And the list still shows it, rather than hiding it behind the lock. */
+      const listed = (await documents(session)).find((entry) => entry.type === 'ASSUMPTIONS')!;
+
+      expect(listed.status).toBe('APPROVED');
+      expect(listed.currentness).toBe('OUTDATED');
+      expect(listed.version).toBe(before.version);
+
+      /* 2. And not writable, because its foundation is no longer agreed. */
+      const refusal = await session.agent
+        .post(DOCUMENT_ROUTES.addRow('ASSUMPTIONS'))
+        .set('x-csrf-token', session.csrf)
+        .send({
+          payload: {
+            assumptionKey: 'AS-000',
+            category: 'CLIENT',
+            statement: 'Something added while the step above was reopened.',
+            provenance: 'USER_STATED',
+            basis: 'Mine.',
+            status: 'DRAFT',
+            requirementIds: [],
+            featureIds: [],
+            technologyIds: [],
+            estimateUnitIds: [],
+            owner: '',
+            impact: 'LOW',
+            impactAreas: [],
+            impactIfFalse: '',
+            validationNeeded: '',
+            validateBy: '',
+            notes: '',
+          },
+          attribution: 'Trying it on.',
+          expectedVersion: after.recordVersion,
+        })
+        .expect(422);
+
+      expect(JSON.stringify(refusal.body)).toContain('DOCUMENT_LOCKED');
+
+      /* Nor generated, nor approved. */
+      await session.agent
+        .post(DOCUMENT_ROUTES.generate('ASSUMPTIONS'))
+        .set('x-csrf-token', session.csrf)
+        .send({ useAi: false, expectedVersion: after.recordVersion })
+        .expect(422);
+
+      await session.agent
+        .post(DOCUMENT_ROUTES.approve('ASSUMPTIONS'))
+        .set('x-csrf-token', session.csrf)
+        .send({ acknowledged: true, expectedVersion: after.recordVersion })
+        .expect(422);
+
+      /* Nothing about it changed while all that was refused. */
+      const untouched = await read(session, 'ASSUMPTIONS');
+      expect(untouched.rows).toHaveLength(before.rows.length);
+      expect(untouched.version).toBe(before.version);
+    }, 300_000);
+
+    it('keeps an issued document readable when its prerequisite is withdrawn', async () => {
+      const session = await throughAssumptions();
+      await settle(session, 'STATEMENT_OF_WORK');
+
+      const approved = await read(session, 'STATEMENT_OF_WORK');
+      const issued = (
+        await session.agent
+          .post(DOCUMENT_ROUTES.markFinal('STATEMENT_OF_WORK'))
+          .set('x-csrf-token', session.csrf)
+          .send({ acknowledged: true, expectedVersion: approved.recordVersion })
+          .expect(201)
+      ).body.document as DocumentSnapshot;
+
+      const bodies = issued.sections.map((section) => section.body);
+
+      const assumptions = await read(session, 'ASSUMPTIONS');
+      await session.agent
+        .post(DOCUMENT_ROUTES.reopen('ASSUMPTIONS'))
+        .set('x-csrf-token', session.csrf)
+        .send({
+          reason: 'Another assumption turned up.',
+          expectedVersion: assumptions.recordVersion,
+        })
+        .expect(201);
+
+      /* Readable, word for word, and still issued. */
+      const after = await read(session, 'STATEMENT_OF_WORK');
+
+      expect(after.status).toBe('FINAL');
+      expect(after.currentness).toBe('OUTDATED');
+      expect(after.sections.map((section) => section.body)).toEqual(bodies);
+
+      /* The archived version is readable too — that is the record of what was sent. */
+      const historical = (
+        await session.agent
+          .get(DOCUMENT_ROUTES.version('STATEMENT_OF_WORK', String(issued.version)))
+          .expect(200)
+      ).body.document as DocumentSnapshot;
+
+      expect(historical.status).toBe('FINAL');
+      expect(historical.sections.map((section) => section.body)).toEqual(bodies);
+
+      /* And immutable, for both reasons at once. */
+      await session.agent
+        .put(DOCUMENT_ROUTES.section('STATEMENT_OF_WORK', after.sections[0]!.sectionId))
+        .set('x-csrf-token', session.csrf)
+        .send({ body: 'Rewritten.', expectedVersion: after.recordVersion })
+        .expect(409);
+    }, 300_000);
+
     /* 32. */
+
     it('hides another project’s documents behind the same answer as a missing one', async () => {
       const mine = await throughAcceptanceCriteria();
       const theirs = await project();

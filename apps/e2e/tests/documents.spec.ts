@@ -179,14 +179,16 @@ test.describe('Documents', () => {
     );
     await expect(page.getByTestId('document-open-FEATURE_LISTING')).toBeDisabled();
 
-    /* Documents 3–7 are visible and honestly marked unavailable. */
-    for (const type of [
-      'ACCEPTANCE_CRITERIA',
-      'ASSUMPTIONS',
-      'STATEMENT_OF_WORK',
-      'WORK_BREAKDOWN_STRUCTURE',
-      'CLIENT_DEPENDENCY_SHEET',
-    ]) {
+    /*
+     * Documents 3 to 5 exist now and are locked behind their prerequisites; the last
+     * two are visible and honestly marked unavailable.
+     */
+    for (const type of ['ACCEPTANCE_CRITERIA', 'ASSUMPTIONS', 'STATEMENT_OF_WORK']) {
+      await expect(page.getByTestId(`document-lock-${type}`)).toContainText('Approve');
+      await expect(page.getByTestId(`document-unavailable-${type}`)).toBeHidden();
+    }
+
+    for (const type of ['WORK_BREAKDOWN_STRUCTURE', 'CLIENT_DEPENDENCY_SHEET']) {
       await expect(page.getByTestId(`document-unavailable-${type}`)).toBeVisible();
     }
   });
@@ -256,13 +258,29 @@ test.describe('Documents', () => {
     await page.getByTestId('section-input-project-overview').fill('Version one text.');
     await page.getByTestId('section-save-project-overview').click();
 
+    /*
+     * Wait for the save to land before asking for a rewrite.
+     *
+     * Every mutation carries the version it expects to be changing, so firing the
+     * next one before this has come back sends a stale number and is refused —
+     * correctly. The user cannot click faster than the round trip; the test can.
+     */
+    await expect(page.getByTestId('section-body-project-overview')).toContainText(
+      'Version one text.',
+    );
+
     await page.getByTestId('generate-without-ai').click();
     await expect(page.getByTestId('document-version')).toHaveText('v2', { timeout: 60_000 });
 
     await page.getByTestId('proposal-KEEP_CURRENT-project-overview').click();
+    await expect(page.getByTestId('section-proposal-project-overview')).toBeHidden();
+
     await page.getByTestId('section-edit-project-overview').click();
     await page.getByTestId('section-input-project-overview').fill('Version two text.');
     await page.getByTestId('section-save-project-overview').click();
+    await expect(page.getByTestId('section-body-project-overview')).toContainText(
+      'Version two text.',
+    );
 
     /* 11. Compare. */
     await expect(versionsPanel(page).getByTestId('version-1')).toBeVisible();

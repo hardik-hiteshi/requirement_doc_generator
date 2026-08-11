@@ -279,6 +279,30 @@ _about_ is a scope decision; an assumption's status and provenance do not change
 editing, because those move only through confirm, reject and settle, where the
 application records who did it.
 
+## What the lock gates, and what it never gates
+
+`editableDocument` is the single gate every mutation passes through, and it asks two
+questions. **Status** decides whether this document's content may change at all — an
+issued document's may not, ever. **The lock** decides whether the workflow has reached
+this document: one whose prerequisite has been withdrawn is not a document to patch,
+because the foundation it was built on is no longer agreed.
+
+Reading is gated by neither. `read`, `version`, `listVersions`, `compare` and the CSV
+never touch that method, so an approved or issued document stays readable when the step
+above it is reopened. Hiding a record somebody may have to produce — at the moment its
+context has become contentious — is precisely when it must not disappear. The interface
+follows: a document that already has a version stays openable, with the lock shown
+beside it.
+
+`revise` is deliberately outside the lock. It does not alter the issued record; it opens
+a new working version beside it, and it is the action the screen advises for an issued
+document whose inputs have moved. The new draft still cannot be approved until its
+prerequisite is approved again.
+
+The gate costs one authoritative upstream read per mutation, which is the same read the
+request performs again when it reloads the document afterwards. That is a known cost,
+recorded as such rather than optimised away by weakening the check.
+
 ## Traceability lives in the citation, not in the prose
 
 A section's body reads as a document a client could be sent. The requirement it came

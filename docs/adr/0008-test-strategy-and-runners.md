@@ -116,3 +116,17 @@ any date rather than a week count.
 The integration suite supplies a team through the API, so the precise "approximately N
 working weeks" form is asserted there. Splitting it this way keeps both assertions
 honest: neither pretends the interface can reach something it cannot.
+
+## Addendum, Phase 8: optimistic concurrency and test synchronisation
+
+Every mutation carries the record version it expects to be changing, and a stale one
+is refused with 409. That is load-bearing: two people editing the same document, or a
+tab left open, must not overwrite each other silently.
+
+A browser test that clicks Save and then immediately clicks Generate sends the version
+it held before the save returned, and is refused — correctly. The fix belongs in the
+test, which waits for the saved state to appear before issuing the next mutation; a
+person cannot click faster than the round trip, and a test that can must say so.
+
+The concurrency check is never relaxed to make a test pass. If a browser test fails
+with 409, the test is wrong.
