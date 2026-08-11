@@ -27,6 +27,8 @@ import {
   useReopenDocument,
   useReviseDocument,
 } from '@/hooks/use-documents';
+import { AssumptionsPanel } from './assumptions-panel';
+import { CriteriaTable } from './criteria-table';
 import { FeatureTable } from './feature-table';
 import { SectionEditor } from './section-editor';
 import { ValidationPanel } from './validation-panel';
@@ -568,6 +570,30 @@ function DocumentDetail({ type }: { readonly type: DocumentType }) {
 
       {document.features.length > 0 || document.coverage ? (
         <FeatureTable type={type} document={document} />
+      ) : null}
+
+      {/*
+       * The structured list documents. Each renders its own rows: an acceptance
+       * criterion and an assumption are different things to read and different
+       * things to decide about, so they get different views over the one row
+       * channel the engine stores them in.
+       */}
+      {type === 'ACCEPTANCE_CRITERIA' && (document.rows.length > 0 || document.criteriaCoverage) ? (
+        <CriteriaTable
+          type={type}
+          document={document}
+          editable={editable}
+          aiAvailable={aiAvailable}
+        />
+      ) : null}
+
+      {type === 'ASSUMPTIONS' && document.assumptionSummary ? (
+        <AssumptionsPanel
+          type={type}
+          document={document}
+          editable={editable}
+          aiAvailable={aiAvailable}
+        />
       ) : null}
 
       <ValidationPanel type={type} document={document} aiAvailable={aiAvailable} />

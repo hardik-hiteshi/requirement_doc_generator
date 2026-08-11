@@ -1,4 +1,13 @@
 import {
+  type AddRow,
+  type ConfirmAssumption,
+  type EditRow,
+  type ExcludeRow,
+  type RegenerateRow,
+  type RegenerateRowGroup,
+  type RejectAssumption,
+  type ResolveRowProposal,
+  type SettleAssumption,
   DOCUMENT_ROUTES,
   type AcknowledgeFinding,
   type ApplyCorrection,
@@ -265,6 +274,129 @@ export async function restoreDocumentVersion(
   request: RestoreVersion,
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.restore(type), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+/* ------------------------------------- Phase 8: structured rows ---------- */
+
+/*
+ * One set of row calls for every list document. Acceptance Criteria and
+ * Assumptions share them; the row kind follows from the document type.
+ */
+
+export async function addRow(type: DocumentType, request: AddRow): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.addRow(type), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function updateRow(
+  type: DocumentType,
+  rowId: string,
+  request: EditRow,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.row(type, rowId), {
+    method: 'PATCH',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function regenerateRow(
+  type: DocumentType,
+  rowId: string,
+  request: RegenerateRow,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.regenerateRow(type, rowId), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function regenerateRowGroup(
+  type: DocumentType,
+  request: RegenerateRowGroup,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.regenerateRowGroup(type), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function resolveRowProposal(
+  type: DocumentType,
+  rowId: string,
+  request: ResolveRowProposal,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.resolveRowProposal(type, rowId), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function excludeRow(
+  type: DocumentType,
+  rowId: string,
+  request: ExcludeRow,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.excludeRow(type, rowId), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+/* ---------------------------------------- Phase 8: assumptions ----------- */
+
+export async function confirmAssumption(
+  type: DocumentType,
+  rowId: string,
+  request: ConfirmAssumption,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.confirmAssumption(type, rowId), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function rejectAssumption(
+  type: DocumentType,
+  rowId: string,
+  request: RejectAssumption,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.rejectAssumption(type, rowId), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function settleAssumption(
+  type: DocumentType,
+  rowId: string,
+  request: SettleAssumption,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.settleAssumption(type, rowId), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function requestAssumptionCandidates(
+  type: DocumentType,
+  request: GenerateDocument,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.assumptionCandidates(type), {
     method: 'POST',
     body: request,
     headers: mutationHeaders(),

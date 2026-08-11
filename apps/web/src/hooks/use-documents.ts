@@ -2,6 +2,15 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
+  AddRow,
+  ConfirmAssumption,
+  EditRow,
+  ExcludeRow,
+  RegenerateRow,
+  RegenerateRowGroup,
+  RejectAssumption,
+  ResolveRowProposal,
+  SettleAssumption,
   AcknowledgeFinding,
   ApplyCorrection,
   ApproveDocument,
@@ -19,6 +28,16 @@ import type {
 import { useCallback } from 'react';
 
 import {
+  addRow,
+  confirmAssumption,
+  excludeRow,
+  regenerateRow,
+  regenerateRowGroup,
+  rejectAssumption,
+  requestAssumptionCandidates,
+  resolveRowProposal,
+  settleAssumption,
+  updateRow,
   acknowledgeDocumentFinding,
   applyCorrection,
   approveDocument,
@@ -266,5 +285,69 @@ export function useReviseDocument(type: DocumentType) {
 export function useRestoreVersion(type: DocumentType) {
   return useDocumentMutation(type, (request: RestoreVersion) =>
     restoreDocumentVersion(type, request),
+  );
+}
+
+/* ------------------------------------- Phase 8: structured rows ---------- */
+
+export function useAddRow(type: DocumentType) {
+  return useDocumentMutation(type, (request: AddRow) => addRow(type, request));
+}
+
+export function useUpdateRow(type: DocumentType) {
+  return useDocumentMutation(type, ({ rowId, ...request }: EditRow & { rowId: string }) =>
+    updateRow(type, rowId, request),
+  );
+}
+
+export function useRegenerateRow(type: DocumentType) {
+  return useDocumentMutation(type, ({ rowId, ...request }: RegenerateRow & { rowId: string }) =>
+    regenerateRow(type, rowId, request),
+  );
+}
+
+export function useRegenerateRowGroup(type: DocumentType) {
+  return useDocumentMutation(type, (request: RegenerateRowGroup) =>
+    regenerateRowGroup(type, request),
+  );
+}
+
+export function useResolveRowProposal(type: DocumentType) {
+  return useDocumentMutation(
+    type,
+    ({ rowId, ...request }: ResolveRowProposal & { rowId: string }) =>
+      resolveRowProposal(type, rowId, request),
+  );
+}
+
+export function useExcludeRow(type: DocumentType) {
+  return useDocumentMutation(type, ({ rowId, ...request }: ExcludeRow & { rowId: string }) =>
+    excludeRow(type, rowId, request),
+  );
+}
+
+/* ---------------------------------------- Phase 8: assumptions ----------- */
+
+export function useConfirmAssumption(type: DocumentType) {
+  return useDocumentMutation(type, ({ rowId, ...request }: ConfirmAssumption & { rowId: string }) =>
+    confirmAssumption(type, rowId, request),
+  );
+}
+
+export function useRejectAssumption(type: DocumentType) {
+  return useDocumentMutation(type, ({ rowId, ...request }: RejectAssumption & { rowId: string }) =>
+    rejectAssumption(type, rowId, request),
+  );
+}
+
+export function useSettleAssumption(type: DocumentType) {
+  return useDocumentMutation(type, ({ rowId, ...request }: SettleAssumption & { rowId: string }) =>
+    settleAssumption(type, rowId, request),
+  );
+}
+
+export function useAssumptionCandidates(type: DocumentType) {
+  return useDocumentMutation(type, (request: GenerateDocument) =>
+    requestAssumptionCandidates(type, request),
   );
 }
