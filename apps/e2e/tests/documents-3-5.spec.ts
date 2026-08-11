@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { DOCUMENT_LABELS } from '@wdrg/contracts';
+
 import { expectNoAccessibilityViolations } from './support/accessibility';
 import { createProject, enterWorkspace, saveSection, section } from './support/workspace';
 
@@ -123,14 +125,37 @@ async function settleOpenDocument(page: Page): Promise<void> {
 }
 
 /**
+ * Open a document, waiting for it to be unlocked first.
+ *
+ * If it stays locked the assertion reports the lock's own sentence, which names the
+ * prerequisite — far more use than a click timing out against a disabled button.
+ */
+async function openDocument(page: Page, type: string): Promise<void> {
+  await expect(page.getByTestId(`document-open-${type}`)).toBeEnabled({ timeout: 60_000 });
+  await page.getByTestId(`document-open-${type}`).click();
+
+  /*
+   * Wait for the pane to be showing *this* document, by name.
+   *
+   * Not merely for a pane to exist: the previous document's is already on screen, so
+   * a `toBeVisible` passes instantly and the next click lands on the wrong document.
+   */
+  await expect(page.getByTestId('detail-title')).toHaveText(
+    DOCUMENT_LABELS[type as keyof typeof DOCUMENT_LABELS],
+    { timeout: 30_000 },
+  );
+}
+
+/**
  * Open a document, write it deterministically, then approve it.
  *
  * The list and the open document are both on screen, so moving on is a matter of
  * opening the next one — there is nothing to go back to.
  */
 async function settle(page: Page, type: string): Promise<void> {
-  await expect(page.getByTestId(`document-open-${type}`)).toBeEnabled({ timeout: 60_000 });
-  await page.getByTestId(`document-open-${type}`).click();
+  /* Unlocked, because this is about to write it — not merely open it. */
+  await expect(page.getByTestId(`document-lock-${type}`)).toBeHidden({ timeout: 60_000 });
+  await openDocument(page, type);
   await page.getByTestId('generate-without-ai').click();
   await expect(page.getByTestId('document-version')).toHaveText('v1', { timeout: 90_000 });
   await settleOpenDocument(page);
@@ -192,7 +217,7 @@ test.describe('Documents 3 to 5', () => {
     await settle(page, 'FEATURE_LISTING');
 
     /* 4. */
-    await page.getByTestId('document-open-ACCEPTANCE_CRITERIA').click();
+    await openDocument(page, 'ACCEPTANCE_CRITERIA');
     await page.getByTestId('generate-without-ai').click();
     await expect(criteriaPanel(page)).toBeVisible({ timeout: 90_000 });
 
@@ -241,7 +266,7 @@ test.describe('Documents 3 to 5', () => {
     await settle(page, 'ACCEPTANCE_CRITERIA');
 
     /* 11. */
-    await page.getByTestId('document-open-ASSUMPTIONS').click();
+    await openDocument(page, 'ASSUMPTIONS');
     await page.getByTestId('generate-without-ai').click();
     await expect(assumptionsPanel(page)).toBeVisible({ timeout: 90_000 });
 
@@ -271,7 +296,7 @@ test.describe('Documents 3 to 5', () => {
     await settle(page, 'ASSUMPTIONS');
 
     /* 17, 18. */
-    await page.getByTestId('document-open-STATEMENT_OF_WORK').click();
+    await openDocument(page, 'STATEMENT_OF_WORK');
     await page.getByTestId('generate-without-ai').click();
     await expect(contentPanel(page)).toBeVisible({ timeout: 90_000 });
 
@@ -332,9 +357,13 @@ test.describe('Documents 3 to 5', () => {
     await page.getByTestId('section-save-objective').click();
     await expect(page.getByTestId('section-body-objective')).toContainText('spreadsheet process');
 
+    /*
+     * Rewriting one section does not cut a new document version — it replaces that
+     * section's text and takes the document back to draft. What matters here is that
+     * it left the section somebody edited alone.
+     */
     await page.getByTestId('section-regenerate-scope-of-work').click();
-    await expect(page.getByTestId('document-version')).toHaveText('v2', { timeout: 90_000 });
-    /* The edited section survived the rewrite of another. */
+    await expect(page.getByTestId('detail-status')).toHaveText('Draft', { timeout: 60_000 });
     await expect(page.getByTestId('section-body-objective')).toContainText('spreadsheet process');
 
     /* 25, 27. */
@@ -393,7 +422,11 @@ test.describe('Documents 3 to 5', () => {
     await settle(page, 'ACCEPTANCE_CRITERIA');
     await settle(page, 'ASSUMPTIONS');
 
-    await page.getByTestId('document-open-STATEMENT_OF_WORK').click();
+    /* The prerequisite is approved and current, which is what unlocks the next one. */
+    await expect(page.getByTestId('document-status-ASSUMPTIONS')).toHaveText('Approved');
+    await expect(page.getByTestId('document-outdated-ASSUMPTIONS')).toBeHidden();
+
+    await openDocument(page, 'STATEMENT_OF_WORK');
     await page.getByTestId('generate-without-ai').click();
     await expect(contentPanel(page)).toBeVisible({ timeout: 90_000 });
     await settleOpenDocument(page);
@@ -409,7 +442,7 @@ test.describe('Documents 3 to 5', () => {
     await expect(page.getByTestId('revise-document')).toBeVisible();
 
     /* Reopen the document it is built on, and it goes out of date without moving. */
-    await page.getByTestId('document-open-ASSUMPTIONS').click();
+    await openDocument(page, 'ASSUMPTIONS');
     await page.getByTestId('reopen-document').click();
     await expect(page.getByTestId('detail-status')).toHaveText('Needs changes', {
       timeout: 60_000,
@@ -418,7 +451,7 @@ test.describe('Documents 3 to 5', () => {
     await expect(page.getByTestId('document-status-STATEMENT_OF_WORK')).toHaveText('Issued');
     await expect(page.getByTestId('document-outdated-STATEMENT_OF_WORK')).toBeVisible();
 
-    await page.getByTestId('document-open-STATEMENT_OF_WORK').click();
+    await openDocument(page, 'STATEMENT_OF_WORK');
     await expect(page.getByTestId('detail-currentness')).toHaveText('Out of date');
     await expect(page.getByTestId('section-body-technology')).toHaveText(issued!.trim());
   });
@@ -452,7 +485,7 @@ test.describe('Documents 3 to 5', () => {
         await settle(page, 'OUR_UNDERSTANDING');
         await settle(page, 'FEATURE_LISTING');
 
-        await page.getByTestId('document-open-ACCEPTANCE_CRITERIA').click();
+        await openDocument(page, 'ACCEPTANCE_CRITERIA');
         await page.getByTestId('generate-without-ai').click();
         await expect(criteriaPanel(page)).toBeVisible({ timeout: 90_000 });
         await expect(validationPanel(page)).toBeVisible();

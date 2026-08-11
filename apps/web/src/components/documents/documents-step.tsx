@@ -162,11 +162,19 @@ function DocumentCard({
         >
           {DOCUMENT_STATUS_LABELS[summary.status]}
         </Badge>
+        {/*
+         * Locked means "you cannot write this yet", not "you cannot read it". A
+         * document that already has a version stays openable even when the step
+         * above it has been reopened — an issued document in particular is a record
+         * somebody may need to produce, and hiding it behind a disabled button
+         * because a prerequisite moved would make the history unreachable exactly
+         * when it matters.
+         */}
         {summary.implemented ? (
           <Button
             variant="secondary"
             onClick={onOpen}
-            disabled={summary.lock?.reason === 'prerequisite_document'}
+            disabled={summary.lock?.reason === 'prerequisite_document' && summary.version === 0}
             data-testid={`document-open-${summary.type}`}
           >
             {open ? 'Close' : 'Open'}
@@ -220,7 +228,7 @@ function DocumentDetail({ type }: { readonly type: DocumentType }) {
       <Card role="region" aria-label={DOCUMENT_LABELS[type]}>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle>{document.title}</CardTitle>
+            <CardTitle data-testid="detail-title">{document.title}</CardTitle>
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone="neutral" data-testid="document-version">
                 v{document.version}
