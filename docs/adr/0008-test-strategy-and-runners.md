@@ -105,17 +105,20 @@ context: it is the reliable way to make a suite stop being run.
 **`ts-jest` instead of `@swc/jest`.** Rejected: materially slower, and it would
 type-check twice (the `typecheck` gate already does that properly).
 
-## Addendum, Phase 8: what the browser can and cannot reach
+## Addendum, Phase 8: the browser can reach the whole plan
 
-Phase 6 exposes no interface for supplying a team, so a browser walkthrough approves an
-estimate with recommended staffing and no schedule. The Statement of Work then states
-its duration in the only form that evidence permits — "the duration set out in the
-approved estimate" — and the browser suite asserts the relative form and the absence of
-any date rather than a week count.
+An earlier version of this addendum recorded that the browser could not supply a team,
+because Phase 6 exposed no interface for one — so the browser suite asserted a weaker
+timeline form than the integration suite did.
 
-The integration suite supplies a team through the API, so the precise "approximately N
-working weeks" form is asserted there. Splitting it this way keeps both assertions
-honest: neither pretends the interface can reach something it cannot.
+That gap is closed. The estimation step now has team-capacity and working-calendar
+panels, and the browser suite drives them: no team, add one, change it, remove it, edit
+the calendar, reload. Both suites now assert the same "approximately N working weeks"
+form, because both can reach it.
+
+The lesson worth keeping: a test that asserts a weaker property than the product should
+support is a signal, not a settled boundary. This one was recorded as a limitation for
+one review cycle and was then read back as a missing feature — which is what it was.
 
 ## Addendum, Phase 8: optimistic concurrency and test synchronisation
 

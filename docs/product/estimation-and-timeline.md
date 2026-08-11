@@ -168,6 +168,38 @@ If the requirements change, the stack is unlocked, or the timeline moves, the
 estimate says so. **Nothing in it is recalculated.** It still says exactly what it
 said, and you decide whether to re-estimate, adjust, or leave it.
 
+## Your team, if you know it
+
+Optional, and it stays optional.
+
+**Without a team** you still get a full plan: the effort per role, the staffing the work
+would need to meet your timeline — fractional where a fraction is the honest answer —
+a schedule laid out against that derived capacity, and a feasibility verdict. Nobody has
+to invent a team to see a date.
+
+**With a team** the same plan is measured rather than projected. Per role you can say how
+many people, how many productive hours a day, how many days a week, what percentage of
+their time this project gets, and which working day they become available. Utilisation,
+capacity gaps and the schedule are recalculated against what you actually have.
+
+Removing the team returns you to the derived view. Changing it changes how long the work
+takes and whether it fits — **it never changes the effort**, because who is doing the
+work does not change what the work is.
+
+## The working calendar
+
+Every duration on the screen is hours divided by this, which makes it the quietest way
+for a plan to be wrong.
+
+Productive hours a day defaults to **six and a half, not eight** — eight hours of paid
+time is not eight hours of engineering, and planning at eight is the most common way a
+correct estimate becomes an incorrect schedule. You can change it, and the number is on
+screen rather than buried.
+
+Working days are named rather than counted, because a Sunday-to-Thursday week is normal
+in much of the world. Non-working dates, client review days, UAT days and deployment days
+are all here, because they are working days somebody has to wait through.
+
 ## What it is not good at
 
 It is an estimate. The range is the honest part, and the expected figure is a

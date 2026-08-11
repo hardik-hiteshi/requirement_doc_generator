@@ -71,8 +71,16 @@ export function TeamPanel({ estimate }: { readonly estimate: EstimateSnapshot })
 
         return {
           role,
-          /* Rounded up: half a person cannot be hired, though it can be planned. */
-          people: Math.max(1, Math.ceil(recommended?.people ?? 1)),
+          /*
+           * The recommendation as it stands, fraction intact.
+           *
+           * Rounding 0.3 up to 1 here would seed the form with three and a half days
+           * a week of somebody's time that nobody offered, and the user would very
+           * reasonably accept it. Phase 6's capacity model is fractional throughout,
+           * and this is a starting point they can change rather than a claim about
+           * who exists.
+           */
+          people: recommended?.people ?? 1,
           productiveHoursPerDay: estimate.calendar.hoursPerDay,
           workingDaysPerWeek: estimate.calendar.workingWeekdays.length,
           availability: 1,

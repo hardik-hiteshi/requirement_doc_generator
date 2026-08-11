@@ -1549,6 +1549,70 @@ describe('Estimation and timeline (e2e)', () => {
       expect(approved.totalEffort.expected).toBe(estimate.totalEffort.expected);
     }, 240_000);
 
+    /*
+     * The approved snapshot is what every later phase reads. These assert that it
+     * contains the plan rather than a shell that a reader would have to reconstruct.
+     */
+    it('stores every part of the approved plan, not just a status', async () => {
+      const { session, estimate } = await estimatedProject(WEB);
+
+      const approved = (
+        await session.agent
+          .post(ESTIMATION_ROUTES.approve)
+          .set('x-csrf-token', session.csrf)
+          .send({ acknowledgedAiAssistance: true, expectedVersion: estimate.recordVersion })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+
+      /* Effort, in total and per role. */
+      expect(approved.totalEffort.expected).toBeGreaterThan(0);
+      expect(approved.totalEffort.optimistic).toBeGreaterThan(0);
+      expect(approved.totalEffort.conservative).toBeGreaterThan(0);
+      expect(Object.keys(approved.effortByRole).length).toBeGreaterThan(0);
+      expect(approved.implementationHours).toBeGreaterThan(0);
+
+      /* The schedule, with the tasks in it. */
+      expect(approved.schedule.totalWorkingDays).toBeGreaterThan(0);
+      expect(approved.schedule.tasks.length).toBeGreaterThan(0);
+      expect(approved.schedule.criticalPath.length).toBeGreaterThan(0);
+
+      /* The plan structure and the staffing behind it. */
+      expect(approved.milestones.length).toBeGreaterThan(0);
+      expect(approved.recommendedStaffing.length).toBeGreaterThan(0);
+
+      /* And the verdict. */
+      expect(approved.feasibility.status.length).toBeGreaterThan(0);
+
+      /*
+       * Read it back cold. Nothing here is reconstructed on the way out — the record
+       * itself carries the authority, which is what makes it quotable a month later.
+       */
+      const reread = await readEstimate(session);
+
+      expect(reread.status).toBe('APPROVED');
+      expect(reread.schedule.totalWorkingDays).toBe(approved.schedule.totalWorkingDays);
+      expect(reread.milestones.length).toBe(approved.milestones.length);
+      expect(reread.recommendedStaffing.length).toBe(approved.recommendedStaffing.length);
+      expect(reread.feasibility.status).toBe(approved.feasibility.status);
+      expect(reread.totalEffort.expected).toBe(approved.totalEffort.expected);
+    }, 240_000);
+
+    it('states a tiny staffing requirement as a fraction rather than a whole person', async () => {
+      const { estimate } = await estimatedProject(WEB);
+
+      /* Whatever the shape of the work, no line claims nobody or invents somebody. */
+      for (const line of estimate.recommendedStaffing) {
+        expect(line.people).toBeGreaterThan(0);
+
+        const hours = estimate.effortByRole[line.role] ?? 0;
+
+        /* A role with a couple of hours must not be reported as a full-time person. */
+        if (hours > 0 && hours < estimate.calendar.hoursPerDay) {
+          expect(line.people).toBeLessThan(1);
+        }
+      }
+    }, 240_000);
+
     it('measures against a supplied team without moving the effort', async () => {
       const { session, estimate } = await estimatedProject(WEB);
 

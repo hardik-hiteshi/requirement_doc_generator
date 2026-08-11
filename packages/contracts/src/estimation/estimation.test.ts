@@ -569,6 +569,85 @@ describe('recommending a team', () => {
     expect(peopleForHours(0, DEFAULT_CALENDAR, 20)).toBe(0);
     expect(peopleForHours(100, DEFAULT_CALENDAR, 0)).toBe(0);
   });
+
+  /*
+   * The rounding rules for a required-capacity figure, which is a floor somebody
+   * plans against rather than a measurement.
+   */
+  describe('rounding a required-staffing figure', () => {
+    /* One hour across a year is a real, tiny requirement — and it is not nobody. */
+    it('never reports nobody for work that exists', () => {
+      const tiny = peopleForHours(1, DEFAULT_CALENDAR, 250);
+
+      expect(tiny).toBeGreaterThan(0);
+      expect(tiny).toBe(0.01);
+    });
+
+    /*
+     * The failure this guards against: a hundredth of a person becoming a whole one.
+     * Phase 6's capacity model is fractional, and inflating 0.003 to 1.00 would
+     * invent a full-time person nobody offered.
+     */
+    it('states a tiny requirement as a hundredth of a person, not as one person', () => {
+      expect(peopleForHours(1, DEFAULT_CALENDAR, 250)).not.toBe(1);
+      expect(peopleForHours(1, DEFAULT_CALENDAR, 250)).toBeLessThan(0.02);
+    });
+
+    it('keeps ordinary fractions fractional and exact', () => {
+      /* 26 hours over 20 days at 6.5 h/day is a fifth of a person. */
+      expect(peopleForHours(26, DEFAULT_CALENDAR, 20)).toBe(0.2);
+      /* And a clean 1.2 does not become 1.21 through floating point. */
+      expect(peopleForHours(156, DEFAULT_CALENDAR, 20)).toBe(1.2);
+      expect(peopleForHours(65, DEFAULT_CALENDAR, 20)).toBe(0.5);
+    });
+
+    it('reports nobody only when there is no work', () => {
+      expect(peopleForHours(0, DEFAULT_CALENDAR, 20)).toBe(0);
+
+      expect(
+        recommendStaffing({
+          plannedEffort: { BACKEND: 0 },
+          calendar: DEFAULT_CALENDAR,
+          availableWorkingDays: 20,
+        }),
+      ).toEqual([]);
+    });
+
+    /* Rounding down would understate a floor, so it rounds up at the precision. */
+    it('never understates the requirement at two decimals', () => {
+      for (const hours of [1, 7, 13, 41, 99, 131, 257, 1_003]) {
+        for (const days of [5, 20, 60, 130, 250]) {
+          const reported = peopleForHours(hours, DEFAULT_CALENDAR, days);
+          const exact = hours / (DEFAULT_CALENDAR.hoursPerDay * days);
+
+          expect(reported).toBeGreaterThanOrEqual(Math.min(exact, 0.01));
+          /* And never overstated by more than the precision allows. */
+          expect(reported).toBeLessThan(exact + 0.01);
+        }
+      }
+    });
+
+    /*
+     * The recommendation has to be usable: staffing every role at the figure given,
+     * for the working days available, must cover the planned hours.
+     */
+    it('recommends enough people to finish inside the delivery timeline', () => {
+      const plannedEffort = { BACKEND: 260, FRONTEND: 97, QA: 26, DEVOPS: 3 };
+      const days = 20;
+
+      const staffing = recommendStaffing({
+        plannedEffort,
+        calendar: DEFAULT_CALENDAR,
+        availableWorkingDays: days,
+      });
+
+      for (const line of staffing) {
+        const capacityHours = line.people * DEFAULT_CALENDAR.hoursPerDay * days;
+
+        expect(capacityHours).toBeGreaterThanOrEqual(plannedEffort[line.role as 'BACKEND']);
+      }
+    });
+  });
 });
 
 /* --------------------------------------------------------- dependencies */
