@@ -73,7 +73,7 @@ export class UnderstandingComposer implements DocumentComposer {
       };
     });
 
-    return { sections, features: [] };
+    return { sections, features: [], rows: [] };
   }
 
   applicableRequirementIds(context: UpstreamContext): readonly string[] {

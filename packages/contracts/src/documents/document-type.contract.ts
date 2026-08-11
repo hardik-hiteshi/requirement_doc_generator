@@ -26,8 +26,22 @@ export const DOCUMENT_TYPES = [
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 export const documentTypeSchema = z.enum(DOCUMENT_TYPES);
 
-/** The documents Phase 7 actually builds. Everything else is declared only. */
-export const IMPLEMENTED_DOCUMENT_TYPES = ['OUR_UNDERSTANDING', 'FEATURE_LISTING'] as const;
+/**
+ * The documents that are actually built. Everything else is declared only.
+ *
+ * Phases 7 and 8 between them cover the first five. The Work Breakdown Structure
+ * and the Client Dependency Sheet are declared in `DOCUMENT_TYPES` so the graph and
+ * the interface know they exist, and nothing can generate, validate or approve one:
+ * the service refuses, the routes reject, and the screen shows the step as
+ * unavailable rather than as a button that fails.
+ */
+export const IMPLEMENTED_DOCUMENT_TYPES = [
+  'OUR_UNDERSTANDING',
+  'FEATURE_LISTING',
+  'ACCEPTANCE_CRITERIA',
+  'ASSUMPTIONS',
+  'STATEMENT_OF_WORK',
+] as const;
 
 export type ImplementedDocumentType = (typeof IMPLEMENTED_DOCUMENT_TYPES)[number];
 
@@ -61,9 +75,12 @@ export const DOCUMENT_DESCRIPTIONS: Readonly<Record<DocumentType, string>> = {
     'What we understand you are asking us to build, in your terms, from the requirements you approved.',
   FEATURE_LISTING:
     'Every feature as a row, with the hours from the estimate you approved — module, screen, description and effort.',
-  ACCEPTANCE_CRITERIA: 'How each feature will be judged done.',
-  ASSUMPTIONS: 'What this plan takes for granted, stated rather than buried.',
-  STATEMENT_OF_WORK: 'The commercial document: scope, deliverables, terms.',
+  ACCEPTANCE_CRITERIA:
+    'The observable conditions for accepting the approved scope — what has to be true, not how it will be tested.',
+  ASSUMPTIONS:
+    'What this plan is resting on, each one with somebody behind it and what would happen if it were wrong.',
+  STATEMENT_OF_WORK:
+    'The commercial document: scope, deliverables, technology, timeline and how the work is accepted.',
   WORK_BREAKDOWN_STRUCTURE: 'The plan broken into deliverable work packages.',
   CLIENT_DEPENDENCY_SHEET: 'What we need from you, and by when.',
 };
@@ -78,11 +95,27 @@ export const DOCUMENT_DESCRIPTIONS: Readonly<Record<DocumentType, string>> = {
 export const DOCUMENT_SHAPES = ['SECTIONS', 'ROWS'] as const;
 export type DocumentShape = (typeof DOCUMENT_SHAPES)[number];
 
+/**
+ * Which kind of row a `ROWS` document is a list of.
+ *
+ * Feature Listing's rows are `FEATURE` and keep their own shape and storage,
+ * because they carry authoritative hours reconciled against the approved estimate
+ * and a pinned eight-column export. Every other row kind shares the generic row
+ * envelope — see `document-row.contract.ts` for why that split is deliberate.
+ */
+export const DOCUMENT_ROW_KIND_BY_TYPE: Readonly<Partial<Record<DocumentType, string>>> = {
+  FEATURE_LISTING: 'FEATURE',
+  ACCEPTANCE_CRITERIA: 'ACCEPTANCE_CRITERION',
+  ASSUMPTIONS: 'ASSUMPTION',
+  WORK_BREAKDOWN_STRUCTURE: 'WORK_PACKAGE',
+  CLIENT_DEPENDENCY_SHEET: 'CLIENT_DEPENDENCY',
+};
+
 export const DOCUMENT_SHAPE_BY_TYPE: Readonly<Record<DocumentType, DocumentShape>> = {
   OUR_UNDERSTANDING: 'SECTIONS',
   FEATURE_LISTING: 'ROWS',
   ACCEPTANCE_CRITERIA: 'ROWS',
-  ASSUMPTIONS: 'SECTIONS',
+  ASSUMPTIONS: 'ROWS',
   STATEMENT_OF_WORK: 'SECTIONS',
   WORK_BREAKDOWN_STRUCTURE: 'ROWS',
   CLIENT_DEPENDENCY_SHEET: 'ROWS',

@@ -117,7 +117,27 @@ export const AUDIT_EVENT_TYPES = [
   'DOCUMENT_MARKED_FINAL',
   'DOCUMENT_OUTDATED',
   'DOCUMENT_VALIDATED',
+  'DOCUMENT_PROPOSAL_RESOLVED',
+  'DOCUMENT_CORRECTION_APPLIED',
   'FEATURE_LIST_VALIDATED',
+
+  /* Phase 8 — Acceptance Criteria, Assumptions and the Statement of Work.
+     The same rule: keys, categories, counts and outcomes are safe to keep;
+     criterion text, assumption statements and SOW prose never are. */
+  'ACCEPTANCE_CRITERIA_GENERATED',
+  'ACCEPTANCE_CRITERION_EDITED',
+  'ACCEPTANCE_CRITERION_REGENERATED',
+  'ASSUMPTION_CANDIDATE_CREATED',
+  'ASSUMPTION_CONFIRMED',
+  'ASSUMPTION_REJECTED',
+  'ASSUMPTION_VALIDATED',
+  'ASSUMPTION_INVALIDATED',
+  'SOW_GENERATED',
+  'SOW_SECTION_EDITED',
+  'SOW_SECTION_REGENERATED',
+  'SOW_VALIDATED',
+  /** A targeted rewrite of selected rows in a list document. */
+  'DOCUMENT_ROW_REGENERATED',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];

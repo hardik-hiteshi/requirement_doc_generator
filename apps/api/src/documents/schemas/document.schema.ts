@@ -2,11 +2,13 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import {
   CORRECTION_OUTCOMES,
   CORRECTION_TARGET_KINDS,
+  DOCUMENT_ROW_KINDS,
   DOCUMENT_RUN_KINDS,
   DOCUMENT_RUN_STATUSES,
   DOCUMENT_STATUSES,
   DOCUMENT_TYPES,
   FEATURE_REVIEW_STATUSES,
+  ROW_ORIGINS,
   SECTION_ORIGINS,
   VALIDATION_SEVERITIES,
 } from '@wdrg/contracts';
@@ -349,6 +351,10 @@ export class DocumentVersionRecord {
   @Prop({ type: [Object], required: true, default: [] })
   features!: Record<string, unknown>[];
 
+  /** Structured rows, for a list document that uses the generic row channel. */
+  @Prop({ type: [Object], required: true, default: [] })
+  rows!: Record<string, unknown>[];
+
   @Prop({ type: Object, required: false, default: null })
   validation!: Record<string, unknown> | null;
 
@@ -558,3 +564,71 @@ export class DocumentValidationRecord {
 export type DocumentValidationDocument = HydratedDocument<DocumentValidationRecord>;
 export const DocumentValidationSchema = SchemaFactory.createForClass(DocumentValidationRecord);
 DocumentValidationSchema.index({ projectId: 1, type: 1, createdAt: -1 });
+
+/* --------------------------------------------------------------- rows */
+
+/**
+ * A structured row of a list document — an acceptance criterion, an assumption.
+ *
+ * One collection for every row kind, because the engine's operations on a row are
+ * the same whatever it contains: order it, protect it when a person edits it, hold
+ * a proposal beside it, cite its evidence, exclude it with a reason. `payload`
+ * carries the document-specific fields and is parsed by that document's Zod schema
+ * before it is written, so nothing unvalidated reaches storage even though Mongoose
+ * sees an object.
+ *
+ * Feature rows keep their own collection: they carry authoritative hours that are
+ * reconciled against the approved estimate on every read, and folding them in here
+ * would put a number that matters inside an opaque payload.
+ */
+@Schema({ collection: 'document_rows', timestamps: true })
+export class DocumentRowRecord {
+  @Prop({ type: String, required: true, unique: true, index: true })
+  rowId!: string;
+
+  @Prop({ type: String, required: true, index: true })
+  projectId!: string;
+
+  @Prop({ type: String, required: true, enum: DOCUMENT_TYPES, index: true })
+  type!: string;
+
+  @Prop({ type: String, required: true, enum: DOCUMENT_ROW_KINDS })
+  kind!: string;
+
+  @Prop({ type: Number, required: true, index: true })
+  documentVersion!: number;
+
+  @Prop({ type: Number, required: true, default: 0 })
+  order!: number;
+
+  @Prop({ type: String, required: true, enum: ROW_ORIGINS })
+  origin!: string;
+
+  /** Why a person added this row, when nothing upstream produced it. */
+  @Prop({ type: String, required: false, default: '' })
+  attribution!: string;
+
+  /** A suggested rewrite waiting for a decision. Never applied on its own. */
+  @Prop({ type: Object, required: false, default: null })
+  proposed!: Record<string, unknown> | null;
+
+  @Prop({ type: Date, required: false })
+  proposedAt?: Date;
+
+  @Prop({ type: [Object], required: true, default: [] })
+  references!: Record<string, unknown>[];
+
+  @Prop({ type: String, required: false, default: '' })
+  excludedReason!: string;
+
+  /** The document-specific content. Validated by contract before it gets here. */
+  @Prop({ type: Object, required: true, default: {} })
+  payload!: Record<string, unknown>;
+
+  createdAt!: Date;
+  updatedAt!: Date;
+}
+
+export type DocumentRowDocument = HydratedDocument<DocumentRowRecord>;
+export const DocumentRowSchema = SchemaFactory.createForClass(DocumentRowRecord);
+DocumentRowSchema.index({ projectId: 1, type: 1, documentVersion: 1, order: 1 });

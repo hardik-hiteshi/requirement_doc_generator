@@ -7,6 +7,7 @@ import { Model } from 'mongoose';
 import {
   DocumentCorrectionRecord,
   DocumentFeatureRecord,
+  DocumentRowRecord,
   DocumentRecord,
   DocumentRunRecord,
   DocumentSectionRecord,
@@ -18,6 +19,7 @@ import {
   type DocumentSectionDocument,
   type DocumentVersionDocument,
   type DocumentCorrectionDocument,
+  type DocumentRowDocument,
 } from './schemas/document.schema';
 
 /**
@@ -55,6 +57,8 @@ export class DocumentsRepository {
     private readonly validations: Model<DocumentValidationRecord>,
     @InjectModel(DocumentCorrectionRecord.name)
     private readonly corrections: Model<DocumentCorrectionRecord>,
+    @InjectModel(DocumentRowRecord.name)
+    private readonly rows: Model<DocumentRowRecord>,
   ) {}
 
   /** Crockford base32, matching the ids used everywhere else. */
@@ -215,6 +219,76 @@ export class DocumentsRepository {
   }
 
   /* --------------------------------------------------------- versions */
+
+  /* ------------------------------------------------------------- rows */
+
+  /**
+   * Replaces every row of a list document for a new version.
+   *
+   * `projectId`, `type` and `kind` are stamped here rather than trusted from the
+   * caller — the same lesson Phase 7 learned when unscoped section rows leaked
+   * between documents.
+   */
+  async replaceRows(
+    projectId: string,
+    type: string,
+    kind: string,
+    documentVersion: number,
+    rows: readonly Record<string, unknown>[],
+  ): Promise<void> {
+    await this.rows.deleteMany({ projectId, type }).exec();
+
+    if (rows.length > 0) {
+      await this.rows.insertMany(
+        rows.map((row) => ({ ...row, projectId, type, kind, documentVersion })),
+      );
+    }
+  }
+
+  async insertRows(
+    projectId: string,
+    type: string,
+    kind: string,
+    documentVersion: number,
+    rows: readonly Record<string, unknown>[],
+  ): Promise<void> {
+    if (rows.length > 0) {
+      await this.rows.insertMany(
+        rows.map((row) => ({ ...row, projectId, type, kind, documentVersion })),
+      );
+    }
+  }
+
+  async listRows(
+    projectId: string,
+    type: string,
+    documentVersion: number,
+  ): Promise<DocumentRowDocument[]> {
+    return this.rows.find({ projectId, type, documentVersion }).sort({ order: 1 }).exec();
+  }
+
+  async findRow(projectId: string, rowId: string): Promise<DocumentRowDocument | null> {
+    return this.rows.findOne({ projectId, rowId }).exec();
+  }
+
+  async updateRow(
+    projectId: string,
+    rowId: string,
+    changes: Record<string, unknown>,
+    unset: readonly string[] = [],
+  ): Promise<void> {
+    await this.rows
+      .updateOne(
+        { projectId, rowId },
+        {
+          $set: changes,
+          ...(unset.length > 0
+            ? { $unset: Object.fromEntries(unset.map((field) => [field, ''])) }
+            : {}),
+        },
+      )
+      .exec();
+  }
 
   async createVersion(record: Partial<DocumentVersionRecord>): Promise<DocumentVersionDocument> {
     return this.versions.create(record);

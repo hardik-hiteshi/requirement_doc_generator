@@ -10,14 +10,19 @@ import {
   type DocumentType,
   type DocumentValidation,
   type DocumentVersionSummary,
+  type AssumptionSummary,
+  type CriteriaCoverage,
+  type DocumentRow,
   type EffortReconciliation,
   type FeatureCoverage,
   type FeatureRow,
+  type SowScopeReconciliation,
 } from '@wdrg/contracts';
 
 import type {
   DocumentDocument,
   DocumentFeatureDocument,
+  DocumentRowDocument,
   DocumentRunDocument,
   DocumentSectionDocument,
   DocumentVersionDocument,
@@ -40,6 +45,7 @@ import type {
 export interface StoredContent {
   readonly sections: readonly DocumentSection[];
   readonly features: readonly FeatureRow[];
+  readonly rows: readonly DocumentRow[];
   readonly version: number;
   readonly status: DocumentStatus;
 }
@@ -47,6 +53,10 @@ export interface StoredContent {
 export interface AssembledExtras {
   readonly status?: DocumentStatus;
   readonly currentness?: DocumentCurrentness;
+  readonly rows?: readonly DocumentRow[];
+  readonly criteriaCoverage?: CriteriaCoverage | null;
+  readonly assumptionSummary?: AssumptionSummary | null;
+  readonly scopeReconciliation?: SowScopeReconciliation | null;
   readonly blockers?: readonly DocumentBlocker[];
   readonly outdatedReasons?: DocumentSnapshot['outdatedReasons'];
   readonly coverage?: FeatureCoverage | null;
@@ -131,6 +141,41 @@ export function toFeatureRecord(
   };
 }
 
+/**
+ * One string field of a row payload, safely.
+ *
+ * A payload is `unknown` to the engine by design — only the document's own schema
+ * knows its shape — so reading a field for a label or a fingerprint goes through
+ * here rather than through `String()`, which would render an object as
+ * `[object Object]` and quietly produce nonsense.
+ */
+export function payloadText(payload: unknown, field: string): string {
+  if (typeof payload !== 'object' || payload === null) {
+    return '';
+  }
+
+  const value = (payload as Record<string, unknown>)[field];
+
+  return typeof value === 'string' ? value : '';
+}
+
+/** A stored row, in the shape the wire uses. */
+export function toRow(record: DocumentRowDocument): DocumentRow {
+  return {
+    rowId: record.rowId,
+    kind: record.kind as DocumentRow['kind'],
+    order: record.order,
+    origin: record.origin as DocumentRow['origin'],
+    ...(record.attribution ? { attribution: record.attribution } : {}),
+    ...(record.proposed ? { proposed: record.proposed } : {}),
+    ...(record.proposedAt ? { proposedAt: record.proposedAt.toISOString() } : {}),
+    references: record.references as unknown as DocumentReference[],
+    ...(record.excludedReason ? { excludedReason: record.excludedReason } : {}),
+    payload: record.payload,
+    updatedAt: record.updatedAt.toISOString(),
+  };
+}
+
 export function toDocumentSnapshot(
   record: DocumentDocument,
   content: StoredContent,
@@ -163,6 +208,10 @@ export function toDocumentSnapshot(
       ...(extras.outdatedReasons ??
         (record.outdatedReasons as unknown as DocumentSnapshot['outdatedReasons'])),
     ],
+    rows: [...(extras.rows ?? [])],
+    criteriaCoverage: extras.criteriaCoverage ?? null,
+    assumptionSummary: extras.assumptionSummary ?? null,
+    scopeReconciliation: extras.scopeReconciliation ?? null,
     coverage: extras.coverage ?? (record.coverage as unknown as FeatureCoverage | null) ?? null,
     reconciliation:
       extras.reconciliation ??

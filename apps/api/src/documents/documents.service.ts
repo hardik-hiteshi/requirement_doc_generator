@@ -20,6 +20,15 @@ import {
   IMPLEMENTED_DOCUMENT_TYPES,
   currentnessFrom,
   isAuthoritativeState,
+  isRowProtected,
+  rowNeedsAttribution,
+  rowsAwaitingDecision,
+  acceptanceCriterionSchema,
+  assumptionSchema,
+  canTransitionAssumption,
+  candidateToAssumption,
+  nextAssumptionKey,
+  nextCriterionKey,
   isDocumentAuthoritative,
   isDocumentEditable,
   isDocumentRunning,
@@ -39,7 +48,19 @@ import {
   type DocumentDiff,
   type DocumentSection,
   type DocumentSnapshot,
+  type AddRow,
+  type Assumption,
+  type AssumptionCandidate,
+  type AuditEventType,
+  type ConfirmAssumption,
+  type DocumentReference,
+  type DocumentRow,
   type DocumentState,
+  type EditRow,
+  type ExcludeRow,
+  type RejectAssumption,
+  type ResolveRowProposal,
+  type SettleAssumption,
   type DocumentSummary,
   type DocumentType,
   type DocumentValidation,
@@ -60,24 +81,30 @@ import {
 import { AuditService } from '../audit/audit.service';
 import { DocumentError } from './documents.errors';
 import { DocumentsRepository } from './documents.repository';
+import { requirementReference } from './composers/composer.types';
 import {
   documentOutdatedReasonsFor,
   UpstreamReader,
   type AuthorityVersions,
   type UpstreamSnapshot,
 } from './upstream.reader';
+import { AcceptanceCriteriaComposer } from './composers/acceptance-criteria.composer';
+import { AssumptionsComposer } from './composers/assumptions.composer';
 import { FeatureListingComposer } from './composers/feature-listing.composer';
+import { StatementOfWorkComposer } from './composers/statement-of-work.composer';
 import { UnderstandingComposer } from './composers/understanding.composer';
 import type { ComposedContent, DocumentComposer } from './composers/composer.types';
 import {
   toDocumentSnapshot,
   toFeatureRecord,
+  payloadText,
   toFeatureRow,
+  toRow,
   toSection,
   toVersionSummary,
   type StoredContent,
 } from './documents.mapper';
-import type { DocumentDocument } from './schemas/document.schema';
+import type { DocumentDocument, DocumentRowDocument } from './schemas/document.schema';
 
 export interface DocumentContext {
   readonly projectId: string;
@@ -112,10 +139,16 @@ export class DocumentsService {
     private readonly audit: AuditService,
     understanding: UnderstandingComposer,
     private readonly featureListing: FeatureListingComposer,
+    private readonly acceptanceCriteria: AcceptanceCriteriaComposer,
+    private readonly assumptions: AssumptionsComposer,
+    private readonly statementOfWork: StatementOfWorkComposer,
   ) {
     this.composers = new Map<DocumentType, DocumentComposer>([
       [understanding.type, understanding],
       [featureListing.type, featureListing],
+      [acceptanceCriteria.type, acceptanceCriteria],
+      [assumptions.type, assumptions],
+      [statementOfWork.type, statementOfWork],
     ]);
   }
 
@@ -234,6 +267,7 @@ export class DocumentsService {
     return toDocumentSnapshot(record, {
       sections: stored.sections as unknown as DocumentSection[],
       features: stored.features as unknown as FeatureRow[],
+      rows: (stored.rows ?? []) as unknown as DocumentRow[],
       version: stored.version,
       status: stored.status as DocumentSnapshot['status'],
     });
@@ -346,6 +380,7 @@ export class DocumentsService {
 
     const sections = this.mergeSections(content, previous?.sections ?? [], version, now);
     const features = this.buildFeatures(content, previous?.features ?? [], version);
+    const rows = this.buildRows(content, previous?.rows ?? [], version, now);
 
     const record = existing
       ? await this.repository.update(context.projectId, type, existing.recordVersion, {
@@ -389,6 +424,10 @@ export class DocumentsService {
     await this.repository.replaceSections(context.projectId, type, version, sections);
     await this.repository.replaceFeatures(context.projectId, type, version, features);
 
+    if (composer.rowKind) {
+      await this.repository.replaceRows(context.projectId, type, composer.rowKind, version, rows);
+    }
+
     /*
      * The new version is archived immediately, not only when it is superseded.
      * `document_versions` is what "every version of this document" reads, and a
@@ -410,6 +449,7 @@ export class DocumentsService {
         version,
         sectionCount: sections.length,
         featureCount: features.length,
+        rowCount: rows.length,
       },
     });
 
@@ -645,6 +685,7 @@ export class DocumentsService {
           body: section.body,
           references: section.references.map((reference) => reference.id),
         })),
+        rows: content.rows,
         features: content.features,
         excludedRequirementIds: record.exclusions.map((entry) => entry.requirementId),
         baselineCurrent: this.baselineCurrent(record, upstream),
@@ -1062,6 +1103,25 @@ export class DocumentsService {
       toFeatureRecord(feature, version, { featureId: DocumentsRepository.newId('ftr') }),
     );
 
+    /*
+     * Restored rows are protected for the same reason restored sections are:
+     * somebody chose this content, so the next regeneration proposes rather than
+     * replaces. `USER_EDITED` rather than `USER_DEFINED` — it came from a
+     * generated version originally, and it keeps its references, so it is still
+     * traceable and needs no attribution.
+     */
+    const restoredRows = ((stored.rows ?? []) as unknown as DocumentRow[]).map((row, index) => ({
+      rowId: DocumentsRepository.newId('drw'),
+      documentVersion: version,
+      order: index,
+      origin: 'USER_EDITED',
+      attribution: row.attribution ?? '',
+      payload: row.payload as Record<string, unknown>,
+      proposed: null,
+      references: row.references,
+      excludedReason: row.excludedReason ?? '',
+    }));
+
     await this.repository.update(context.projectId, type, record.recordVersion, {
       version,
       status: 'DRAFT',
@@ -1072,6 +1132,18 @@ export class DocumentsService {
 
     await this.repository.replaceSections(context.projectId, type, version, sections);
     await this.repository.replaceFeatures(context.projectId, type, version, features);
+
+    const restoreComposer = this.composerFor(type);
+
+    if (restoreComposer.rowKind) {
+      await this.repository.replaceRows(
+        context.projectId,
+        type,
+        restoreComposer.rowKind,
+        version,
+        restoredRows,
+      );
+    }
 
     await this.audit.record({
       type: 'DOCUMENT_VERSION_RESTORED',
@@ -1237,7 +1309,7 @@ export class DocumentsService {
     context: DocumentContext,
     type: DocumentType,
     record: DocumentDocument,
-    auditType: 'DOCUMENT_EDITED' | 'DOCUMENT_SECTION_REGENERATED',
+    auditType: AuditEventType,
     metadata: Record<string, unknown>,
   ): Promise<void> {
     const wasApproved = record.status === 'APPROVED';
@@ -1461,18 +1533,104 @@ export class DocumentsService {
     });
   }
 
+  /**
+   * Structured rows for a new version, keeping what a person decided.
+   *
+   * A row somebody edited or added is carried forward untouched, and a
+   * regeneration that would have replaced it leaves a **proposal** beside it
+   * instead — the same rule sections have, for the same reason: replacing it would
+   * discard a decision, and nothing here can tell which words were the decision.
+   *
+   * Rows a person added from nothing survive regeneration entirely. Nothing
+   * upstream produced them, so nothing upstream can supersede them.
+   */
+  private buildRows(
+    content: ComposedContent,
+    previous: readonly DocumentRow[],
+    version: number,
+    now: Date,
+  ): Record<string, unknown>[] {
+    /*
+     * Matched on the identity the payload carries — the criterion or assumption key
+     * — because a regenerated row is "the same row" when it is about the same
+     * thing, not when it happens to land at the same index.
+     */
+    const protectedRows = previous.filter((row) => isRowProtected(row.origin));
+    const byKey = new Map(
+      protectedRows.map((row) => [
+        DocumentsService.rowKey(row.payload as Record<string, unknown>),
+        row,
+      ]),
+    );
+
+    const rows: Record<string, unknown>[] = content.rows.map((composed) => {
+      const existing = byKey.get(DocumentsService.rowKey(composed.payload));
+
+      if (existing) {
+        byKey.delete(DocumentsService.rowKey(composed.payload));
+
+        return {
+          rowId: DocumentsRepository.newId('drw'),
+          documentVersion: version,
+          order: composed.order,
+          origin: existing.origin,
+          attribution: existing.attribution ?? '',
+          /* The person's version stays; the new one waits for a decision. */
+          payload: existing.payload as Record<string, unknown>,
+          proposed: composed.payload,
+          proposedAt: now,
+          references: composed.references,
+          excludedReason: existing.excludedReason ?? '',
+        };
+      }
+
+      return {
+        rowId: DocumentsRepository.newId('drw'),
+        documentVersion: version,
+        order: composed.order,
+        origin: 'GENERATED',
+        attribution: '',
+        payload: composed.payload,
+        proposed: null,
+        references: composed.references,
+        excludedReason: '',
+      };
+    });
+
+    /* Rows a person wrote that composition did not produce are kept as they are. */
+    let order = rows.length;
+
+    for (const orphan of byKey.values()) {
+      rows.push({
+        rowId: DocumentsRepository.newId('drw'),
+        documentVersion: version,
+        order: order++,
+        origin: orphan.origin,
+        attribution: orphan.attribution ?? '',
+        payload: orphan.payload,
+        proposed: null,
+        references: orphan.references,
+        excludedReason: orphan.excludedReason ?? '',
+      });
+    }
+
+    return rows;
+  }
+
   private async currentContent(
     projectId: string,
     record: DocumentDocument,
   ): Promise<StoredContent> {
-    const [sections, features] = await Promise.all([
+    const [sections, features, rows] = await Promise.all([
       this.repository.listSections(projectId, record.type, record.version),
       this.repository.listFeatures(projectId, record.type, record.version),
+      this.repository.listRows(projectId, record.type, record.version),
     ]);
 
     return {
       sections: sections.map(toSection),
       features: features.map(toFeatureRow),
+      rows: rows.map(toRow),
       version: record.version,
       status: record.status as DocumentSnapshot['status'],
     };
@@ -1491,6 +1649,7 @@ export class DocumentsService {
       status: status ?? record.status,
       sections: content.sections as unknown as Record<string, unknown>[],
       features: content.features as unknown as Record<string, unknown>[],
+      rows: content.rows as unknown as Record<string, unknown>[],
       validation: record.validation,
       regenerationReason: record.regenerationReason,
       ...(record.baselineVersion !== undefined ? { baselineVersion: record.baselineVersion } : {}),
@@ -1534,14 +1693,40 @@ export class DocumentsService {
 
     const excluded = record.exclusions.map((entry) => entry.requirementId);
 
+    /*
+     * Feature coverage and effort reconciliation belong to Feature Listing alone —
+     * they are about hours. Every other list document has its own assessment, and
+     * each is computed only for the document it describes rather than for anything
+     * that happens to be a list.
+     */
     const coverage =
-      composer.shape === 'ROWS'
+      type === 'FEATURE_LISTING'
         ? this.featureListing.coverageFor(upstream.context, content.features, excluded)
         : null;
     const reconciliation =
-      composer.shape === 'ROWS'
+      type === 'FEATURE_LISTING'
         ? this.featureListing.reconciliationFor(upstream.context, content.features)
         : null;
+
+    const validationInput = {
+      context: upstream.context,
+      sections: content.sections.map((section) => ({
+        key: section.key,
+        body: section.body,
+        references: section.references.map((reference) => reference.id),
+      })),
+      features: content.features,
+      rows: content.rows,
+      excludedRequirementIds: excluded,
+      baselineCurrent: upstream.baselineCurrent,
+    };
+
+    const criteriaCoverage =
+      type === 'ACCEPTANCE_CRITERIA' ? this.acceptanceCriteria.coverageFor(validationInput) : null;
+    const assumptionSummary =
+      type === 'ASSUMPTIONS' ? this.assumptions.summaryFor(validationInput) : null;
+    const scopeReconciliation =
+      type === 'STATEMENT_OF_WORK' ? this.statementOfWork.reconciliationFor(validationInput) : null;
 
     const unapproved = DOCUMENT_DEPENDENCIES[type].documents.filter((prerequisite) => {
       const state = upstream.documentStates[prerequisite];
@@ -1550,14 +1735,20 @@ export class DocumentsService {
     });
 
     const blockers = calculateDocumentBlockers({
-      generated: content.sections.length > 0 || content.features.length > 0,
+      generated:
+        content.sections.length > 0 || content.features.length > 0 || content.rows.length > 0,
       sections: content.sections,
       pendingFeatureIds: DocumentsService.featuresAwaitingDecision(content.features),
+      pendingRowIds: rowsAwaitingDecision(content.rows),
+      unattributedRowIds: content.rows.filter(rowNeedsAttribution).map((row) => row.rowId),
       requiredSectionKeys: composer.requiredSectionKeys,
       validation: record.validation as unknown as DocumentValidation | null,
       outdatedReasons: reasons,
       coverage,
       reconciliation,
+      criteriaCoverage,
+      assumptionSummary,
+      scopeReconciliation,
       unapprovedPrerequisites: unapproved,
     });
 
@@ -1578,6 +1769,10 @@ export class DocumentsService {
       outdatedReasons: reasons,
       coverage,
       reconciliation,
+      rows: content.rows,
+      criteriaCoverage,
+      assumptionSummary,
+      scopeReconciliation,
     });
   }
 
@@ -1605,6 +1800,717 @@ export class DocumentsService {
       ...(upstream.context.estimate ? { estimateVersion: upstream.context.estimate.version } : {}),
       baselineCurrent: upstream.baselineCurrent,
     };
+  }
+
+  /**
+   * A row's own identity — `AC-001`, `AS-004` — from its payload.
+   *
+   * Rows are matched across regenerations on this rather than on position: a
+   * regenerated row is "the same row" when it is about the same thing, not when it
+   * happens to land at the same index.
+   */
+  private static rowKey(payload: Record<string, unknown>): string {
+    const candidate = payload.criterionKey ?? payload.assumptionKey;
+
+    return typeof candidate === 'string' ? candidate : '';
+  }
+
+  /**
+   * Store a model's suggestions as candidates.
+   *
+   * The only path from an inference result to an assumption row, and every
+   * authoritative field is supplied here by `candidateToAssumption` rather than by
+   * the model: `DRAFT`, provenance `MODEL_SUGGESTED`, no owner, no confirmation.
+   * A candidate is appended rather than replacing anything, because a suggestion
+   * should never displace an assumption somebody has stood behind.
+   */
+  async addAssumptionCandidates(
+    context: DocumentContext,
+    type: DocumentType,
+    candidates: readonly AssumptionCandidate[],
+    expectedVersion: number,
+    runId: string,
+  ): Promise<DocumentSnapshot> {
+    const record = await this.editableDocument(context, type, expectedVersion);
+    const composer = this.composerFor(type);
+
+    if (!composer.rowKind) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.WRONG_DOCUMENT_SHAPE, 422);
+    }
+
+    const upstream = await this.upstream.read(context.projectId, context.correlationId);
+    const byKey = new Map(
+      upstream.context.requirements.map((requirement) => [requirement.key, requirement]),
+    );
+
+    const existing = await this.repository.listRows(context.projectId, type, record.version);
+    const keys = existing.map((row) => DocumentsService.rowKey(row.payload));
+
+    /* Deduplicated against what is already here, so asking twice is harmless. */
+    const seen = new Set(
+      existing.map((row) =>
+        payloadText(row.payload, 'statement').toLowerCase().replace(/\s+/g, ' ').trim(),
+      ),
+    );
+
+    const rows: Record<string, unknown>[] = [];
+
+    for (const candidate of candidates) {
+      const fingerprint = candidate.statement.toLowerCase().replace(/\s+/g, ' ').trim();
+
+      if (seen.has(fingerprint)) {
+        continue;
+      }
+
+      seen.add(fingerprint);
+
+      const requirements = candidate.requirementKeys
+        .map((key) => byKey.get(key))
+        .filter((requirement) => requirement !== undefined);
+
+      const assumption = candidateToAssumption(
+        candidate,
+        nextAssumptionKey([
+          ...keys,
+          ...rows.map((row) => DocumentsService.rowKey(row.payload as Record<string, unknown>)),
+        ]),
+        requirements.map((requirement) => requirement.key),
+      );
+
+      rows.push({
+        rowId: DocumentsRepository.newId('drw'),
+        order: existing.length + rows.length,
+        origin: 'GENERATED',
+        attribution: '',
+        payload: assumptionSchema.parse(assumption),
+        proposed: null,
+        references: requirements.map(requirementReference),
+        excludedReason: '',
+      });
+    }
+
+    await this.repository.insertRows(
+      context.projectId,
+      type,
+      composer.rowKind,
+      record.version,
+      rows,
+    );
+
+    await this.audit.record({
+      type: 'ASSUMPTION_CANDIDATE_CREATED',
+      projectId: context.projectId,
+      correlationId: context.correlationId,
+      /* Counts and the run, never the statements themselves. */
+      metadata: { documentType: type, candidateCount: rows.length, runId },
+    });
+
+    return this.reload(context, type);
+  }
+
+  /* ------------------------------------------------------ structured rows */
+
+  /**
+   * Edit one row's own fields.
+   *
+   * The payload is parsed by the document's own schema before anything is stored,
+   * so an acceptance criterion cannot acquire a field nobody defined and an
+   * assumption cannot acquire a status by being edited. Editing marks the row as
+   * the person's, which is what protects it from the next regeneration.
+   *
+   * Two things a person may not do by editing: change an assumption's `status`,
+   * `provenance` or `confirmedBy` — those move only through confirm, reject and
+   * settle, where the application records who did it — and cite a requirement or
+   * feature that does not exist.
+   */
+  async updateRow(
+    context: DocumentContext,
+    type: DocumentType,
+    rowId: string,
+    request: EditRow,
+  ): Promise<DocumentSnapshot> {
+    const record = await this.editableDocument(context, type, request.expectedVersion);
+    const row = await this.expectRow(context.projectId, type, record.version, rowId);
+
+    const merged = { ...row.payload, ...(request.payload as Record<string, unknown>) };
+    const payload = this.parseRowPayload(type, merged, row.payload);
+
+    const references = request.referenceIds
+      ? await this.verifiedReferences(context, type, request.referenceIds)
+      : (row.references as unknown as DocumentReference[]);
+
+    await this.repository.updateRow(context.projectId, rowId, {
+      payload,
+      references,
+      origin: row.origin === 'USER_DEFINED' ? 'USER_DEFINED' : 'USER_EDITED',
+      ...(request.attribution !== undefined ? { attribution: request.attribution } : {}),
+    });
+
+    await this.afterContentChange(context, type, record, 'DOCUMENT_EDITED', {
+      rowId,
+      fields: Object.keys(request.payload ?? {}),
+    });
+
+    return this.reload(context, type);
+  }
+
+  /**
+   * Add a row by hand.
+   *
+   * Marked `USER_DEFINED`, and the attribution is required by the request schema
+   * rather than checked afterwards — a criterion or an assumption nobody can trace
+   * is exactly what should have to be justified out loud, and asking at the moment
+   * of writing is easier than asking at approval.
+   */
+  async addRow(
+    context: DocumentContext,
+    type: DocumentType,
+    request: AddRow,
+  ): Promise<DocumentSnapshot> {
+    const record = await this.editableDocument(context, type, request.expectedVersion);
+    const composer = this.composerFor(type);
+
+    if (!composer.rowKind) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.WRONG_DOCUMENT_SHAPE, 422);
+    }
+
+    const existing = await this.repository.listRows(context.projectId, type, record.version);
+    const payload = this.parseRowPayload(
+      type,
+      this.withNextKey(type, request.payload as Record<string, unknown>, existing),
+      null,
+    );
+
+    const references = await this.verifiedReferences(context, type, request.referenceIds ?? []);
+
+    await this.repository.insertRows(context.projectId, type, composer.rowKind, record.version, [
+      {
+        rowId: DocumentsRepository.newId('drw'),
+        order: existing.length,
+        origin: 'USER_DEFINED',
+        attribution: request.attribution,
+        payload,
+        proposed: null,
+        references,
+        excludedReason: '',
+      },
+    ]);
+
+    await this.afterContentChange(context, type, record, 'DOCUMENT_EDITED', {
+      rowAdded: true,
+      origin: 'USER_DEFINED',
+    });
+
+    return this.reload(context, type);
+  }
+
+  /** Record that a row is deliberately not part of this document, with a reason. */
+  async excludeRow(
+    context: DocumentContext,
+    type: DocumentType,
+    rowId: string,
+    request: ExcludeRow,
+  ): Promise<DocumentSnapshot> {
+    const record = await this.editableDocument(context, type, request.expectedVersion);
+    await this.expectRow(context.projectId, type, record.version, rowId);
+
+    await this.repository.updateRow(context.projectId, rowId, {
+      excludedReason: request.reason,
+    });
+
+    await this.afterContentChange(context, type, record, 'DOCUMENT_EDITED', {
+      rowId,
+      excluded: true,
+    });
+
+    return this.reload(context, type);
+  }
+
+  /**
+   * Rewrite selected rows, and nothing else.
+   *
+   * `rowIds` selects rows directly; `group` selects every row in one module (for
+   * acceptance criteria) or one category (for assumptions). Rows outside the
+   * selection are carried forward untouched, so a targeted rewrite cannot disturb
+   * the rest of the document.
+   *
+   * A row a person edited or wrote gets a **proposal** rather than a replacement.
+   */
+  async regenerateRows(
+    context: DocumentContext,
+    type: DocumentType,
+    selection: { readonly rowIds?: readonly string[]; readonly group?: string },
+    expectedVersion: number,
+    named: ReadonlyMap<string, Record<string, unknown>>,
+    reason?: string,
+  ): Promise<DocumentSnapshot> {
+    const record = await this.editableDocument(context, type, expectedVersion);
+    const composer = this.composerFor(type);
+
+    if (!composer.rowKind) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.WRONG_DOCUMENT_SHAPE, 422);
+    }
+
+    const stored = await this.repository.listRows(context.projectId, type, record.version);
+    const selected = this.selectRows(type, stored, selection);
+
+    if (selected.length === 0) {
+      throw new DocumentError(
+        selection.group !== undefined
+          ? DOCUMENT_ERROR_CODES.CATEGORY_NOT_FOUND
+          : DOCUMENT_ERROR_CODES.ROW_NOT_FOUND,
+        404,
+      );
+    }
+
+    const upstream = await this.upstream.read(context.projectId, context.correlationId);
+    const composed = composer.compose(upstream.context);
+    const now = new Date();
+
+    const selectedIds = new Set(selected.map((row) => row.rowId));
+    const version = await this.repository.nextVersion(context.projectId, type);
+
+    /* Everything is carried forward; only the selected rows change. */
+    const rows = stored.map((row, index) => {
+      const key = DocumentsService.rowKey(row.payload);
+      const replacement =
+        named.get(row.rowId) ??
+        composed.rows.find((candidate) => DocumentsService.rowKey(candidate.payload) === key)
+          ?.payload;
+
+      if (!selectedIds.has(row.rowId) || replacement === undefined) {
+        return {
+          rowId: DocumentsRepository.newId('drw'),
+          documentVersion: version,
+          order: index,
+          origin: row.origin,
+          attribution: row.attribution ?? '',
+          payload: row.payload,
+          proposed: row.proposed ?? null,
+          ...(row.proposedAt ? { proposedAt: row.proposedAt } : {}),
+          references: row.references,
+          excludedReason: row.excludedReason ?? '',
+        };
+      }
+
+      /* Whatever a document allows a rewrite to touch, and never more. */
+      const rewritten = this.parseRowPayload(
+        type,
+        { ...row.payload, ...this.rewritableFields(type, replacement) },
+        row.payload,
+      );
+
+      const protectedRow = isRowProtected(row.origin as DocumentRow['origin']);
+
+      return {
+        rowId: DocumentsRepository.newId('drw'),
+        documentVersion: version,
+        order: index,
+        origin: row.origin,
+        attribution: row.attribution ?? '',
+        payload: protectedRow ? row.payload : rewritten,
+        proposed: protectedRow ? rewritten : null,
+        ...(protectedRow ? { proposedAt: now } : {}),
+        references: row.references,
+        excludedReason: row.excludedReason ?? '',
+      };
+    });
+
+    const previous = await this.currentContent(context.projectId, record);
+    await this.archive(context.projectId, record, previous);
+
+    await this.repository.update(context.projectId, type, record.recordVersion, {
+      version,
+      status: 'DRAFT',
+      supersedesVersion: record.version,
+      regenerationReason: reason ?? 'Rewrote selected entries',
+      validation: null,
+    });
+
+    await this.repository.replaceSections(
+      context.projectId,
+      type,
+      version,
+      previous.sections.map((section) => ({
+        sectionId: DocumentsRepository.newId('dsc'),
+        documentVersion: version,
+        key: section.key,
+        title: section.title,
+        order: section.order,
+        body: section.body,
+        origin: section.origin,
+        omittedReason: section.omittedReason ?? '',
+        references: section.references,
+        proposedBody: section.proposedBody ?? '',
+        updatedAt: now,
+      })),
+    );
+
+    await this.repository.replaceRows(context.projectId, type, composer.rowKind, version, rows);
+
+    const current = await this.repository.find(context.projectId, type);
+
+    if (current) {
+      await this.archive(
+        context.projectId,
+        current,
+        await this.currentContent(context.projectId, current),
+      );
+    }
+
+    await this.audit.record({
+      type: 'DOCUMENT_ROW_REGENERATED',
+      projectId: context.projectId,
+      correlationId: context.correlationId,
+      metadata: {
+        documentType: type,
+        version,
+        rowCount: selected.length,
+        ...(selection.group !== undefined ? { group: selection.group } : {}),
+      },
+    });
+
+    return this.reload(context, type);
+  }
+
+  /** Decide what happens to a row's suggested rewrite. */
+  async resolveRowProposal(
+    context: DocumentContext,
+    type: DocumentType,
+    rowId: string,
+    request: ResolveRowProposal,
+  ): Promise<DocumentSnapshot> {
+    const record = await this.editableDocument(context, type, request.expectedVersion);
+    const row = await this.expectRow(context.projectId, type, record.version, rowId);
+
+    if (!row.proposed) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.NO_ROW_PROPOSAL, 422);
+    }
+
+    const chosen =
+      request.decision === 'KEEP_CURRENT'
+        ? row.payload
+        : request.decision === 'ACCEPT_GENERATED_REVISION'
+          ? row.proposed
+          : {
+              ...row.proposed,
+              ...this.rewritableFields(type, (request.payload ?? {}) as Record<string, unknown>),
+            };
+
+    await this.repository.updateRow(
+      context.projectId,
+      rowId,
+      {
+        payload: this.parseRowPayload(type, chosen, row.payload),
+        proposed: null,
+      },
+      ['proposedAt'],
+    );
+
+    await this.afterContentChange(context, type, record, 'DOCUMENT_PROPOSAL_RESOLVED', {
+      rowId,
+      decision: request.decision,
+    });
+
+    return this.reload(context, type);
+  }
+
+  /* --------------------------------------------------------- assumptions */
+
+  /**
+   * Stand behind an assumption.
+   *
+   * The only path from candidate to authority, and it takes a person. They say what
+   * it rests on, and the application — not the model, not the request — sets
+   * `status`, `confirmedBy` and `confirmedAt`.
+   */
+  async confirmAssumption(
+    context: DocumentContext,
+    type: DocumentType,
+    rowId: string,
+    request: ConfirmAssumption,
+  ): Promise<DocumentSnapshot> {
+    const record = await this.editableDocument(context, type, request.expectedVersion);
+    const row = await this.expectRow(context.projectId, type, record.version, rowId);
+    const assumption = row.payload as unknown as Assumption;
+
+    if (!canTransitionAssumption(assumption.status, 'CONFIRMED')) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.ASSUMPTION_NOT_CONFIRMABLE, 409);
+    }
+
+    const payload = this.parseRowPayload(
+      type,
+      {
+        ...row.payload,
+        status: 'CONFIRMED',
+        provenance: request.provenance,
+        basis: request.basis,
+        ...(request.owner !== undefined ? { owner: request.owner } : {}),
+        ...(request.validateBy !== undefined ? { validateBy: request.validateBy } : {}),
+        confirmedBy: 'USER',
+        confirmedAt: new Date().toISOString(),
+      },
+      row.payload,
+      { allowStatusChange: true },
+    );
+
+    await this.repository.updateRow(context.projectId, rowId, { payload });
+
+    await this.afterContentChange(context, type, record, 'ASSUMPTION_CONFIRMED', {
+      assumptionKey: assumption.assumptionKey,
+      provenance: request.provenance,
+    });
+
+    return this.reload(context, type);
+  }
+
+  /** Turn an assumption down. Kept on the record with the reason. */
+  async rejectAssumption(
+    context: DocumentContext,
+    type: DocumentType,
+    rowId: string,
+    request: RejectAssumption,
+  ): Promise<DocumentSnapshot> {
+    const record = await this.editableDocument(context, type, request.expectedVersion);
+    const row = await this.expectRow(context.projectId, type, record.version, rowId);
+    const assumption = row.payload as unknown as Assumption;
+
+    if (!canTransitionAssumption(assumption.status, 'REJECTED')) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.ASSUMPTION_NOT_CONFIRMABLE, 409);
+    }
+
+    const payload = this.parseRowPayload(
+      type,
+      {
+        ...row.payload,
+        status: 'REJECTED',
+        rejectedReason: request.reason,
+      },
+      row.payload,
+      { allowStatusChange: true },
+    );
+
+    await this.repository.updateRow(context.projectId, rowId, { payload });
+
+    await this.afterContentChange(context, type, record, 'ASSUMPTION_REJECTED', {
+      assumptionKey: assumption.assumptionKey,
+    });
+
+    return this.reload(context, type);
+  }
+
+  /** Record that a confirmed assumption turned out to be true, or did not. */
+  async settleAssumption(
+    context: DocumentContext,
+    type: DocumentType,
+    rowId: string,
+    request: SettleAssumption,
+  ): Promise<DocumentSnapshot> {
+    const record = await this.editableDocument(context, type, request.expectedVersion);
+    const row = await this.expectRow(context.projectId, type, record.version, rowId);
+    const assumption = row.payload as unknown as Assumption;
+
+    if (!canTransitionAssumption(assumption.status, request.outcome)) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.ASSUMPTION_NOT_CONFIRMABLE, 409);
+    }
+
+    const payload = this.parseRowPayload(
+      type,
+      {
+        ...row.payload,
+        status: request.outcome,
+        notes: [assumption.notes, request.note].filter(Boolean).join('\n'),
+      },
+      row.payload,
+      { allowStatusChange: true },
+    );
+
+    await this.repository.updateRow(context.projectId, rowId, { payload });
+
+    await this.afterContentChange(
+      context,
+      type,
+      record,
+      request.outcome === 'VALIDATED' ? 'ASSUMPTION_VALIDATED' : 'ASSUMPTION_INVALIDATED',
+      { assumptionKey: assumption.assumptionKey },
+    );
+
+    return this.reload(context, type);
+  }
+
+  /* ----------------------------------------------------- row internals */
+
+  private async expectRow(
+    projectId: string,
+    type: DocumentType,
+    version: number,
+    rowId: string,
+  ): Promise<DocumentRowDocument> {
+    const row = await this.repository.findRow(projectId, rowId);
+
+    if (row?.type !== type || row.documentVersion !== version) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.ROW_NOT_FOUND, 404);
+    }
+
+    return row;
+  }
+
+  /**
+   * Parse a row payload against the schema of the document it belongs to.
+   *
+   * The one gate between a request and storage. `allowStatusChange` is false for
+   * every ordinary edit, so an assumption's status, provenance and confirmation
+   * cannot be set by editing the row — they move only through the operations that
+   * record who did it. A request that tries is refused rather than silently
+   * ignored, because silently ignoring it would look like it worked.
+   */
+  private parseRowPayload(
+    type: DocumentType,
+    candidate: Record<string, unknown>,
+    previous: Record<string, unknown> | null,
+    options: { readonly allowStatusChange?: boolean } = {},
+  ): Record<string, unknown> {
+    if (type === 'ASSUMPTIONS' && previous && !options.allowStatusChange) {
+      const guarded = ['status', 'provenance', 'confirmedBy', 'confirmedAt'] as const;
+
+      for (const field of guarded) {
+        if (
+          candidate[field] !== undefined &&
+          JSON.stringify(candidate[field]) !== JSON.stringify(previous[field])
+        ) {
+          throw new DocumentError(DOCUMENT_ERROR_CODES.ASSUMPTION_PROVENANCE_REQUIRED, 422);
+        }
+      }
+    }
+
+    const schema = type === 'ACCEPTANCE_CRITERIA' ? acceptanceCriterionSchema : assumptionSchema;
+    const parsed = schema.safeParse(candidate);
+
+    if (!parsed.success) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.WRONG_DOCUMENT_SHAPE, 422, undefined, {
+        problems: parsed.error.issues.map((issue) => issue.path.join('.')).slice(0, 20),
+      });
+    }
+
+    return parsed.data;
+  }
+
+  /**
+   * The fields a rewrite may touch.
+   *
+   * Descriptive wording only. An acceptance criterion's requirement and feature
+   * links stay as they are, because changing what a criterion is *about* is a scope
+   * decision rather than a wording one; an assumption's status and provenance stay,
+   * for the reason above.
+   */
+  private rewritableFields(
+    type: DocumentType,
+    candidate: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const allowed =
+      type === 'ACCEPTANCE_CRITERIA'
+        ? ['module', 'submodule', 'screen', 'actor', 'given', 'when', 'then', 'rule', 'notes']
+        : [
+            'statement',
+            'category',
+            'impact',
+            'impactAreas',
+            'impactIfFalse',
+            'validationNeeded',
+            'notes',
+          ];
+
+    return Object.fromEntries(
+      Object.entries(candidate).filter(([field]) => allowed.includes(field)),
+    );
+  }
+
+  /** Rows a targeted regeneration is aimed at. */
+  private selectRows(
+    type: DocumentType,
+    rows: readonly DocumentRowDocument[],
+    selection: { readonly rowIds?: readonly string[]; readonly group?: string },
+  ): readonly DocumentRowDocument[] {
+    if (selection.rowIds && selection.rowIds.length > 0) {
+      const wanted = new Set(selection.rowIds);
+
+      return rows.filter((row) => wanted.has(row.rowId));
+    }
+
+    if (selection.group === undefined) {
+      return [];
+    }
+
+    /* A module for acceptance criteria; a category for assumptions. */
+    const field = type === 'ACCEPTANCE_CRITERIA' ? 'module' : 'category';
+
+    return rows.filter((row) => row.payload[field] === selection.group);
+  }
+
+  /** The next free key for a hand-added row. */
+  private withNextKey(
+    type: DocumentType,
+    payload: Record<string, unknown>,
+    existing: readonly DocumentRowDocument[],
+  ): Record<string, unknown> {
+    const keys = existing.map((row) => DocumentsService.rowKey(row.payload));
+
+    return type === 'ACCEPTANCE_CRITERIA'
+      ? { ...payload, criterionKey: nextCriterionKey(keys) }
+      : { ...payload, assumptionKey: nextAssumptionKey(keys) };
+  }
+
+  /**
+   * Turn requested reference ids into references, having checked each exists.
+   *
+   * A citation that names nothing is worse than none — it survives review — so
+   * every id is looked up in the approved baseline or the approved Feature Listing
+   * before it becomes a reference.
+   */
+  private async verifiedReferences(
+    context: DocumentContext,
+    type: DocumentType,
+    ids: readonly string[],
+  ): Promise<DocumentReference[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const upstream = await this.upstream.read(context.projectId, context.correlationId);
+    const requirements = new Map(
+      upstream.context.requirements.map((requirement) => [requirement.key, requirement]),
+    );
+    const features = new Map(
+      (upstream.context.documents.featureListing?.features ?? []).map((feature) => [
+        feature.featureId,
+        feature,
+      ]),
+    );
+
+    const references: DocumentReference[] = [];
+
+    for (const id of ids) {
+      const requirement = requirements.get(id);
+
+      if (requirement) {
+        references.push(requirementReference(requirement));
+        continue;
+      }
+
+      if (features.has(id)) {
+        references.push({ kind: 'ESTIMATE_UNIT', id, label: features.get(id)!.description });
+        continue;
+      }
+
+      throw new DocumentError(
+        requirements.size === 0 || id.startsWith('REQ-')
+          ? DOCUMENT_ERROR_CODES.UNKNOWN_REQUIREMENT
+          : DOCUMENT_ERROR_CODES.UNKNOWN_FEATURE,
+        422,
+      );
+    }
+
+    return references;
   }
 
   /* --------------------------------------------- targeted regeneration */
@@ -1920,6 +2826,10 @@ export class DocumentsService {
       prerequisiteVersions: {},
       sections: [],
       features: [],
+      rows: [],
+      criteriaCoverage: null,
+      assumptionSummary: null,
+      scopeReconciliation: null,
       validation: null,
       blockers: [
         {

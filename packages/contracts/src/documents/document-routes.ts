@@ -87,6 +87,49 @@ export const DOCUMENT_ROUTES = {
    */
   revise: (type: string) => buildApiPath('projects/current/documents', type, 'revise'),
 
+  /* ----------------------------------------- Phase 8: structured rows */
+
+  /**
+   * GET — the structured rows of a document that is a list.
+   *
+   * One set of row endpoints for acceptance criteria, assumptions and whatever
+   * Phase 9 adds: the row kind comes from the document type, so a third list
+   * document needs no new route.
+   */
+  rows: (type: string) => buildApiPath('projects/current/documents', type, 'rows'),
+  /** POST — add a row by hand. Requires a note saying where it came from. */
+  addRow: (type: string) => buildApiPath('projects/current/documents', type, 'rows'),
+  /** PATCH — edit one row's own fields. */
+  row: (type: string, rowId: string) =>
+    buildApiPath('projects/current/documents', type, 'rows', rowId),
+  /** POST — rewrite one row, optionally with a correction instruction. */
+  regenerateRow: (type: string, rowId: string) =>
+    buildApiPath('projects/current/documents', type, 'rows', rowId, 'regenerate'),
+  /** POST — rewrite every row in one group (a module, or a category). */
+  regenerateRowGroup: (type: string) =>
+    buildApiPath('projects/current/documents', type, 'rows/regenerate-group'),
+  /** POST — decide what happens to a row's suggested rewrite. */
+  resolveRowProposal: (type: string, rowId: string) =>
+    buildApiPath('projects/current/documents', type, 'rows', rowId, 'proposal'),
+  /** POST — record that a row is deliberately left out, with a reason. */
+  excludeRow: (type: string, rowId: string) =>
+    buildApiPath('projects/current/documents', type, 'rows', rowId, 'exclude'),
+
+  /* ------------------------------------------ Phase 8: assumptions */
+
+  /** POST — stand behind an assumption. Only a person may do this. */
+  confirmAssumption: (type: string, rowId: string) =>
+    buildApiPath('projects/current/documents', type, 'rows', rowId, 'confirm'),
+  /** POST — turn one down, with a reason. Kept on the record. */
+  rejectAssumption: (type: string, rowId: string) =>
+    buildApiPath('projects/current/documents', type, 'rows', rowId, 'reject'),
+  /** POST — record that a confirmed assumption turned out true, or did not. */
+  settleAssumption: (type: string, rowId: string) =>
+    buildApiPath('projects/current/documents', type, 'rows', rowId, 'settle'),
+  /** POST — ask a model for assumption candidates. Candidates only. */
+  assumptionCandidates: (type: string) =>
+    buildApiPath('projects/current/documents', type, 'rows/candidates'),
+
   /** GET — the current or most recent generation run. */
   currentRun: (type: string) => buildApiPath('projects/current/documents', type, 'run/current'),
 } as const;

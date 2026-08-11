@@ -92,6 +92,28 @@ export const AI_TASK_IDS = [
    * a document may be approved.
    */
   'document.validate',
+  /**
+   * Acceptance conditions for approved features.
+   *
+   * Phase 8. Returns wording only: the observable outcome, and optionally the
+   * precondition and action. Its schema has nowhere to put a threshold, a feature
+   * it was not given, or an effort figure — see `acceptance-criteria.contract.ts`.
+   */
+  'acceptance_criteria.generate',
+  /** One acceptance criterion, rewritten. Phase 8. */
+  'acceptance_criteria.regenerate',
+  /**
+   * Things the plan appears to be resting on.
+   *
+   * Phase 8, and the most carefully bounded task in the application. It returns
+   * **candidates**: a statement, a category, why it looked like an assumption.
+   * There is no field for status, provenance, owner or confirmation, so nothing it
+   * returns can become an authoritative assumption without a person — see
+   * `assumptions.contract.ts`.
+   */
+  'assumptions.suggest',
+  /** One section of a statement of work. Phase 8. */
+  'sow.section.generate',
 ] as const;
 
 export type AiTaskId = (typeof AI_TASK_IDS)[number];
@@ -117,6 +139,10 @@ export const AI_TASK_LABELS: Readonly<Record<AiTaskId, string>> = {
   'document.plan': 'Planning the document',
   'document.section': 'Writing a section',
   'document.features': 'Grouping requirements into features',
+  'acceptance_criteria.generate': 'Writing acceptance conditions',
+  'acceptance_criteria.regenerate': 'Rewriting an acceptance condition',
+  'assumptions.suggest': 'Looking for what the plan is resting on',
+  'sow.section.generate': 'Writing a section of the statement of work',
   'document.validate': 'Reading the document back',
 };
 

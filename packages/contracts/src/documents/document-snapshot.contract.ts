@@ -5,6 +5,10 @@ import { documentTypeSchema } from './document-type.contract';
 import { documentSectionSchema } from './document-section.contract';
 import { documentValidationSchema } from './document-validation.contract';
 import { documentOutdatedReasonSchema } from './document-dependency';
+import { documentRowSchema } from './document-row.contract';
+import { criteriaCoverageSchema } from './acceptance-criteria.contract';
+import { assumptionSummarySchema } from './assumptions.contract';
+import { sowScopeReconciliationSchema } from './statement-of-work.contract';
 import {
   featureCoverageSchema,
   effortReconciliationSchema,
@@ -35,6 +39,15 @@ export const documentBlockerKinds = [
   'coverage_incomplete',
   'effort_mismatch',
   'empty_required_section',
+  /* Phase 8 */
+  /** A row somebody added by hand with nothing saying where it came from. */
+  'attribution_missing',
+  /** Model-suggested assumptions nobody has accepted or turned down. */
+  'unconfirmed_assumptions',
+  /** A confirmed assumption whose failure would stop the plan. */
+  'blocking_assumption',
+  /** The SOW's scope does not reconcile with the approved Feature Listing. */
+  'scope_not_reconciled',
 ] as const;
 
 export type DocumentBlockerKind = (typeof documentBlockerKinds)[number];
@@ -101,9 +114,19 @@ export const documentSnapshotSchema = z
      */
     prerequisiteVersions: z.record(z.string().max(60), z.number().int().nonnegative()),
 
-    /* Content. One of the two is populated, by document shape. */
+    /*
+     * Content. A document fills the channel its shape calls for: prose documents
+     * fill `sections`, Feature Listing fills `features`, and every other list
+     * document fills `rows`.
+     *
+     * Three channels rather than one because features are genuinely different —
+     * they carry authoritative hours reconciled against the approved estimate —
+     * and rather than five, because everything after Feature Listing shares one
+     * envelope. See `document-row.contract.ts`.
+     */
     sections: z.array(documentSectionSchema).max(60),
     features: z.array(featureRowSchema).max(2_000),
+    rows: z.array(documentRowSchema).max(2_000),
 
     /* Assessment. */
     validation: documentValidationSchema.nullable(),
@@ -111,6 +134,10 @@ export const documentSnapshotSchema = z
     outdatedReasons: z.array(documentOutdatedReasonSchema).max(20),
     coverage: featureCoverageSchema.nullable(),
     reconciliation: effortReconciliationSchema.nullable(),
+    /* Per-document assessments, present only for the document they belong to. */
+    criteriaCoverage: criteriaCoverageSchema.nullable(),
+    assumptionSummary: assumptionSummarySchema.nullable(),
+    scopeReconciliation: sowScopeReconciliationSchema.nullable(),
 
     /* Provenance. */
     generator: generatorMetadataSchema.nullable(),

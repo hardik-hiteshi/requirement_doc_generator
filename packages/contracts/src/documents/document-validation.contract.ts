@@ -59,6 +59,49 @@ export const VALIDATION_KINDS = [
   'scope_contradiction',
   /** A section is empty and has no reason recorded. */
   'empty_section',
+  /* ---- Phase 8: Acceptance Criteria ---- */
+  /** A criterion cites a feature that is not in the current Feature Listing. */
+  'unknown_feature_reference',
+  /** A criterion states a figure or standard the approved evidence does not. */
+  'unstated_threshold',
+  /** A criterion exists for scope somebody deliberately excluded. */
+  'criterion_for_excluded_scope',
+  /** An approved feature has no acceptance criterion and no disposition. */
+  'feature_uncovered',
+  /** A criterion cites nothing, so nothing supports it. */
+  'criterion_unsupported',
+  /** A criterion a person added without saying where it came from. */
+  'attribution_missing',
+  /* ---- Phase 8: Assumptions ---- */
+  /** An assumption with no provenance a person stands behind. */
+  'assumption_unprovenanced',
+  /** A model's candidate is still waiting for somebody to decide. */
+  'assumption_unconfirmed',
+  /** Two confirmed assumptions that cannot both be true. */
+  'assumption_contradiction',
+  /** An unresolved clarification has been treated as though it were answered. */
+  'open_question_as_assumption',
+  /** A confirmed assumption whose failure would stop the plan. */
+  'assumption_blocking_unresolved',
+  /* ---- Phase 8: Statement of Work ---- */
+  /** The SOW's scope does not reconcile with the approved Feature Listing. */
+  'scope_not_reconciled',
+  /** A technology that is not in the locked stack, or a version that differs. */
+  'stack_mismatch',
+  /** A timeline that is not the approved one, or a date nobody approved. */
+  'timeline_mismatch',
+  /** A legal or commercial term nobody supplied. */
+  'unsupported_legal_term',
+  /** Internal delivery methodology in a client document. */
+  'internal_methodology_disclosed',
+  /** A staffing commitment the approved capacity plan does not establish. */
+  'fictional_staffing',
+  /** A deliverable that traces to nothing approved. */
+  'unsupported_deliverable',
+  /** An assumption in the SOW that is not in the approved Assumptions document. */
+  'assumption_not_approved',
+  /** Acceptance wording that contradicts the approved Acceptance Criteria. */
+  'acceptance_misaligned',
   /** A statement with no supporting requirement. Model-assisted. */
   'unsupported_statement',
   /** The same concept named two ways. Model-assisted. */

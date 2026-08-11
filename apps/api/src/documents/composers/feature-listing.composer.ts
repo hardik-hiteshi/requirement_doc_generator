@@ -90,7 +90,7 @@ export class FeatureListingComposer implements DocumentComposer {
       };
     });
 
-    return { sections: [], features };
+    return { sections: [], features, rows: [] };
   }
 
   applicableRequirementIds(context: UpstreamContext): readonly string[] {
