@@ -5,12 +5,14 @@ import {
   API_PREFIX,
   API_VERSION,
   DOCUMENT_ROUTES,
+  ESTIMATION_ROUTES,
   REQUIREMENT_ROUTES,
   REQUIRED_SOW_SECTION_KEYS,
   type Assumption,
   type AcceptanceCriterion,
   type DocumentSnapshot,
   type DocumentSummary,
+  type EstimateSnapshot,
 } from '@wdrg/contracts';
 
 import { AppModule } from '../src/app.module';
@@ -65,6 +67,8 @@ describe('Documents 3–5 (e2e)', () => {
 
   const WEB = documentFixture('a web application');
   const API_ONLY = documentFixture('an API-only service');
+  /* A project shape that is never staffed, so the no-team planning path is exercised. */
+  const NO_TEAM = documentFixture('a project with no team supplied');
 
   async function project(fixture = WEB): Promise<FixtureSession> {
     return approvedEstimateProject(app.getHttpServer(), provider, fixture);
@@ -1142,6 +1146,104 @@ describe('Documents 3–5 (e2e)', () => {
           (finding) => finding.kind === 'assumption_not_approved',
         ),
       ).toEqual([]);
+    }, 300_000);
+
+    /*
+     * The SOW against a plan with no team.
+     *
+     * Phase 6 now derives planning capacity and persists the schedule, so a project
+     * where nobody said who is doing the work still has an agreed duration to quote.
+     * The document must state it in the relative form and must not turn the derived
+     * capacity into a staffing commitment — "you would need two backend engineers" is
+     * a planning figure, not a promise to the client.
+     */
+    it('quotes the approved duration for a project with no team, and promises no staffing', async () => {
+      const session = await throughAssumptions(NO_TEAM);
+      const document = await generate(session, 'STATEMENT_OF_WORK');
+
+      const timeline = sectionBody(document, 'timeline');
+
+      /* The agreed duration, in the only form an unknown start permits. */
+      expect(timeline).toMatch(/approximately \d+ working weeks?/);
+      expect(timeline).toContain('following the agreed project commencement');
+      expect(everything(document)).not.toMatch(/\b\d{4}-\d{2}-\d{2}\b/);
+
+      /* Responsibilities, not headcount — and no capacity figures at all. */
+      const roles = sectionBody(document, 'roles');
+      expect(roles).not.toMatch(
+        /\b(one|two|three|four|\d+(\.\d+)?)\s+(people|persons?|developers?|engineers?)\b/i,
+      );
+      expect(roles).not.toMatch(/\bFTE\b|full[- ]time equivalent/i);
+      expect(everything(document)).not.toMatch(/\butilisation\b|\butilization\b/i);
+      expect(everything(document)).not.toMatch(/\bproductive hours\b/i);
+
+      const validated = await validate(session, 'STATEMENT_OF_WORK');
+
+      expect(
+        validated.validation?.findings.filter(
+          (finding) =>
+            finding.kind === 'timeline_mismatch' || finding.kind === 'fictional_staffing',
+        ),
+      ).toEqual([]);
+    }, 300_000);
+
+    /* Changing the team must not move scope, stack or effort in the document. */
+    it('keeps scope and stack unchanged when the team changes underneath it', async () => {
+      const session = await throughAssumptions();
+      const before = await generate(session, 'STATEMENT_OF_WORK');
+      const scopeBefore = sectionBody(before, 'functional-scope');
+      const stackBefore = sectionBody(before, 'technology');
+
+      /*
+       * Staff the project generously, which changes capacity and nothing else.
+       *
+       * The estimate has to be reopened first: an approved estimate is authority, and
+       * Phase 6 refuses to change capacity underneath one. That refusal is the point —
+       * a document quoting an approved plan cannot have the plan altered without the
+       * approval being withdrawn.
+       */
+      const approved = (await session.agent.get(ESTIMATION_ROUTES.estimate).expect(200)).body
+        .snapshot as EstimateSnapshot;
+
+      const estimate = (
+        await session.agent
+          .post(ESTIMATION_ROUTES.reopen)
+          .set('x-csrf-token', session.csrf)
+          .send({
+            reason: 'More people became available.',
+            expectedVersion: approved.recordVersion,
+          })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot;
+
+      const roles = Object.entries(estimate.effortByRole)
+        .filter(([, hours]) => hours > 0)
+        .map(([role]) => role);
+
+      await session.agent
+        .put(ESTIMATION_ROUTES.team)
+        .set('x-csrf-token', session.csrf)
+        .send({
+          lines: roles.map((role) => ({
+            role,
+            people: 3,
+            productiveHoursPerDay: 6,
+            workingDaysPerWeek: 5,
+            availability: 1,
+            availableFromDay: 0,
+          })),
+          expectedVersion: estimate.recordVersion,
+        })
+        .expect(200);
+
+      /*
+       * The estimate is no longer approved, so the document reports itself out of
+       * date rather than quietly quoting a plan nobody signed off.
+       */
+      const stale = await read(session, 'STATEMENT_OF_WORK');
+      expect(stale.currentness).toBe('OUTDATED');
+      expect(sectionBody(stale, 'functional-scope')).toBe(scopeBefore);
+      expect(sectionBody(stale, 'technology')).toBe(stackBefore);
     }, 300_000);
 
     /* 50, 52. */

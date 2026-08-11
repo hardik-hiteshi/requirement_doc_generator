@@ -192,7 +192,15 @@ export function peopleForHours(
     return 0;
   }
 
-  return Number((hours / (calendar.hoursPerDay * workingDays)).toFixed(2));
+  /*
+   * Never zero for work that exists.
+   *
+   * Rounding to two places sends a role with an hour or two of work to 0.00 over a
+   * long timeline, and "this needs nobody" is false about work somebody has to do.
+   * A recommendation is a floor, so it rounds up to the smallest figure it can
+   * state rather than down to nothing.
+   */
+  return Math.max(0.01, Number((hours / (calendar.hoursPerDay * workingDays)).toFixed(2)));
 }
 
 /* ------------------------------------------------- staffing recommendation */

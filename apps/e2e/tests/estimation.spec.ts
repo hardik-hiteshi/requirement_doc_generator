@@ -25,6 +25,26 @@ const effortPanel = (page: Page) => page.getByRole('region', { name: 'Effort', e
 const capacityPanel = (page: Page) => page.getByRole('region', { name: 'Capacity', exact: true });
 const schedulePanel = (page: Page) => page.getByRole('region', { name: 'Schedule', exact: true });
 const feasibilityPanel = (page: Page) => page.getByRole('region', { name: 'Delivery feasibility' });
+const teamPanel = (page: Page) => page.getByRole('region', { name: 'Team', exact: true });
+const calendarPanel = (page: Page) =>
+  page.getByRole('region', { name: 'Working calendar', exact: true });
+
+/**
+ * The first role this project actually has work for.
+ *
+ * Read from the rendered team editor rather than assumed, because which roles a
+ * project prices depends on its locked stack — and staffing one it has no work for
+ * is refused.
+ */
+async function firstStaffedRole(page: Page): Promise<string> {
+  const field = page.locator('[data-testid^="team-people-"]').first();
+
+  await expect(field).toBeVisible({ timeout: 30_000 });
+
+  const id = (await field.getAttribute('data-testid')) ?? '';
+
+  return id.replace('team-people-', '');
+}
 
 const BRIEF = [
   'Staff must sign in and record their weekly timesheets.',
@@ -541,9 +561,157 @@ test.describe('Estimation and timeline', () => {
       await expect(feasibilityPanel(page)).toBeVisible();
     });
   }
+  /* ==================== team capacity and the working calendar ========= */
+
+  /**
+   * The plan with no team, then with one, then without it again.
+   *
+   * The property under test is that a user who has not decided who is doing the work
+   * still gets a usable plan — required staffing, a schedule and a verdict — and that
+   * supplying a team changes the capacity arithmetic without ever changing the effort.
+   */
+  test('plans without a team, then measures against one supplied through the UI', async ({
+    page,
+  }) => {
+    /* 1. */
+    await reachEstimation(page);
+    await estimate(page);
+
+    /* 2. The controls are on the screen. */
+    await expect(teamPanel(page)).toBeVisible();
+    await expect(calendarPanel(page)).toBeVisible();
+
+    /* 3 & 4. No team, and the plan says what it would need. */
+    await expect(page.getByTestId('team-not-supplied')).toBeVisible();
+    await expect(capacityPanel(page)).toContainText('what this plan would need');
+    await expect(page.getByTestId('recommended-staffing')).toBeVisible();
+
+    /* 5. A relative schedule exists — no start date was given. */
+    await expect(schedulePanel(page)).toBeVisible();
+    await expect(schedulePanel(page)).toContainText(/working day/i);
+    await expect(feasibilityPanel(page)).toBeVisible();
+
+    const effortBefore = await effortPanel(page).innerText();
+
+    /* 6. Supply a team through the UI. */
+    await page.getByTestId('team-edit').click();
+    const firstRole = await firstStaffedRole(page);
+    await page.getByTestId(`team-people-${firstRole}`).fill('3');
+    await page.getByTestId(`team-availability-${firstRole}`).fill('80');
+    await page.getByTestId('team-save').click();
+
+    /* 7. Capacity becomes measured rather than recommended. */
+    await expect(page.getByTestId('team-summary')).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId(`team-line-${firstRole}`)).toContainText('80% available');
+    await expect(capacityPanel(page)).toContainText('What your team can supply');
+    await expect(page.getByTestId(`utilisation-${firstRole}`)).toBeVisible();
+
+    /* 8. Schedule and feasibility recalculate. */
+    await expect(schedulePanel(page)).toBeVisible();
+    await expect(feasibilityPanel(page)).toBeVisible();
+
+    /* 9. And the effort is untouched. */
+    expect(await effortPanel(page).innerText()).toBe(effortBefore);
+
+    /* 10 & 11. Change the team; the verdict may move, the effort may not. */
+    await page.getByTestId('team-edit').click();
+    await page.getByTestId(`team-people-${firstRole}`).fill('1');
+    await page.getByTestId(`team-availability-${firstRole}`).fill('40');
+    await page.getByTestId('team-save').click();
+
+    await expect(page.getByTestId(`team-line-${firstRole}`)).toContainText('40% available', {
+      timeout: 30_000,
+    });
+    await expect(feasibilityPanel(page)).toBeVisible();
+    expect(await effortPanel(page).innerText()).toBe(effortBefore);
+
+    /* 12 & 13. Remove it, and the plan returns to derived capacity. */
+    await page.getByTestId('team-remove').click();
+    await expect(page.getByTestId('team-not-supplied')).toBeVisible({ timeout: 30_000 });
+    await expect(capacityPanel(page)).toContainText('what this plan would need');
+    await expect(page.getByTestId('recommended-staffing')).toBeVisible();
+    await expect(schedulePanel(page)).toContainText(/working day/i);
+    expect(await effortPanel(page).innerText()).toBe(effortBefore);
+  });
+
+  test('reschedules when the working calendar changes, and leaves the effort alone', async ({
+    page,
+  }) => {
+    await reachEstimation(page);
+    await estimate(page);
+
+    const effortBefore = await effortPanel(page).innerText();
+    const scheduleBefore = await schedulePanel(page).innerText();
+
+    /* 14. Edit the calendar through the UI. */
+    await expect(page.getByTestId('calendar-summary')).toContainText('6.5 productive hours');
+
+    await page.getByTestId('calendar-edit').click();
+    await page.getByTestId('calendar-hours').fill('4');
+    await page.getByTestId('calendar-weekday-5').uncheck();
+    await page.getByTestId('calendar-holiday-input').fill('2027-01-01');
+    await page.getByTestId('calendar-holiday-add').click();
+    await page.getByTestId('calendar-review').fill('5');
+    await page.getByTestId('calendar-save').click();
+
+    /* 15. Scheduling changes; the effort does not. */
+    await expect(page.getByTestId('calendar-summary')).toContainText('4 productive hours', {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId('calendar-summary')).toContainText('4 working days a week');
+    await expect(page.getByTestId('calendar-summary')).toContainText('1 non-working date');
+    expect(await schedulePanel(page).innerText()).not.toBe(scheduleBefore);
+    expect(await effortPanel(page).innerText()).toBe(effortBefore);
+
+    /* 16. And it survives a reload. */
+    await page.reload();
+    await returnToEstimation(page);
+
+    await expect(page.getByTestId('calendar-summary')).toContainText('4 productive hours');
+    await expect(page.getByTestId('calendar-summary')).toContainText('1 non-working date');
+    expect(await effortPanel(page).innerText()).toBe(effortBefore);
+  });
+
+  test('the team and calendar controls are accessible', async ({ page }) => {
+    await reachEstimation(page);
+    await estimate(page);
+
+    await expectNoAccessibilityViolations(page);
+
+    await page.getByTestId('team-edit').click();
+    await expectNoAccessibilityViolations(page);
+
+    await page.getByTestId('team-cancel').click();
+    await page.getByTestId('calendar-edit').click();
+    await expectNoAccessibilityViolations(page);
+  });
+
+  for (const viewport of [
+    { name: 'a phone', width: 390, height: 844 },
+    { name: 'a tablet', width: 768, height: 1024 },
+    { name: 'a desktop', width: 1440, height: 900 },
+  ]) {
+    test(`the team and calendar controls stay usable on ${viewport.name}`, async ({ page }) => {
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await reachEstimation(page);
+      await estimate(page);
+
+      await expect(teamPanel(page)).toBeVisible();
+      await expect(calendarPanel(page)).toBeVisible();
+
+      await page.getByTestId('team-edit').click();
+      await expect(page.getByTestId('team-save')).toBeVisible();
+
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+
+      expect(overflow).toBeLessThanOrEqual(1);
+      await expectNoAccessibilityViolations(page);
+    });
+  }
 });
 
-/** Walks back to the estimation step after a reload. */
 async function returnToEstimation(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Continue to requirement input' }).click();
   await page.getByRole('button', { name: 'Continue to requirement analysis' }).click();

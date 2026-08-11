@@ -47,6 +47,15 @@ export interface DocumentFixture {
   readonly expectRoles?: readonly string[];
   /** True when every Screen cell must be empty. */
   readonly noInterface?: boolean;
+  /**
+   * Leave the team unstaffed.
+   *
+   * The common path supplies one, because most assertions want measured capacity.
+   * This shape exercises the other half: Phase 6 derives the staffing the work
+   * would need and schedules against it, so a plan with no team still has a
+   * duration for a document to quote.
+   */
+  readonly withoutTeam?: boolean;
 }
 
 const WEB_STACK = [
@@ -104,6 +113,16 @@ export const DOCUMENT_FIXTURES: readonly DocumentFixture[] = [
       'The timesheet list screen must load within 3 seconds for up to 500 records.',
     ],
     stack: WEB_STACK,
+  },
+  {
+    name: 'a project with no team supplied',
+    projectTypes: ['WEB_APPLICATION'],
+    brief: [
+      'Staff must record their weekly timesheets on a weekly grid screen.',
+      'A manager must approve every timesheet before it is exported.',
+    ],
+    stack: WEB_STACK,
+    withoutTeam: true,
   },
   {
     name: 'a project with explicit out-of-scope items',
@@ -246,33 +265,38 @@ export async function approvedEstimateProject(
   ).body.snapshot as EstimateSnapshot;
 
   /*
-   * A team, so Phase 6 can produce a schedule.
+   * A team, so capacity is measured rather than derived.
    *
-   * After the run, because the roles a project may be staffed with come from its
-   * own locked stack — staffing a role this project has no work for is refused —
-   * and the run is what reveals which roles were priced. Without a team the
-   * estimate has hours but no duration, and Phase 8's Statement of Work states
-   * working weeks, so the fixture has to reach the point where those exist.
+   * Set after the run, because the roles a project may be staffed with come from its
+   * own locked stack — staffing a role this project has no work for is refused — and
+   * the run is what reveals which roles were priced.
+   *
+   * A schedule does not depend on this. Phase 6 derives the staffing the work would
+   * need when no team is supplied and schedules against it, which the `withoutTeam`
+   * fixture exercises. Supplying one here turns recommended staffing into measured
+   * utilisation, which is what most assertions in the document suites want to read.
    */
   const roles = [...new Set(estimated.estimates.flatMap((unit) => Object.keys(unit.effort)))];
 
-  const staffed = (
-    await agent
-      .put(ESTIMATION_ROUTES.team)
-      .set('x-csrf-token', csrf)
-      .send({
-        lines: roles.map((role) => ({
-          role,
-          people: 1,
-          productiveHoursPerDay: 6,
-          workingDaysPerWeek: 5,
-          availability: 1,
-          availableFromDay: 0,
-        })),
-        expectedVersion: estimated.recordVersion,
-      })
-      .expect(200)
-  ).body.snapshot as EstimateSnapshot;
+  const staffed = fixture.withoutTeam
+    ? estimated
+    : ((
+        await agent
+          .put(ESTIMATION_ROUTES.team)
+          .set('x-csrf-token', csrf)
+          .send({
+            lines: roles.map((role) => ({
+              role,
+              people: 1,
+              productiveHoursPerDay: 6,
+              workingDaysPerWeek: 5,
+              availability: 1,
+              availableFromDay: 0,
+            })),
+            expectedVersion: estimated.recordVersion,
+          })
+          .expect(200)
+      ).body.snapshot as EstimateSnapshot);
 
   await agent
     .post(ESTIMATION_ROUTES.approve)

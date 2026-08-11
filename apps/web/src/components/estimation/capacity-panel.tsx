@@ -67,7 +67,7 @@ export function CapacityPanel({ estimate }: { readonly estimate: EstimateSnapsho
               ))}
           </ul>
         ) : (
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-2" data-testid="recommended-staffing">
             {estimate.recommendedStaffing.map((line) => (
               <li
                 key={line.role}
