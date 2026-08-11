@@ -234,9 +234,21 @@ test.describe('Estimation and timeline', () => {
     const line = table.getByTestId(/^estimate-E-/).first();
     const key = (await line.getAttribute('data-testid'))!.replace('estimate-', '');
 
+    /*
+     * The calculated figure, before anything is changed.
+     *
+     * Captured so the reset can be asserted exactly. The override value is derived
+     * from it rather than fixed, because a hard-coded 99 that happens to equal what
+     * the engine calculated makes "it changed" and "it went back" indistinguishable —
+     * which is precisely how this test failed once the engine's numbers moved.
+     */
+    const calculatedTotal = (await page.getByTestId(`hours-${key}`).textContent())!;
+    const calculatedHours = Number.parseInt(calculatedTotal, 10);
+    const override = calculatedHours + 50;
+
     /* 10. Change it. */
     await line.getByRole('button', { name: 'Change this figure' }).click();
-    await line.getByTestId('hours-input-BACKEND').fill('99');
+    await line.getByTestId('hours-input-BACKEND').fill(String(override));
     await line.getByRole('textbox', { name: 'Why?' }).fill('We have built this before.');
     const [response] = await Promise.all([
       page.waitForResponse((candidate) => candidate.url().includes('/estimation/estimates/'), {
@@ -260,28 +272,56 @@ test.describe('Estimation and timeline', () => {
      */
     const overriddenTotal = (await page.getByTestId(`hours-${key}`).textContent())!;
 
-    expect(Number.parseInt(overriddenTotal, 10)).toBeGreaterThanOrEqual(99);
+    expect(Number.parseInt(overriddenTotal, 10)).toBeGreaterThanOrEqual(override);
+    expect(overriddenTotal).not.toBe(calculatedTotal);
 
-    /* 11. Re-estimate, and it is untouched. */
-    await page.getByRole('button', { name: 'Estimate without AI' }).click();
-    await expect(page.getByTestId(`estimate-${key}`).getByText('Your figure')).toBeVisible({
-      timeout: 60_000,
-    });
+    /*
+     * 11. Re-estimate, and it is untouched.
+     *
+     * Waiting for the run's own response, not for the row to look unchanged: the row
+     * already looked like this before the run, so a visual assertion passes instantly
+     * and the next mutation goes out carrying the version from before the re-run.
+     * Optimistic concurrency then refuses it, correctly, and the test blames the wrong
+     * thing.
+     */
+    const [runResponse] = await Promise.all([
+      page.waitForResponse(
+        (candidate) =>
+          candidate.url().includes('/estimation/run') && candidate.request().method() === 'POST',
+        { timeout: 60_000 },
+      ),
+      page.getByRole('button', { name: 'Estimate without AI' }).click(),
+    ]);
+
+    expect(runResponse.ok()).toBe(true);
+
+    await expect(page.getByTestId(`source-${key}`)).toHaveText('Your figure', { timeout: 60_000 });
     await expect(page.getByTestId(`hours-${key}`)).toHaveText(overriddenTotal);
     await expect(
       page.getByTestId(`estimate-${key}`).getByText(/Was .* before you changed it/),
     ).toBeVisible();
 
     /* 12. And it can be put back. */
-    await page
-      .getByTestId(`estimate-${key}`)
-      .getByRole('button', { name: 'Back to the calculated figure' })
-      .click();
+    const [resetResponse] = await Promise.all([
+      page.waitForResponse((candidate) => candidate.url().includes('/reset'), { timeout: 30_000 }),
+      page
+        .getByTestId(`estimate-${key}`)
+        .getByRole('button', { name: 'Back to the calculated figure' })
+        .click(),
+    ]);
 
-    await expect(page.getByTestId(`estimate-${key}`).getByText('Calculated')).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(page.getByTestId(`hours-${key}`)).not.toHaveText(overriddenTotal);
+    if (!resetResponse.ok()) {
+      throw new Error(`Reset refused (${resetResponse.status()}): ${await resetResponse.text()}`);
+    }
+
+    /*
+     * The source badge by test id, not `getByText('Calculated')` — that matched the
+     * "Back to the calculated figure" button and passed while the reset had in fact
+     * been refused.
+     */
+    await expect(page.getByTestId(`source-${key}`)).toHaveText('Calculated', { timeout: 30_000 });
+    /* Back to the figure the application worked out, exactly. */
+    await expect(page.getByTestId(`hours-${key}`)).toHaveText(calculatedTotal);
   });
 
   test('a project with no start date gets working days, not invented dates', async ({ page }) => {

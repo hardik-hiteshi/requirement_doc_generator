@@ -113,7 +113,10 @@ function EstimateRow({
           <p className="text-xs text-muted">{TASK_CATEGORY_LABELS[unit.taskCategory]}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Badge tone={isUserAuthored(unit.source) ? 'success' : 'neutral'}>
+          <Badge
+            tone={isUserAuthored(unit.source) ? 'success' : 'neutral'}
+            data-testid={`source-${unit.key}`}
+          >
             {ESTIMATE_SOURCE_LABELS[unit.source]}
           </Badge>
           <span className="text-sm font-medium" data-testid={`hours-${unit.key}`}>

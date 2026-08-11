@@ -1083,6 +1083,54 @@ describe('Estimation and timeline (e2e)', () => {
     expect(restored.source).toBe('SYSTEM_CALCULATED');
   }, 180_000);
 
+  /*
+   * Reset after a re-estimation, which is the sequence a reviewer actually performs:
+   * change a figure, re-run because the requirements moved, then decide the override
+   * was wrong after all.
+   */
+  it('puts an override back even after the estimate has been re-run', async () => {
+    const { session, estimate } = await estimatedProject(WEB);
+
+    const target = features(estimate)[0]!;
+    const calculatedHours = target.totalHours;
+
+    const overridden = (
+      await session.agent
+        .patch(ESTIMATION_ROUTES.estimateUnit(target.id))
+        .set('x-csrf-token', session.csrf)
+        .send({
+          effort: { BACKEND: calculatedHours + 50 },
+          expectedVersion: estimate.recordVersion,
+        })
+        .expect(200)
+    ).body.snapshot as EstimateSnapshot;
+
+    expect(overridden.estimates.find((unit) => unit.id === target.id)!.totalHours).not.toBe(
+      calculatedHours,
+    );
+
+    const rerun = await runEstimation(session, overridden);
+
+    /* The override survived, and it still remembers what was calculated. */
+    const survivor = rerun.estimates.find((unit) => unit.id === target.id)!;
+    expect(survivor.source).toBe('USER_OVERRIDE');
+    expect(survivor.originalTotalHours).toBe(calculatedHours);
+
+    const reset = (
+      await session.agent
+        .post(ESTIMATION_ROUTES.resetEstimate(target.id))
+        .set('x-csrf-token', session.csrf)
+        .send({ expectedVersion: rerun.recordVersion })
+        .expect(201)
+    ).body.snapshot as EstimateSnapshot;
+
+    const restored = reset.estimates.find((unit) => unit.id === target.id)!;
+
+    expect(restored.source).toBe('SYSTEM_CALCULATED');
+    expect(restored.totalHours).toBe(calculatedHours);
+    expect(restored.originalTotalHours).toBeUndefined();
+  }, 180_000);
+
   it('refuses an impossible number of hours, including from a person', async () => {
     const { session, estimate } = await estimatedProject(WEB);
     const unitId = features(estimate)[0]!.id;
