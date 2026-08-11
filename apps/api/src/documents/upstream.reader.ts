@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import {
+  currentnessFrom,
+  documentOutdatedReasons,
+  DOCUMENT_DEPENDENCIES,
   SETTLED_CLARIFICATION_STATUSES,
+  type DocumentOutdatedReason,
+  type DocumentState,
   type DocumentStatus,
   type DocumentType,
   type RequirementItem,
@@ -19,8 +24,94 @@ export interface UpstreamSnapshot {
   readonly context: UpstreamContext;
   /** Whether the approved baseline is still the current one. */
   readonly baselineCurrent: boolean;
-  /** Every document's status in this project, for lock and blocker checks. */
-  readonly documentStatuses: Readonly<Partial<Record<DocumentType, DocumentStatus>>>;
+  /**
+   * Every document's lifecycle status *and* currentness, for lock and blocker
+   * checks. Both, because a prerequisite that is approved but stale is not a
+   * foundation for the document after it.
+   */
+  readonly documentStates: Readonly<Partial<Record<DocumentType, DocumentState>>>;
+}
+
+/** The upstream versions a document's currentness is judged against. */
+export interface AuthorityVersions {
+  readonly baselineVersion?: number;
+  readonly stackVersion?: number;
+  readonly estimateVersion?: number;
+  /** False when Phase 4 has marked the approved baseline stale in place. */
+  readonly baselineCurrent: boolean;
+}
+
+/** What a currentness judgement needs from a stored document. */
+export interface DocumentAuthorityRecord {
+  readonly type: string;
+  readonly baselineVersion?: number;
+  readonly stackVersion?: number;
+  readonly estimateVersion?: number;
+  readonly outdatedReasons: readonly unknown[];
+}
+
+/**
+ * Every reason a document is no longer current.
+ *
+ * Exported and shared rather than living in the service, because the reader
+ * computes it for *other* documents (to decide whether they unlock this one) and
+ * the engine computes it for *this* one. Two implementations of the same
+ * judgement is how a list that says "approved" ends up beside a detail view that
+ * says "out of date".
+ *
+ * Nothing here recalculates content. An out-of-date document keeps saying exactly
+ * what it said; these are the facts a reader should be told.
+ */
+export function documentOutdatedReasonsFor(
+  record: DocumentAuthorityRecord,
+  current: AuthorityVersions,
+): readonly DocumentOutdatedReason[] {
+  const type = record.type as DocumentType;
+
+  return [
+    ...documentOutdatedReasons({
+      type,
+      generatedAgainst: {
+        ...(record.baselineVersion !== undefined
+          ? { baselineVersion: record.baselineVersion }
+          : {}),
+        ...(record.stackVersion !== undefined ? { stackVersion: record.stackVersion } : {}),
+        ...(record.estimateVersion !== undefined
+          ? { estimateVersion: record.estimateVersion }
+          : {}),
+      },
+      current: {
+        ...(current.baselineVersion !== undefined
+          ? { baselineVersion: current.baselineVersion }
+          : {}),
+        ...(current.stackVersion !== undefined ? { stackVersion: current.stackVersion } : {}),
+        ...(current.estimateVersion !== undefined
+          ? { estimateVersion: current.estimateVersion }
+          : {}),
+      },
+      changedPrerequisites: [],
+    }),
+    /*
+     * A baseline that went out of date without changing version. Phase 4 keeps an
+     * approved-then-outdated baseline at the same version until a new analysis run
+     * supersedes it, so a version comparison cannot see this — and a document built
+     * on it is nonetheless no longer current.
+     */
+    ...(!current.baselineCurrent &&
+    DOCUMENT_DEPENDENCIES[type].upstream.includes('REQUIREMENT_BASELINE') &&
+    record.baselineVersion !== undefined
+      ? [
+          {
+            cause: 'baseline_changed' as const,
+            summary:
+              'The approved requirements are no longer current — something changed upstream after this document was written.',
+            generatedAgainst: `v${record.baselineVersion}`,
+          },
+        ]
+      : []),
+    /* Prerequisite changes are recorded on the document as they happen. */
+    ...(record.outdatedReasons as readonly DocumentOutdatedReason[]),
+  ];
 }
 
 /**
@@ -113,6 +204,11 @@ export class UpstreamReader {
 
     const documentRecords = await this.documents.findAll(projectId);
 
+    const baselineCurrent = approved?.status === 'approved';
+    const approvedBaselineVersion = approved?.version;
+    const lockedStackVersion = locked?.version;
+    const approvedEstimateVersion = approvedEstimate?.version;
+
     return {
       context: {
         projectId,
@@ -155,9 +251,26 @@ export class UpstreamReader {
           summary: String((blocker as { summary?: string }).summary ?? ''),
         })),
       },
-      baselineCurrent: approved?.status === 'approved',
-      documentStatuses: Object.fromEntries(
-        documentRecords.map((record) => [record.type, record.status]),
+      baselineCurrent,
+      documentStates: Object.fromEntries(
+        documentRecords.map((record) => [
+          record.type,
+          {
+            status: record.status as DocumentStatus,
+            currentness: currentnessFrom(
+              documentOutdatedReasonsFor(record, {
+                ...(approvedBaselineVersion !== undefined
+                  ? { baselineVersion: approvedBaselineVersion }
+                  : {}),
+                ...(lockedStackVersion !== undefined ? { stackVersion: lockedStackVersion } : {}),
+                ...(approvedEstimateVersion !== undefined
+                  ? { estimateVersion: approvedEstimateVersion }
+                  : {}),
+                baselineCurrent,
+              }),
+            ),
+          },
+        ]),
       ),
     };
   }

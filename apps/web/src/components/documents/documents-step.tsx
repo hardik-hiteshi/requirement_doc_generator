@@ -6,6 +6,7 @@ import {
   leaksInternalData,
   DOCUMENT_LABELS,
   DOCUMENT_STATUS_LABELS,
+  outdatedExplanation,
   isDocumentEditable,
   technicalDocumentText,
   type DocumentSnapshot,
@@ -135,18 +136,25 @@ function DocumentCard({
         ) : null}
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        {summary.outdated ? (
+        {summary.currentness === 'OUTDATED' ? (
           <Badge tone="warning" data-testid={`document-outdated-${summary.type}`}>
             Out of date
           </Badge>
         ) : null}
+        {/*
+         * Both axes, side by side. An issued document that is no longer current
+         * keeps saying "Issued" — that is what happened — and says "Out of date"
+         * beside it, which is the other thing that happened.
+         */}
         <Badge
           tone={
-            summary.status === 'APPROVED' || summary.status === 'FINAL'
-              ? 'success'
-              : summary.status === 'FAILED'
-                ? 'danger'
-                : 'neutral'
+            summary.currentness === 'OUTDATED'
+              ? 'warning'
+              : summary.status === 'APPROVED' || summary.status === 'FINAL'
+                ? 'success'
+                : summary.status === 'FAILED'
+                  ? 'danger'
+                  : 'neutral'
           }
           data-testid={`document-status-${summary.type}`}
         >
@@ -217,14 +225,21 @@ function DocumentDetail({ type }: { readonly type: DocumentType }) {
               </Badge>
               <Badge
                 tone={
-                  document.status === 'APPROVED' || document.status === 'FINAL'
-                    ? 'success'
-                    : 'neutral'
+                  document.currentness === 'OUTDATED'
+                    ? 'warning'
+                    : document.status === 'APPROVED' || document.status === 'FINAL'
+                      ? 'success'
+                      : 'neutral'
                 }
                 data-testid="detail-status"
               >
                 {DOCUMENT_STATUS_LABELS[document.status]}
               </Badge>
+              {document.currentness === 'OUTDATED' ? (
+                <Badge tone="warning" data-testid="detail-currentness">
+                  Out of date
+                </Badge>
+              ) : null}
             </div>
           </div>
           <CardDescription>
@@ -238,17 +253,27 @@ function DocumentDetail({ type }: { readonly type: DocumentType }) {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {document.outdatedReasons.length > 0 ? (
+          {document.currentness === 'OUTDATED' ? (
             <div className="rounded-md border border-warning p-3" data-testid="outdated-warning">
-              <h3 className="text-sm font-medium">Something it is built on has changed</h3>
+              <h3 className="text-sm font-medium">
+                {document.status === 'FINAL'
+                  ? 'This was issued before the project changed'
+                  : 'Something it is built on has changed'}
+              </h3>
+              {outdatedExplanation(document) ? (
+                <p className="mt-1 text-sm" data-testid="outdated-explanation">
+                  {outdatedExplanation(document)}
+                </p>
+              ) : null}
               <ul className="mt-2 flex flex-col gap-1 text-sm">
                 {document.outdatedReasons.map((reasonEntry, index) => (
                   <li key={`${reasonEntry.cause}-${index}`}>{reasonEntry.summary}</li>
                 ))}
               </ul>
               <p className="mt-2 text-xs text-muted">
-                Nothing here has been changed for you. Regenerate it, edit it, or leave it — the
-                decision is yours.
+                {document.status === 'FINAL'
+                  ? 'Nothing here has been changed. This is the version that was issued, and it stays exactly as it was sent. Start a new version to work against the project as it stands now.'
+                  : 'Nothing here has been changed for you. Regenerate it, edit it, or leave it — the decision is yours.'}
               </p>
             </div>
           ) : null}
@@ -308,16 +333,28 @@ function DocumentDetail({ type }: { readonly type: DocumentType }) {
             </p>
           ) : null}
 
+          {/*
+           * Approval is offered only where it can succeed. An issued document is a
+           * historical record — the API refuses to approve it, and a button that
+           * cannot work is worse than no button. Issuing is offered only while the
+           * document is current, for the same reason.
+           */}
           <div className="flex flex-wrap gap-2">
-            <Button
-              onClick={() =>
-                approve.mutate({ acknowledged: true, expectedVersion: document.recordVersion })
-              }
-              disabled={approve.isPending || document.blockers.length > 0}
-              data-testid="approve-document"
-            >
-              Approve this document
-            </Button>
+            {editable ? (
+              <Button
+                onClick={() =>
+                  approve.mutate({ acknowledged: true, expectedVersion: document.recordVersion })
+                }
+                disabled={
+                  approve.isPending ||
+                  document.blockers.length > 0 ||
+                  document.currentness === 'OUTDATED'
+                }
+                data-testid="approve-document"
+              >
+                Approve this document
+              </Button>
+            ) : null}
             {document.status === 'APPROVED' ? (
               <>
                 <Button
@@ -336,7 +373,7 @@ function DocumentDetail({ type }: { readonly type: DocumentType }) {
                 <Button
                   variant="secondary"
                   data-testid="mark-final"
-                  disabled={markFinal.isPending}
+                  disabled={markFinal.isPending || document.currentness === 'OUTDATED'}
                   onClick={() =>
                     markFinal.mutate({
                       acknowledged: true,

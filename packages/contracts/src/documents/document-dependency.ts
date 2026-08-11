@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
-import { DOCUMENT_TYPES, type DocumentType } from './document-type.contract';
-import { isDocumentAuthoritative, type DocumentStatus } from './document-status.contract';
+import { DOCUMENT_ORDER, DOCUMENT_TYPES, type DocumentType } from './document-type.contract';
+import { isAuthoritativeState, type DocumentState } from './document-status.contract';
 
 /**
  * What each document is allowed to be built from, and what invalidates it.
@@ -11,20 +11,41 @@ import { isDocumentAuthoritative, type DocumentStatus } from './document-status.
  * propagation rule copied and adjusted. The engine reads this; it knows nothing
  * about any particular document.
  *
- * ## The current graph
+ * ## The canonical graph
+ *
+ * The seven documents are generated in order, and each one is locked until the
+ * one before it is approved:
  *
  * ```
- *   approved requirement baseline
- *              ↓
- *      Our Understanding
- *              ↓
- *       Feature Listing  ←  locked technology stack
- *                        ←  approved estimation snapshot
+ *   approved requirements · locked stack · approved estimate
+ *                            ↓
+ *   1. Our Understanding     ← approved requirements
+ *                            ↓
+ *   2. Feature Listing       ← approved requirements, locked stack, approved estimate
+ *                            ↓
+ *   3. Acceptance Criteria   ← approved requirements
+ *                            ↓
+ *   4. Assumptions           ← approved requirements, locked stack
+ *                            ↓
+ *   5. Statement of Work     ← approved requirements, locked stack, approved estimate
+ *                            ↓
+ *   6. Work Breakdown        ← approved requirements, locked stack, approved estimate
+ *      Structure             ↓
+ *   7. Client Dependency     ← approved requirements, locked stack
+ *      Sheet                 ← Assumptions (as well as the WBS before it)
  * ```
  *
- * Feature Listing depends on Our Understanding *and* directly on the stack and
- * the estimate. Both edges are real: the narrative constrains what the features
- * are, and the estimate is where the hours come from. A row here records both.
+ * Two kinds of edge, both real. The **sequential** edge is the workflow: document
+ * N+1 stays locked until document N is approved, so nobody writes a Statement of
+ * Work against features nobody has agreed. The **direct** edges are what a
+ * document actually quotes — Feature Listing takes its hours from the estimate,
+ * the Client Dependency Sheet takes what the client must supply from the
+ * Assumptions — and they are listed even where the sequential chain would reach
+ * them anyway, because propagation should not depend on a reader tracing a chain.
+ *
+ * Only the first two documents are implemented. The other five are declared here
+ * so the engine is built for seven from the start rather than retro-fitted from
+ * two; `IMPLEMENTED_DOCUMENT_TYPES` is what governs whether anything can run.
  */
 
 /** The upstream artifacts a document can depend on, besides other documents. */
@@ -68,28 +89,67 @@ export const DOCUMENT_DEPENDENCIES: Readonly<Record<DocumentType, DocumentDepend
     documents: ['FEATURE_LISTING'],
   },
   ASSUMPTIONS: {
-    upstream: ['REQUIREMENT_BASELINE'],
-    documents: ['OUR_UNDERSTANDING'],
+    upstream: ['REQUIREMENT_BASELINE', 'TECHNOLOGY_STACK'],
+    documents: ['ACCEPTANCE_CRITERIA'],
   },
   STATEMENT_OF_WORK: {
     upstream: ['REQUIREMENT_BASELINE', 'TECHNOLOGY_STACK', 'ESTIMATION_SNAPSHOT'],
-    documents: ['OUR_UNDERSTANDING', 'FEATURE_LISTING'],
+    documents: ['ASSUMPTIONS'],
   },
   WORK_BREAKDOWN_STRUCTURE: {
-    upstream: ['ESTIMATION_SNAPSHOT'],
-    documents: ['FEATURE_LISTING'],
+    upstream: ['REQUIREMENT_BASELINE', 'TECHNOLOGY_STACK', 'ESTIMATION_SNAPSHOT'],
+    documents: ['STATEMENT_OF_WORK'],
   },
   CLIENT_DEPENDENCY_SHEET: {
-    upstream: ['REQUIREMENT_BASELINE'],
-    documents: ['OUR_UNDERSTANDING'],
+    upstream: ['REQUIREMENT_BASELINE', 'TECHNOLOGY_STACK'],
+    /*
+     * The sequential edge is the WBS. Assumptions is named as well because this
+     * sheet quotes it directly — what the client has to supply is exactly what
+     * the plan assumed they would.
+     */
+    documents: ['ASSUMPTIONS', 'WORK_BREAKDOWN_STRUCTURE'],
   },
 };
 
-/** Documents that name `type` as a prerequisite. Used to propagate outdatedness. */
+/** The document immediately before this one in the canonical sequence. */
+export function documentBefore(type: DocumentType): DocumentType | null {
+  const order = DOCUMENT_ORDER[type];
+
+  return DOCUMENT_TYPES.find((candidate) => DOCUMENT_ORDER[candidate] === order - 1) ?? null;
+}
+
+/** Documents that name `type` as a prerequisite directly. */
 export function documentsDependingOn(type: DocumentType): readonly DocumentType[] {
   return DOCUMENT_TYPES.filter((candidate) =>
     DOCUMENT_DEPENDENCIES[candidate].documents.includes(type),
   );
+}
+
+/**
+ * Every document downstream of this one, however many hops away.
+ *
+ * Propagation has to be transitive. In a chain of seven, a baseline change under
+ * Our Understanding reaches the Client Dependency Sheet through five
+ * intermediaries, and a reader who is told only about the next document along has
+ * been told the smallest true thing rather than the useful one.
+ *
+ * Returned in canonical order so a caller walks the chain forwards, and each type
+ * appears once even though the graph has more than one path to some of them.
+ */
+export function downstreamDocuments(type: DocumentType): readonly DocumentType[] {
+  const found = new Set<DocumentType>();
+  const queue: DocumentType[] = [type];
+
+  while (queue.length > 0) {
+    for (const dependent of documentsDependingOn(queue.shift()!)) {
+      if (!found.has(dependent)) {
+        found.add(dependent);
+        queue.push(dependent);
+      }
+    }
+  }
+
+  return DOCUMENT_TYPES.filter((candidate) => found.has(candidate));
 }
 
 /** Documents invalidated when an upstream artifact of this kind changes. */
@@ -119,8 +179,13 @@ export interface DocumentLock {
 export interface DependencyState {
   /** Upstream artifacts that exist and are current. */
   readonly availableUpstream: readonly UpstreamKind[];
-  /** Status of every document in the project, by type. */
-  readonly documentStatuses: Readonly<Partial<Record<DocumentType, DocumentStatus>>>;
+  /**
+   * Lifecycle status *and* currentness of every document in the project.
+   *
+   * Both, because a prerequisite that is approved but stale does not unlock the
+   * document after it — see `isAuthoritativeState`.
+   */
+  readonly documentStates: Readonly<Partial<Record<DocumentType, DocumentState>>>;
 }
 
 /**
@@ -157,7 +222,9 @@ export function lockFor(
 
   const unapproved = dependencies.documents.filter(
     (prerequisite) =>
-      !isDocumentAuthoritative(state.documentStatuses[prerequisite] ?? 'NOT_STARTED'),
+      !isAuthoritativeState(
+        state.documentStates[prerequisite] ?? { status: 'NOT_STARTED', currentness: 'CURRENT' },
+      ),
   );
 
   if (unapproved.length > 0) {
@@ -197,6 +264,18 @@ export const documentOutdatedReasonSchema = z
   .strict();
 
 export type DocumentOutdatedReason = z.infer<typeof documentOutdatedReasonSchema>;
+
+/**
+ * Currentness from the reasons behind it.
+ *
+ * One line, in one place, so the list view and the detail view cannot disagree
+ * about whether a document is out of date.
+ */
+export function currentnessFrom(
+  reasons: readonly DocumentOutdatedReason[],
+): 'CURRENT' | 'OUTDATED' {
+  return reasons.length > 0 ? 'OUTDATED' : 'CURRENT';
+}
 
 export interface UpstreamVersions {
   readonly baselineVersion?: number;

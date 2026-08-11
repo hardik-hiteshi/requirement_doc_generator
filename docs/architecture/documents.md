@@ -64,9 +64,17 @@ the versions that are current. Three cases:
   approved-then-outdated baseline at the same version, so the engine checks
   `baselineCurrent` separately.
 
-A prerequisite document changing is recorded on the dependent document when it
-happens, by `markDependentsOutdated`. Nothing is regenerated: an approved document
-that goes out of date keeps its content and gains a status and a reason.
+A prerequisite document changing is recorded on **every** document downstream of it
+when it happens, by `markDependentsOutdated` over `downstreamDocuments` — the
+transitive closure, not just the next document along. In a chain of seven, a
+baseline change under Our Understanding reaches the Client Dependency Sheet through
+five intermediaries, and telling only the next one would be the smallest true thing
+rather than the useful one.
+
+Nothing is regenerated and no status is written: a document that goes out of date
+keeps its content, keeps its status, and gains a reason. Regenerating is what
+clears the reasons again — the regeneration re-records the prerequisite versions,
+which is what lets a document that fell behind catch up.
 
 ## Composition
 
@@ -147,14 +155,57 @@ every section marked `USER_EDITED`, because somebody chose that text when they
 issued it. `reopen` on an issued document routes to `revise`, so there is one
 mental model rather than two.
 
-An issued document is **not** relabelled `OUTDATED` when its inputs move. It is a
-record of what was sent, and it did not stop being that; the reasons are reported
-beside it so a reader can see the world moved on.
+Revising re-stamps the new working version with today's upstream versions and clears
+its validation. The text was carried across unread, so nothing about it claims to
+match the new baseline — the cleared validation is what makes that claim impossible
+to skip, and approval requires a fresh one whose coverage and citation checks run
+against the current baseline. Revising opens a version to work in; it does not
+launder staleness. If the baseline itself has not been re-approved, the new working
+version is reported out of date too, which is the honest answer.
 
-Approval and issuing both refuse against stale upstream authority with
+Approval and issuing both refuse while a document is not current, with
 `DOCUMENT_UPSTREAM_STALE`, checked before the transition table so the message names
 the real cause. Regeneration, by contrast, is _allowed_ on a stale approved
 document — it is the action the screen tells the user to take.
+
+## Two axes: lifecycle status and currentness
+
+A document has a **status** — what people decided — and a **currentness** — whether
+the world has moved since. They are separate fields because a document can be both
+issued and stale, and both facts matter:
+
+```
+  status      = FINAL       the immutable version that was sent to the client
+  currentness = OUTDATED    the project has changed since it was sent
+```
+
+When `OUTDATED` was a status, that combination could not be expressed and the engine
+had to pick a lie: relabel the issued document, so the history no longer says what
+was sent, or leave it saying `FINAL` and drop the fact that the project moved. The
+first was rejected, which meant issued documents silently stopped reporting upstream
+changes at all.
+
+`DOCUMENT_STATUSES` therefore has eight values and no `OUTDATED`.
+`DOCUMENT_CURRENTNESS` is `CURRENT | OUTDATED`, derived on every read from the
+upstream versions the content was written against — never stored as truth, never set
+by a user, and computed by one shared function, `documentOutdatedReasonsFor`, so the
+list and the detail cannot disagree.
+
+Separating the axes deleted special cases rather than adding them:
+
+- an approved-but-stale document is `APPROVED` + `OUTDATED` — still approved,
+  because nobody withdrew that, and still editable and regenerable, which is what
+  the screen advises. `canGenerateDocument('APPROVED')` is now simply true, where
+  the engine used to synthesise a fake `OUTDATED` status to get past its own check;
+- `isAuthoritativeState` asks for both — an approved prerequisite whose own inputs
+  moved does not unlock the document after it, so staleness cannot travel down the
+  chain unannounced;
+- `canApproveDocument` and `canIssueDocument` ask for both, so nothing stale is
+  approved or issued;
+- versions in the history carry their own currentness, judged against today's
+  upstream from the versions recorded with each one. That is what lets the history
+  say "the version issued in March is no longer current" without touching the March
+  document.
 
 ## Traceability lives in the citation, not in the prose
 
@@ -216,13 +267,15 @@ a caller that forgets writes a section belonging to nothing.
 
 ## Reading is recomputing
 
-`assemble` recomputes outdatedness, coverage, reconciliation, blockers and the
-effective status on every read, exactly as Phase 6 does with the estimate. All of
-them are functions of stored data and the current upstream state, and storing them
-without recomputing is how a stale "everything is fine" survives a change upstream.
+`assemble` recomputes currentness, coverage, reconciliation and blockers on every
+read, exactly as Phase 6 does with the estimate. All of them are functions of stored
+data and the current upstream state, and storing them without recomputing is how a
+stale "everything is fine" survives a change upstream.
 
-An approved document whose inputs have moved reports `OUTDATED` without its stored
-status being rewritten, so the transition cannot be missed by a job that did not run.
+The status is the one thing `assemble` does **not** compute: it is what somebody
+decided, and it is returned exactly as stored. Currentness is derived beside it, so
+neither is written over the other and no background job can be the reason a document
+misreports itself.
 
 ## Validation
 

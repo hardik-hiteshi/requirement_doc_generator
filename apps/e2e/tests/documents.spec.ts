@@ -671,6 +671,67 @@ test.describe('Documents', () => {
     }
   });
 
+  /*
+   * The two axes on screen. An issued document that is no longer current has to
+   * say both things: it is still what was sent, and the project has moved.
+   */
+  test('shows an issued document as issued and out of date, and changes nothing', async ({
+    page,
+  }) => {
+    await reachDocuments(page);
+    await approveUnderstanding(page);
+
+    await page.getByTestId('document-open-OUR_UNDERSTANDING').click();
+    await page.getByTestId('mark-final').click();
+    await expect(page.getByTestId('detail-status')).toHaveText('Issued', { timeout: 30_000 });
+
+    const issuedText = await page.getByTestId('section-body-functional-scope').textContent();
+
+    /* Something upstream moves. */
+    await page.getByRole('button', { name: 'Back to requirement input' }).click();
+
+    const paste = page.getByRole('region', { name: 'Paste requirement text', exact: true });
+    await paste.getByRole('textbox', { name: /Source title/ }).fill('Late addition');
+    await paste
+      .getByRole('textbox', { name: /Requirement text/ })
+      .fill('Timesheets must be exportable as PDF.');
+    await paste.getByRole('button', { name: 'Add requirement text' }).click();
+
+    const sources = page.getByRole('region', { name: 'Requirement sources', exact: true });
+    const row = sources.getByRole('listitem').filter({ hasText: 'Late addition' });
+    await expect(row.getByText(/Ready|Needs your review/)).toBeVisible({ timeout: 60_000 });
+    await sources.getByRole('button', { name: 'Late addition' }).click();
+
+    const review = page.getByRole('region', { name: 'Extraction review', exact: true });
+    await review.getByRole('button', { name: 'Mark reviewed' }).click();
+    await expect(review.getByRole('button', { name: 'Reviewed' })).toBeDisabled();
+
+    await page.getByRole('button', { name: 'Continue to requirement analysis' }).click();
+    await page.getByRole('button', { name: 'Document generation' }).click();
+
+    /* The list says both. */
+    await expect(page.getByTestId('document-status-OUR_UNDERSTANDING')).toHaveText('Issued', {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId('document-outdated-OUR_UNDERSTANDING')).toBeVisible();
+
+    await page.getByTestId('document-open-OUR_UNDERSTANDING').click();
+
+    /* And so does the document. */
+    await expect(page.getByTestId('detail-status')).toHaveText('Issued');
+    await expect(page.getByTestId('detail-currentness')).toHaveText('Out of date');
+    await expect(page.getByTestId('outdated-explanation')).toContainText(
+      'changed since this version was issued',
+    );
+
+    /* Word for word what was sent, and still nothing offering to change it. */
+    await expect(page.getByTestId('section-body-functional-scope')).toHaveText(issuedText!.trim());
+    await expect(page.getByTestId('section-edit-project-overview')).toBeHidden();
+    await expect(page.getByTestId('approve-document')).toBeHidden();
+    /* Revising is the way forward, and it is offered. */
+    await expect(page.getByTestId('revise-document')).toBeVisible();
+  });
+
   test('a new version can be started from an issued document', async ({ page }) => {
     await reachDocuments(page);
     await approveUnderstanding(page);

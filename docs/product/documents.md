@@ -181,14 +181,31 @@ What you can do is **start a new version**. The issued one stays exactly as it w
 sent, on the record, and the new version begins as a copy for you to work on. That
 is why "which version did the client actually receive?" has an answer here.
 
-An issued document is never relabelled out of date when the requirements move
-afterwards. It was a true record of what was sent, and it still is — the changes are
-reported beside it, not applied to it.
+### Issued, and out of date
 
-Neither approving nor issuing is possible while something upstream has moved.
+A document has two labels, not one. **Issued** says what happened to it. **Out of
+date** says whether the project has changed since. Both can be true at once, and
+when they are, the document shows both:
 
-Reopening Our Understanding marks Feature Listing out of date. It does not
-regenerate it, change it or delete it.
+> **Issued · Out of date**
+> Issued previously. Project requirements or upstream decisions have changed since
+> this version was issued.
+
+It is still the version that was sent, word for word, with the baseline it was
+written against still recorded against it. Nothing about it was edited, regenerated
+or relabelled — the only thing that changed is what we tell you about it. Starting a
+new version is how you move on; the issued one stays where it is.
+
+The same is true one step earlier: an approved document whose inputs have moved is
+**Approved · Out of date**. Still approved, because you approved it, and still
+yours to edit or regenerate.
+
+Neither approving nor issuing is possible while a document is out of date, and
+neither button is offered.
+
+Reopening Our Understanding marks Feature Listing out of date — and everything after
+it in the sequence, all the way down. It does not regenerate any of them, change
+them or delete them.
 
 ## When something upstream moves
 
@@ -199,6 +216,10 @@ against.
 **Nothing is recalculated.** It still says exactly what it said. You decide whether
 to regenerate, edit, or leave it. A document that quietly rewrote itself the moment
 something upstream moved would be a document nobody could review twice.
+
+Regenerating it against the new version is what makes it current again. Re-approving
+the document it was built on is not enough on its own — this document was written
+against the version before, and nobody has read it since.
 
 ## Adding something new
 

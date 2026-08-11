@@ -12,13 +12,14 @@ import {
   DOCUMENT_SCHEMA_VERSION,
   DOCUMENT_SHAPE_BY_TYPE,
   DOCUMENT_TYPES,
-  documentOutdatedReasons,
-  documentsDependingOn,
+  downstreamDocuments,
   featureListingCsv,
   correctionAuditMetadata,
   hasFeatureProposal,
   hasProposal,
   IMPLEMENTED_DOCUMENT_TYPES,
+  currentnessFrom,
+  isAuthoritativeState,
   isDocumentAuthoritative,
   isDocumentEditable,
   isDocumentRunning,
@@ -38,6 +39,7 @@ import {
   type DocumentDiff,
   type DocumentSection,
   type DocumentSnapshot,
+  type DocumentState,
   type DocumentSummary,
   type DocumentType,
   type DocumentValidation,
@@ -58,7 +60,12 @@ import {
 import { AuditService } from '../audit/audit.service';
 import { DocumentError } from './documents.errors';
 import { DocumentsRepository } from './documents.repository';
-import { UpstreamReader, type UpstreamSnapshot } from './upstream.reader';
+import {
+  documentOutdatedReasonsFor,
+  UpstreamReader,
+  type AuthorityVersions,
+  type UpstreamSnapshot,
+} from './upstream.reader';
 import { FeatureListingComposer } from './composers/feature-listing.composer';
 import { UnderstandingComposer } from './composers/understanding.composer';
 import type { ComposedContent, DocumentComposer } from './composers/composer.types';
@@ -126,15 +133,25 @@ export class DocumentsService {
     const records = await this.repository.findAll(context.projectId);
     const byType = new Map(records.map((record) => [record.type as DocumentType, record]));
 
-    const statuses = Object.fromEntries(
-      records.map((record) => [record.type, record.status]),
-    ) as Partial<Record<DocumentType, DocumentSnapshot['status']>>;
+    /*
+     * Both axes for every document, computed once. Locking asks for both: a
+     * prerequisite that is approved but stale does not unlock what follows it.
+     */
+    const states = Object.fromEntries(
+      records.map((record) => [
+        record.type,
+        {
+          status: record.status as DocumentSnapshot['status'],
+          currentness: currentnessFrom(this.outdatedFor(record, upstream)),
+        },
+      ]),
+    ) as Partial<Record<DocumentType, DocumentState>>;
 
     return DOCUMENT_TYPES.map((type) => {
       const record = byType.get(type);
       const lock = lockFor(
         type,
-        { availableUpstream: this.availableUpstream(upstream), documentStatuses: statuses },
+        { availableUpstream: this.availableUpstream(upstream), documentStates: states },
         IMPLEMENTED_DOCUMENT_TYPES,
       );
 
@@ -147,7 +164,7 @@ export class DocumentsService {
         lock: lock ? { reason: lock.reason, summary: lock.summary } : null,
         implemented: isImplementedDocumentType(type),
         version: record?.version ?? 0,
-        outdated: record ? this.outdatedFor(record, upstream).length > 0 : false,
+        currentness: states[type]?.currentness ?? 'CURRENT',
         blockerCount: (record?.blockers ?? []).length,
         validationSeverity: (record?.validation as { severity?: string } | null)?.severity ?? null,
         ...(record ? { updatedAt: record.updatedAt.toISOString() } : {}),
@@ -175,8 +192,24 @@ export class DocumentsService {
     this.assertImplemented(type);
 
     const versions = await this.repository.listVersions(context.projectId, type);
+    const upstream = await this.upstream.read(context.projectId, context.correlationId);
 
-    return versions.map(toVersionSummary);
+    /*
+     * Each version is judged against today's upstream on its *own* recorded
+     * versions. That is what lets the history say "the version issued in March is
+     * no longer current" without anything in the March document changing.
+     */
+    return versions.map((version) =>
+      toVersionSummary(
+        version,
+        currentnessFrom(
+          documentOutdatedReasonsFor(
+            { ...version.toObject(), type, outdatedReasons: [] },
+            this.authorityVersions(upstream),
+          ),
+        ),
+      ),
+    );
   }
 
   async version(
@@ -263,7 +296,7 @@ export class DocumentsService {
     this.assertImplemented(type);
 
     const upstream = await this.upstream.read(context.projectId, context.correlationId);
-    await this.assertUnlocked(context, type, upstream);
+    this.assertUnlocked(type, upstream);
 
     const existing = await this.repository.find(context.projectId, type);
 
@@ -283,18 +316,12 @@ export class DocumentsService {
     }
 
     /*
-     * Checked against the *derived* status, not the stored one. An approved
-     * document whose inputs have moved reads as OUTDATED on screen, and
-     * regenerating is precisely what the screen tells the user to do — refusing it
-     * because the stored status still says APPROVED would make the advice
-     * unfollowable.
+     * The stored status, plainly. Regenerating an approved document is legal —
+     * it is what the screen tells somebody to do when the inputs have moved — and
+     * with currentness on its own axis that is a fact about `APPROVED` rather than
+     * a special case about staleness.
      */
-    const effectiveStatus =
-      existing && this.outdatedFor(existing, upstream).length > 0 && existing.status === 'APPROVED'
-        ? ('OUTDATED' as const)
-        : (existing?.status as DocumentSnapshot['status'] | undefined);
-
-    if (effectiveStatus && !canGenerateDocument(effectiveStatus)) {
+    if (existing && !canGenerateDocument(existing.status as DocumentSnapshot['status'])) {
       throw new DocumentError(DOCUMENT_ERROR_CODES.INVALID_STATUS_TRANSITION, 409);
     }
 
@@ -325,6 +352,19 @@ export class DocumentsService {
           version,
           status: 'DRAFT',
           ...this.upstreamFields(upstream),
+          /*
+           * Regenerating is how a document catches up, so the reasons it had fallen
+           * behind are cleared and the prerequisite versions re-recorded. Without
+           * this a document that went out of date because a prerequisite moved
+           * could never be current again: the stored reason would outlive the
+           * regeneration that answered it.
+           *
+           * Regeneration cannot happen while a prerequisite is unapproved — the
+           * lock check refuses it — so by this point the prerequisites are both
+           * approved and current.
+           */
+          outdatedReasons: [],
+          prerequisiteVersions: await this.prerequisiteVersions(context.projectId, type),
           supersedesVersion: existing.version,
           regenerationReason: request.reason ?? '',
           validation: null,
@@ -842,6 +882,7 @@ export class DocumentsService {
     }
 
     const issued = await this.currentContent(context.projectId, record);
+    const upstream = await this.upstream.read(context.projectId, context.correlationId);
 
     /* The issued version, recorded as issued, before anything else happens. */
     await this.archive(context.projectId, record, issued, 'FINAL');
@@ -878,6 +919,19 @@ export class DocumentsService {
       ),
     );
 
+    /*
+     * The new working version is stamped with today's authority and starts with no
+     * validation. That is what "revise" means: the issued version stays behind as
+     * the record of what was sent against the inputs of the day, and work resumes
+     * against the project as it stands now.
+     *
+     * The text has been carried forward unread, so this is not a claim that the
+     * content matches the new baseline — clearing `validation` is what makes that
+     * claim impossible to skip. The document is `DRAFT`, and approving it requires
+     * a fresh validation whose coverage and citation checks run against the
+     * current baseline. A paragraph that no longer matches is caught there, by
+     * reading it, rather than by a version number left deliberately stale.
+     */
     await this.repository.update(
       context.projectId,
       type,
@@ -888,6 +942,9 @@ export class DocumentsService {
         supersedesVersion: record.version,
         regenerationReason: request.reason,
         validation: null,
+        outdatedReasons: [],
+        ...this.upstreamFields(upstream),
+        prerequisiteVersions: await this.prerequisiteVersions(context.projectId, type),
       },
       ['finalAt', 'approvedAt'],
     );
@@ -1090,19 +1147,17 @@ export class DocumentsService {
     }
   }
 
-  private async assertUnlocked(
-    context: DocumentContext,
-    type: DocumentType,
-    upstream: UpstreamSnapshot,
-  ): Promise<void> {
-    const records = await this.repository.findAll(context.projectId);
-    const statuses = Object.fromEntries(
-      records.map((record) => [record.type, record.status]),
-    ) as Partial<Record<DocumentType, DocumentSnapshot['status']>>;
-
+  /**
+   * Synchronous: everything the lock check needs is already on the upstream
+   * snapshot, which reads every document's state once per operation.
+   */
+  private assertUnlocked(type: DocumentType, upstream: UpstreamSnapshot): void {
     const lock = lockFor(
       type,
-      { availableUpstream: this.availableUpstream(upstream), documentStatuses: statuses },
+      {
+        availableUpstream: this.availableUpstream(upstream),
+        documentStates: upstream.documentStates,
+      },
       IMPLEMENTED_DOCUMENT_TYPES,
     );
 
@@ -1220,15 +1275,37 @@ export class DocumentsService {
     }
   }
 
-  /** Marks documents built on this one out of date. Never regenerates them. */
+  /**
+   * Records that every document downstream of this one is no longer current.
+   *
+   * **Transitive**, along the whole chain. In a seven-document sequence a change
+   * under Our Understanding reaches the Client Dependency Sheet through five
+   * intermediaries, and telling only the next document along would be the
+   * smallest true thing rather than the useful one.
+   *
+   * Three things this deliberately does not do.
+   *
+   * It does not **regenerate** anything. The content of a document somebody has
+   * read, edited and possibly sent stays exactly as it is; what changes is what we
+   * tell them about it.
+   *
+   * It does not **change a status**. Currentness is its own axis, so an approved
+   * document stays approved and an issued one stays issued. Before that was true,
+   * this method had to relabel an approved document `OUTDATED` and skip issued
+   * ones entirely — which meant an issued document quietly stopped reporting that
+   * its inputs had moved.
+   *
+   * It does not skip `FINAL`. An issued document is exactly the one where "the
+   * project has changed since this was sent" most needs saying.
+   */
   private async markDependentsOutdated(
     context: DocumentContext,
     type: DocumentType,
   ): Promise<void> {
-    for (const dependent of documentsDependingOn(type)) {
+    for (const dependent of downstreamDocuments(type)) {
       const record = await this.repository.find(context.projectId, dependent);
 
-      if (!record || record.status === 'NOT_STARTED' || record.status === 'FINAL') {
+      if (!record || record.status === 'NOT_STARTED') {
         continue;
       }
 
@@ -1241,12 +1318,7 @@ export class DocumentsService {
         },
       ];
 
-      await this.repository.touch(context.projectId, dependent, {
-        outdatedReasons: reasons,
-        ...(isDocumentAuthoritative(record.status as DocumentSnapshot['status'])
-          ? { status: 'OUTDATED' }
-          : {}),
-      });
+      await this.repository.touch(context.projectId, dependent, { outdatedReasons: reasons });
 
       await this.audit.record({
         type: 'DOCUMENT_OUTDATED',
@@ -1472,9 +1544,9 @@ export class DocumentsService {
         : null;
 
     const unapproved = DOCUMENT_DEPENDENCIES[type].documents.filter((prerequisite) => {
-      const status = upstream.documentStatuses[prerequisite];
+      const state = upstream.documentStates[prerequisite];
 
-      return status !== undefined && !isDocumentAuthoritative(status);
+      return state !== undefined && !isAuthoritativeState(state);
     });
 
     const blockers = calculateDocumentBlockers({
@@ -1490,22 +1562,18 @@ export class DocumentsService {
     });
 
     /*
-     * An approved document whose inputs moved is reported as OUTDATED without
-     * being rewritten. The status is derived here rather than written by a
-     * background job, so it cannot be stale.
+     * The status is what somebody decided; the currentness is what the world did.
+     * Neither is written over the other. An issued document stays `FINAL` and
+     * says `OUTDATED` beside it — relabelling it would make the history lie about
+     * what was sent, and hiding the staleness would let a reader quote a document
+     * the project has moved past.
      *
-     * An **issued** document is not. It is a record of what was sent, and it did
-     * not stop being that because the requirements moved afterwards — relabelling
-     * it would make the history lie. The reasons are still reported, so a reader
-     * can see the world has moved on; the status stays FINAL.
+     * Currentness is derived on every read rather than written by a background
+     * job, so it cannot itself be stale.
      */
-    const status =
-      reasons.length > 0 && record.status === 'APPROVED'
-        ? 'OUTDATED'
-        : (record.status as DocumentSnapshot['status']);
-
     return toDocumentSnapshot(record, content, {
-      status,
+      status: record.status as DocumentSnapshot['status'],
+      currentness: currentnessFrom(reasons),
       blockers,
       outdatedReasons: reasons,
       coverage,
@@ -1524,52 +1592,19 @@ export class DocumentsService {
     record: DocumentDocument,
     upstream: UpstreamSnapshot,
   ): DocumentSnapshot['outdatedReasons'] {
-    const type = record.type as DocumentType;
-
     return [
-      ...documentOutdatedReasons({
-        type,
-        generatedAgainst: {
-          ...(record.baselineVersion !== undefined
-            ? { baselineVersion: record.baselineVersion }
-            : {}),
-          ...(record.stackVersion !== undefined ? { stackVersion: record.stackVersion } : {}),
-          ...(record.estimateVersion !== undefined
-            ? { estimateVersion: record.estimateVersion }
-            : {}),
-        },
-        current: {
-          ...(upstream.context.baseline
-            ? { baselineVersion: upstream.context.baseline.version }
-            : {}),
-          ...(upstream.context.stack ? { stackVersion: upstream.context.stack.version } : {}),
-          ...(upstream.context.estimate
-            ? { estimateVersion: upstream.context.estimate.version }
-            : {}),
-        },
-        changedPrerequisites: [],
-      }),
-      /*
-       * A baseline that went out of date without changing version. Phase 4 keeps
-       * an approved-then-outdated baseline at the same version until a new
-       * analysis run supersedes it, so a version comparison cannot see this — and
-       * a document built on it is nonetheless no longer current.
-       */
-      ...(!upstream.baselineCurrent &&
-      DOCUMENT_DEPENDENCIES[type].upstream.includes('REQUIREMENT_BASELINE') &&
-      record.baselineVersion !== undefined
-        ? [
-            {
-              cause: 'baseline_changed' as const,
-              summary:
-                'The approved requirements are no longer current — something changed upstream after this document was written.',
-              generatedAgainst: `v${record.baselineVersion}`,
-            },
-          ]
-        : []),
-      /* Prerequisite changes are recorded on the document as they happen. */
-      ...(record.outdatedReasons as unknown as DocumentSnapshot['outdatedReasons']),
-    ];
+      ...documentOutdatedReasonsFor(record, this.authorityVersions(upstream)),
+    ] as DocumentSnapshot['outdatedReasons'];
+  }
+
+  /** Today's authoritative versions, in the shape the currentness check wants. */
+  private authorityVersions(upstream: UpstreamSnapshot): AuthorityVersions {
+    return {
+      ...(upstream.context.baseline ? { baselineVersion: upstream.context.baseline.version } : {}),
+      ...(upstream.context.stack ? { stackVersion: upstream.context.stack.version } : {}),
+      ...(upstream.context.estimate ? { estimateVersion: upstream.context.estimate.version } : {}),
+      baselineCurrent: upstream.baselineCurrent,
+    };
   }
 
   /* --------------------------------------------- targeted regeneration */
@@ -1879,6 +1914,8 @@ export class DocumentsService {
       projectId: context.projectId,
       version: 1,
       status: 'NOT_STARTED',
+      /* Nothing has been written, so nothing can have gone out of date. */
+      currentness: 'CURRENT',
       title: DOCUMENT_LABELS[type],
       prerequisiteVersions: {},
       sections: [],

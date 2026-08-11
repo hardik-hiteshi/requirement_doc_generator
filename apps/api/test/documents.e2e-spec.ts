@@ -845,7 +845,9 @@ describe('Documents (e2e)', () => {
 
       const features = await read(session, 'FEATURE_LISTING');
 
-      expect(features.status).toBe('OUTDATED');
+      /* Still approved — nobody withdrew that. No longer current. */
+      expect(features.status).toBe('APPROVED');
+      expect(features.currentness).toBe('OUTDATED');
       expect(features.outdatedReasons.map((reason) => reason.cause)).toContain(
         'prerequisite_document_changed',
       );
@@ -877,7 +879,8 @@ describe('Documents (e2e)', () => {
 
       const after = await read(session, 'OUR_UNDERSTANDING');
 
-      expect(after.status).toBe('OUTDATED');
+      expect(after.status).toBe('APPROVED');
+      expect(after.currentness).toBe('OUTDATED');
       expect(after.outdatedReasons.map((reason) => reason.cause)).toContain('baseline_changed');
       /* The content is exactly what it was. Nothing was regenerated. */
       expect(after.sections.map((section) => section.body)).toEqual(bodies);
@@ -1648,6 +1651,249 @@ describe('Documents (e2e)', () => {
     }, 240_000);
   });
 
+  /* ------------------------ 7f. issued, and then out of date */
+
+  /**
+   * The combination the single-axis model could not express: a document that is
+   * still the immutable thing that was sent, and is also no longer current.
+   *
+   * Every assertion here is about *not* changing something. An issued document
+   * that goes stale must keep its status, its content, its recorded inputs and its
+   * place in history — the only thing that may change is what we say about it.
+   */
+  describe('an issued document whose project moved on', () => {
+    async function issuedThenChanged(session: FixtureSession): Promise<{
+      readonly issuedVersion: number;
+      readonly bodies: readonly string[];
+      readonly baselineVersion: number | undefined;
+    }> {
+      const approved = await approvedUnderstanding(session);
+
+      const document = (
+        await session.agent
+          .post(DOCUMENT_ROUTES.markFinal('OUR_UNDERSTANDING'))
+          .set('x-csrf-token', session.csrf)
+          .send({ acknowledged: true, expectedVersion: approved.recordVersion })
+          .expect(201)
+      ).body.document as DocumentSnapshot;
+
+      /* 1. Approved and current became issued and current. */
+      expect(document.status).toBe('FINAL');
+      expect(document.currentness).toBe('CURRENT');
+
+      /* 3. Now something upstream moves. */
+      const added = await session.agent
+        .post(REQUIREMENT_ROUTES.textSources)
+        .set('x-csrf-token', session.csrf)
+        .send({ title: 'Late addition', text: 'Timesheets must be exportable as PDF.' })
+        .expect(201);
+
+      await session.agent
+        .post(REQUIREMENT_ROUTES.review(added.body.sourceId))
+        .set('x-csrf-token', session.csrf)
+        .send({ version: added.body.version })
+        .expect(200);
+
+      return {
+        issuedVersion: document.version,
+        bodies: document.sections.map((section) => section.body),
+        baselineVersion: document.baselineVersion,
+      };
+    }
+
+    it('stays issued, stays word for word, and reports itself out of date', async () => {
+      const session = await project();
+      const { bodies, baselineVersion } = await issuedThenChanged(session);
+
+      const after = await read(session, 'OUR_UNDERSTANDING');
+
+      /* 4 & 5. Both axes, each saying its own true thing. */
+      expect(after.status).toBe('FINAL');
+      expect(after.currentness).toBe('OUTDATED');
+
+      /* 6. Byte for byte. */
+      expect(after.sections.map((section) => section.body)).toEqual(bodies);
+
+      /* 7. Written against the baseline it was written against. */
+      expect(after.baselineVersion).toBe(baselineVersion);
+
+      /* 8. And the reason names the authority that moved. */
+      expect(after.outdatedReasons.map((reason) => reason.cause)).toContain('baseline_changed');
+      expect(after.outdatedReasons[0]?.summary).toMatch(/requirements/i);
+    }, 240_000);
+
+    it('refuses every edit, regeneration and approval while it stays issued', async () => {
+      const session = await project();
+      await issuedThenChanged(session);
+
+      const document = await read(session, 'OUR_UNDERSTANDING');
+      const section = document.sections[0]!;
+
+      /* 9. No edits. */
+      await session.agent
+        .put(DOCUMENT_ROUTES.section('OUR_UNDERSTANDING', section.sectionId))
+        .set('x-csrf-token', session.csrf)
+        .send({ body: 'Rewritten after issue.', expectedVersion: document.recordVersion })
+        .expect(409);
+
+      /* 10. No regeneration in place. */
+      await session.agent
+        .post(DOCUMENT_ROUTES.generate('OUR_UNDERSTANDING'))
+        .set('x-csrf-token', session.csrf)
+        .send({ useAi: false, expectedVersion: document.recordVersion })
+        .expect(409);
+
+      /* 10b. And no restoring over it. */
+      await session.agent
+        .post(DOCUMENT_ROUTES.restore('OUR_UNDERSTANDING'))
+        .set('x-csrf-token', session.csrf)
+        .send({ version: 1, expectedVersion: document.recordVersion })
+        .expect(409);
+
+      /* 11. It is a historical record, not an approval candidate. */
+      const refusal = await session.agent
+        .post(DOCUMENT_ROUTES.approve('OUR_UNDERSTANDING'))
+        .set('x-csrf-token', session.csrf)
+        .send({ acknowledged: true, expectedVersion: document.recordVersion })
+        .expect(422);
+
+      expect(JSON.stringify(refusal.body)).toContain('DOCUMENT_UPSTREAM_STALE');
+
+      /* Nor issued a second time. */
+      await session.agent
+        .post(DOCUMENT_ROUTES.markFinal('OUR_UNDERSTANDING'))
+        .set('x-csrf-token', session.csrf)
+        .send({ acknowledged: true, expectedVersion: document.recordVersion })
+        .expect(422);
+
+      /* The content is still exactly what was sent. */
+      expect((await read(session, 'OUR_UNDERSTANDING')).sections[0]?.body).toBe(section.body);
+    }, 240_000);
+
+    it('revises into a new working version built on the project as it stands now', async () => {
+      const session = await project();
+      const { issuedVersion, bodies } = await issuedThenChanged(session);
+
+      const stale = await read(session, 'OUR_UNDERSTANDING');
+
+      /* 12. Explicit — nothing created a version because upstream moved. */
+      expect(stale.version).toBe(issuedVersion);
+
+      const revised = (
+        await session.agent
+          .post(DOCUMENT_ROUTES.revise('OUR_UNDERSTANDING'))
+          .set('x-csrf-token', session.csrf)
+          .send({ reason: 'The requirements changed.', expectedVersion: stale.recordVersion })
+          .expect(201)
+      ).body.document as DocumentSnapshot;
+
+      /*
+       * 13. The working version is stamped against the authority that exists right
+       * now, and it starts with no validation: the text came across unread, so
+       * nothing here claims it matches anything.
+       *
+       * It is still reported out of date, and that is the honest answer — the
+       * requirements changed but nobody has re-approved a baseline yet, so there is
+       * no newer authority to be current against. Revising does not launder
+       * staleness; it opens a version to work in.
+       */
+      expect(revised.version).toBe(issuedVersion + 1);
+      expect(revised.status).toBe('DRAFT');
+      expect(revised.validation).toBeNull();
+      expect(revised.currentness).toBe('OUTDATED');
+      expect(revised.outdatedReasons.map((reason) => reason.cause)).toContain('baseline_changed');
+      /* And it is editable now, which the issued version never was. */
+      await session.agent
+        .put(DOCUMENT_ROUTES.section('OUR_UNDERSTANDING', revised.sections[0]!.sectionId))
+        .set('x-csrf-token', session.csrf)
+        .send({ body: 'Rewritten in the new version.', expectedVersion: revised.recordVersion })
+        .expect(200);
+
+      /* 14. The issued version is still readable, and still says what was sent. */
+      const historical = (
+        await session.agent
+          .get(DOCUMENT_ROUTES.version('OUR_UNDERSTANDING', String(issuedVersion)))
+          .expect(200)
+      ).body.document as DocumentSnapshot;
+
+      expect(historical.status).toBe('FINAL');
+      expect(historical.sections.map((section) => section.body)).toEqual(bodies);
+
+      const versions = (
+        await session.agent.get(DOCUMENT_ROUTES.versions('OUR_UNDERSTANDING')).expect(200)
+      ).body.versions as { version: number; status: string; currentness: string }[];
+
+      const issuedEntry = versions.find((entry) => entry.version === issuedVersion)!;
+      expect(issuedEntry.status).toBe('FINAL');
+      /* The history states it plainly, without touching the document. */
+      expect(issuedEntry.currentness).toBe('OUTDATED');
+    }, 240_000);
+
+    /* 15 & 16. Currentness travels down the graph; nothing is regenerated. */
+    it('takes the document built on it out of date too, and regenerates nothing', async () => {
+      const session = await project();
+
+      await approvedUnderstanding(session);
+      await generate(session, 'FEATURE_LISTING');
+      await validate(session, 'FEATURE_LISTING');
+      const features = await approve(session, 'FEATURE_LISTING');
+      const rows = features.features.map((row) => `${row.module}|${row.description}`);
+      const hours = features.features.map((row) => row.totalHours);
+
+      expect(features.currentness).toBe('CURRENT');
+
+      /* Reopen the document it is built on: the prerequisite has moved. */
+      const understanding = await read(session, 'OUR_UNDERSTANDING');
+
+      await session.agent
+        .post(DOCUMENT_ROUTES.reopen('OUR_UNDERSTANDING'))
+        .set('x-csrf-token', session.csrf)
+        .send({ reason: 'Changes wanted.', expectedVersion: understanding.recordVersion })
+        .expect(201);
+
+      const after = await read(session, 'FEATURE_LISTING');
+
+      expect(after.status).toBe('APPROVED');
+      expect(after.currentness).toBe('OUTDATED');
+      expect(after.outdatedReasons.map((reason) => reason.cause)).toContain(
+        'prerequisite_document_changed',
+      );
+
+      /* 16. Not one row was rewritten, and not one hours figure moved. */
+      expect(after.features.map((row) => `${row.module}|${row.description}`)).toEqual(rows);
+      expect(after.features.map((row) => row.totalHours)).toEqual(hours);
+      expect(after.version).toBe(features.version);
+
+      /* And it stays out of date until it is explicitly dealt with. */
+      await session.agent
+        .post(DOCUMENT_ROUTES.approve('FEATURE_LISTING'))
+        .set('x-csrf-token', session.csrf)
+        .send({ acknowledged: true, expectedVersion: after.recordVersion })
+        .expect(422);
+
+      /*
+       * Re-approving the prerequisite is not enough on its own. The Feature Listing
+       * was written against the version before, and nobody has looked at it since —
+       * it stays out of date until it is regenerated against the new one.
+       */
+      await validate(session, 'OUR_UNDERSTANDING');
+      await approve(session, 'OUR_UNDERSTANDING');
+
+      const stillStale = await read(session, 'FEATURE_LISTING');
+      expect(stillStale.currentness).toBe('OUTDATED');
+      expect(stillStale.features.map((row) => row.totalHours)).toEqual(hours);
+
+      /* Regenerating against it is what makes it current again. */
+      await generate(session, 'FEATURE_LISTING');
+
+      const caughtUp = await read(session, 'FEATURE_LISTING');
+      expect(caughtUp.currentness).toBe('CURRENT');
+      expect(caughtUp.status).toBe('DRAFT');
+      /* The hours are still the estimate's — catching up changed no figure. */
+      expect(caughtUp.features.map((row) => row.totalHours)).toEqual(hours);
+    }, 240_000);
+  });
+
   /* -------------------------------- 7e. adding a source during review */
 
   describe('a supporting source added during review', () => {
@@ -1680,7 +1926,8 @@ describe('Documents (e2e)', () => {
       expect(baseline.status).toBe('outdated');
 
       const outdated = await read(session, 'OUR_UNDERSTANDING');
-      expect(outdated.status).toBe('OUTDATED');
+      expect(outdated.status).toBe('APPROVED');
+      expect(outdated.currentness).toBe('OUTDATED');
       expect(outdated.sections.map((section) => section.body)).toEqual(bodies);
 
       /* 7. And it cannot be approved against that. */

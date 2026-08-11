@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { documentStatusSchema } from './document-status.contract';
+import { documentCurrentnessSchema, documentStatusSchema } from './document-status.contract';
 import { documentTypeSchema } from './document-type.contract';
 import { documentSectionSchema } from './document-section.contract';
 import { documentValidationSchema } from './document-validation.contract';
@@ -74,6 +74,15 @@ export const documentSnapshotSchema = z
     /** Monotonic per project and type. */
     version: z.number().int().positive(),
     status: documentStatusSchema,
+    /**
+     * Whether this content still matches the project.
+     *
+     * Derived on every read from the upstream versions below, never stored as
+     * truth. `FINAL` + `OUTDATED` is a legitimate and important combination: the
+     * immutable version that was issued, and the fact that the project has moved
+     * since. `outdatedReasons` says what moved.
+     */
+    currentness: documentCurrentnessSchema,
     title: z.string().min(1).max(300),
 
     /* Upstream authority, as it stood when this content was written. */
@@ -141,7 +150,7 @@ export const documentSummarySchema = z
       .nullable(),
     implemented: z.boolean(),
     version: z.number().int().nonnegative(),
-    outdated: z.boolean(),
+    currentness: documentCurrentnessSchema,
     blockerCount: z.number().int().nonnegative(),
     validationSeverity: z.string().max(20).nullable(),
     updatedAt: z.string().datetime().optional(),
@@ -157,6 +166,14 @@ export const documentVersionSummarySchema = z
   .object({
     version: z.number().int().positive(),
     status: documentStatusSchema,
+    /**
+     * Whether that version's inputs are still the current ones.
+     *
+     * Computed per version from the upstream versions stored with it, which is
+     * what makes "the version we issued in March is no longer current" a fact the
+     * history can state without anybody editing the March document.
+     */
+    currentness: documentCurrentnessSchema,
     createdAt: z.string().datetime(),
     approvedAt: z.string().datetime().optional(),
     finalAt: z.string().datetime().optional(),

@@ -8,10 +8,13 @@ import {
   correctionLimits,
 } from './document-correction.contract';
 import {
+  currentnessFrom,
+  documentBefore,
   documentOutdatedReasons,
   DOCUMENT_DEPENDENCIES,
   documentsDependingOn,
   documentsDependingOnUpstream,
+  downstreamDocuments,
   lockFor,
 } from './document-dependency';
 import {
@@ -22,14 +25,21 @@ import {
 } from './document-section.contract';
 import { diffDocuments } from './document-snapshot.contract';
 import {
+  canApproveDocument,
   canGenerateDocument,
+  canIssueDocument,
   canTransitionDocument,
+  documentStateLabel,
+  DOCUMENT_CURRENTNESS,
   DOCUMENT_STATUSES,
   DOCUMENT_TRANSITIONS,
+  isAuthoritativeState,
   isDocumentAuthoritative,
   isDocumentEditable,
+  outdatedExplanation,
 } from './document-status.contract';
 import {
+  documentTypeSchema,
   DOCUMENT_LABELS,
   DOCUMENT_ORDER,
   DOCUMENT_SHAPE_BY_TYPE,
@@ -129,36 +139,209 @@ describe('document status transitions', () => {
     expect(isDocumentAuthoritative('APPROVED')).toBe(true);
     expect(isDocumentAuthoritative('FINAL')).toBe(true);
     expect(isDocumentAuthoritative('DRAFT')).toBe(false);
-    expect(isDocumentAuthoritative('OUTDATED')).toBe(false);
   });
 
   it('runs generation only from a settled state', () => {
     expect(canGenerateDocument('NOT_STARTED')).toBe(true);
     expect(canGenerateDocument('DRAFT')).toBe(true);
-    expect(canGenerateDocument('OUTDATED')).toBe(true);
     expect(canGenerateDocument('FAILED')).toBe(true);
+    /*
+     * An approved document may be regenerated. That is what the screen tells
+     * somebody to do when its inputs have moved, and refusing it there would
+     * leave them with advice they cannot follow.
+     */
+    expect(canGenerateDocument('APPROVED')).toBe(true);
     /* One run at a time, and never over an issued document. */
     expect(canGenerateDocument('GENERATING')).toBe(false);
     expect(canGenerateDocument('QUEUED')).toBe(false);
     expect(canGenerateDocument('FINAL')).toBe(false);
-    expect(canGenerateDocument('APPROVED')).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------- currentness */
+
+describe('lifecycle status and currentness as separate axes', () => {
+  it('has no OUTDATED status, because outdatedness is not a lifecycle state', () => {
+    expect(DOCUMENT_STATUSES).not.toContain('OUTDATED');
+    expect(DOCUMENT_STATUSES).toHaveLength(8);
+    expect(DOCUMENT_CURRENTNESS).toEqual(['CURRENT', 'OUTDATED']);
   });
 
-  it('makes re-approving stale content take a deliberate step', () => {
-    /* OUTDATED cannot go straight back to APPROVED. */
-    expect(canTransitionDocument('OUTDATED', 'APPROVED')).toBe(false);
-    expect(canTransitionDocument('OUTDATED', 'DRAFT')).toBe(true);
-    expect(canTransitionDocument('DRAFT', 'APPROVED')).toBe(true);
+  /* The combination the old single-axis model could not express. */
+  it('lets an issued document be out of date while staying issued', () => {
+    const state = { status: 'FINAL', currentness: 'OUTDATED' } as const;
+
+    expect(documentStateLabel(state)).toBe('Issued — out of date');
+    expect(outdatedExplanation(state)).toContain('changed since this version was issued');
+    /* Immutable either way. */
+    expect(isDocumentEditable(state.status)).toBe(false);
+    expect(canTransitionDocument('FINAL', 'DRAFT')).toBe(false);
   });
 
-  it('lets an approved document go out of date without being edited', () => {
-    expect(canTransitionDocument('APPROVED', 'OUTDATED')).toBe(true);
+  it('lets an approved document be out of date, and still be edited', () => {
+    const state = { status: 'APPROVED', currentness: 'OUTDATED' } as const;
+
+    expect(documentStateLabel(state)).toBe('Approved — out of date');
+    expect(isDocumentEditable(state.status)).toBe(true);
+    expect(canGenerateDocument(state.status)).toBe(true);
+  });
+
+  it('says nothing extra when a document is current', () => {
+    expect(documentStateLabel({ status: 'FINAL', currentness: 'CURRENT' })).toBe('Issued');
+    expect(outdatedExplanation({ status: 'FINAL', currentness: 'CURRENT' })).toBeNull();
+  });
+
+  it('refuses to approve or issue anything that is out of date', () => {
+    expect(canApproveDocument({ status: 'DRAFT', currentness: 'CURRENT' })).toBe(true);
+    expect(canApproveDocument({ status: 'DRAFT', currentness: 'OUTDATED' })).toBe(false);
+    expect(canIssueDocument({ status: 'APPROVED', currentness: 'CURRENT' })).toBe(true);
+    expect(canIssueDocument({ status: 'APPROVED', currentness: 'OUTDATED' })).toBe(false);
+    /* An issued document was never a candidate for issuing again. */
+    expect(canIssueDocument({ status: 'FINAL', currentness: 'OUTDATED' })).toBe(false);
+    expect(canApproveDocument({ status: 'FINAL', currentness: 'OUTDATED' })).toBe(false);
+  });
+
+  it('will not build a document on a prerequisite that is approved but stale', () => {
+    expect(isAuthoritativeState({ status: 'APPROVED', currentness: 'CURRENT' })).toBe(true);
+    expect(isAuthoritativeState({ status: 'FINAL', currentness: 'CURRENT' })).toBe(true);
+    expect(isAuthoritativeState({ status: 'APPROVED', currentness: 'OUTDATED' })).toBe(false);
+    expect(isAuthoritativeState({ status: 'FINAL', currentness: 'OUTDATED' })).toBe(false);
+  });
+
+  it('derives currentness from the reasons, in one place', () => {
+    expect(currentnessFrom([])).toBe('CURRENT');
+    expect(
+      currentnessFrom([{ cause: 'baseline_changed', summary: 'The requirements changed.' }]),
+    ).toBe('OUTDATED');
+  });
+});
+
+/* ------------------------------------------------ the canonical seven */
+
+describe('the canonical document workflow', () => {
+  /*
+   * The product's document sequence, fixed. This test exists because the list is
+   * the one thing in the engine that cannot be inferred from anything else: get a
+   * type wrong and every downstream phase inherits it.
+   */
+  it('is exactly the seven product documents, in order', () => {
+    expect(DOCUMENT_TYPES).toEqual([
+      'OUR_UNDERSTANDING',
+      'FEATURE_LISTING',
+      'ACCEPTANCE_CRITERIA',
+      'ASSUMPTIONS',
+      'STATEMENT_OF_WORK',
+      'WORK_BREAKDOWN_STRUCTURE',
+      'CLIENT_DEPENDENCY_SHEET',
+    ]);
+    expect(DOCUMENT_TYPES).toHaveLength(7);
+  });
+
+  it('has no slot for a document that is not one of the seven', () => {
+    for (const absent of [
+      'TEST_CASES',
+      'PROJECT_PLAN',
+      'TECHNICAL_SPECIFICATION',
+      'DEPLOYMENT_PLAN',
+    ]) {
+      expect(DOCUMENT_TYPES as readonly string[]).not.toContain(absent);
+      expect(Object.keys(DOCUMENT_DEPENDENCIES)).not.toContain(absent);
+      expect(Object.keys(DOCUMENT_LABELS)).not.toContain(absent);
+      expect(documentTypeSchema.safeParse(absent).success).toBe(false);
+    }
+  });
+
+  it('names them as a reader would see them', () => {
+    expect(DOCUMENT_LABELS).toEqual({
+      OUR_UNDERSTANDING: 'Our Understanding',
+      FEATURE_LISTING: 'Feature Listing',
+      ACCEPTANCE_CRITERIA: 'Acceptance Criteria',
+      ASSUMPTIONS: 'Assumptions',
+      STATEMENT_OF_WORK: 'Statement of Work',
+      WORK_BREAKDOWN_STRUCTURE: 'Work Breakdown Structure',
+      CLIENT_DEPENDENCY_SHEET: 'Client Dependency Sheet',
+    });
+  });
+
+  it('orders them one to seven, with no gaps and no ties', () => {
+    expect(DOCUMENT_TYPES.map((type) => DOCUMENT_ORDER[type])).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it('implements the first two in this phase, and no others', () => {
+    expect(IMPLEMENTED_DOCUMENT_TYPES).toEqual(['OUR_UNDERSTANDING', 'FEATURE_LISTING']);
+
+    for (const type of DOCUMENT_TYPES) {
+      expect(isImplementedDocumentType(type)).toBe(DOCUMENT_ORDER[type] <= 2);
+    }
+  });
+
+  it('reports each unimplemented document as unavailable rather than broken', () => {
+    for (const type of DOCUMENT_TYPES.filter((candidate) => DOCUMENT_ORDER[candidate] > 2)) {
+      /* Every input present: the only reason it is locked is that it does not exist yet. */
+      const lock = lockFor(
+        type,
+        {
+          availableUpstream: ['REQUIREMENT_BASELINE', 'TECHNOLOGY_STACK', 'ESTIMATION_SNAPSHOT'],
+          documentStates: {},
+        },
+        [...IMPLEMENTED_DOCUMENT_TYPES],
+      );
+
+      expect(lock?.reason).toBe('not_implemented');
+      expect(lock?.summary).toBe('This document is not available yet.');
+    }
   });
 });
 
 /* ----------------------------------------------------- the dependency graph */
 
 describe('the document dependency graph', () => {
+  /* Document N+1 is locked until document N is approved. */
+  it('chains every document to the one before it', () => {
+    for (const type of DOCUMENT_TYPES) {
+      const previous = documentBefore(type);
+
+      if (previous === null) {
+        expect(type).toBe('OUR_UNDERSTANDING');
+        expect(DOCUMENT_DEPENDENCIES[type].documents).toEqual([]);
+        continue;
+      }
+
+      expect(DOCUMENT_DEPENDENCIES[type].documents).toContain(previous);
+    }
+  });
+
+  it('records the extra direct edges as well as the sequential one', () => {
+    /* The sheet quotes the Assumptions directly, not only through the WBS. */
+    expect(DOCUMENT_DEPENDENCIES.CLIENT_DEPENDENCY_SHEET.documents).toContain('ASSUMPTIONS');
+    expect(DOCUMENT_DEPENDENCIES.CLIENT_DEPENDENCY_SHEET.documents).toContain(
+      'WORK_BREAKDOWN_STRUCTURE',
+    );
+
+    /* The WBS is planned work, so it needs all three upstream artifacts. */
+    expect(DOCUMENT_DEPENDENCIES.WORK_BREAKDOWN_STRUCTURE.upstream).toEqual([
+      'REQUIREMENT_BASELINE',
+      'TECHNOLOGY_STACK',
+      'ESTIMATION_SNAPSHOT',
+    ]);
+  });
+
+  it('follows the chain all the way down when something changes at the top', () => {
+    /* A baseline change under Understanding reaches the last document. */
+    expect(downstreamDocuments('OUR_UNDERSTANDING')).toEqual([
+      'FEATURE_LISTING',
+      'ACCEPTANCE_CRITERIA',
+      'ASSUMPTIONS',
+      'STATEMENT_OF_WORK',
+      'WORK_BREAKDOWN_STRUCTURE',
+      'CLIENT_DEPENDENCY_SHEET',
+    ]);
+
+    expect(downstreamDocuments('WORK_BREAKDOWN_STRUCTURE')).toEqual(['CLIENT_DEPENDENCY_SHEET']);
+    expect(downstreamDocuments('CLIENT_DEPENDENCY_SHEET')).toEqual([]);
+    /* Nothing upstream of a document is downstream of it. */
+    expect(downstreamDocuments('FEATURE_LISTING')).not.toContain('OUR_UNDERSTANDING');
+  });
   it('builds Understanding on the baseline alone', () => {
     expect(DOCUMENT_DEPENDENCIES.OUR_UNDERSTANDING).toEqual({
       upstream: ['REQUIREMENT_BASELINE'],
@@ -207,7 +390,7 @@ describe('locking', () => {
     expect(
       lockFor(
         'OUR_UNDERSTANDING',
-        { availableUpstream: ['REQUIREMENT_BASELINE'], documentStatuses: {} },
+        { availableUpstream: ['REQUIREMENT_BASELINE'], documentStates: {} },
         implemented,
       ),
     ).toBeNull();
@@ -216,7 +399,7 @@ describe('locking', () => {
   it('locks Understanding without a baseline, and says which input is missing', () => {
     const lock = lockFor(
       'OUR_UNDERSTANDING',
-      { availableUpstream: [], documentStatuses: {} },
+      { availableUpstream: [], documentStates: {} },
       implemented,
     );
 
@@ -232,7 +415,9 @@ describe('locking', () => {
         'TECHNOLOGY_STACK',
         'ESTIMATION_SNAPSHOT',
       ] as const,
-      documentStatuses: { OUR_UNDERSTANDING: 'DRAFT' as const },
+      documentStates: {
+        OUR_UNDERSTANDING: { status: 'DRAFT', currentness: 'CURRENT' } as const,
+      },
     };
 
     expect(lockFor('FEATURE_LISTING', state, implemented)?.reason).toBe('prerequisite_document');
@@ -240,16 +425,40 @@ describe('locking', () => {
     expect(
       lockFor(
         'FEATURE_LISTING',
-        { ...state, documentStatuses: { OUR_UNDERSTANDING: 'APPROVED' } },
+        {
+          ...state,
+          documentStates: {
+            OUR_UNDERSTANDING: { status: 'APPROVED', currentness: 'CURRENT' },
+          },
+        },
         implemented,
       ),
     ).toBeNull();
   });
 
+  /*
+   * Staleness must not travel down the chain unannounced. An Understanding whose
+   * baseline moved is still approved, but it is not a foundation.
+   */
+  it('locks Feature Listing again when Understanding is approved but stale', () => {
+    expect(
+      lockFor(
+        'FEATURE_LISTING',
+        {
+          availableUpstream: ['REQUIREMENT_BASELINE', 'TECHNOLOGY_STACK', 'ESTIMATION_SNAPSHOT'],
+          documentStates: {
+            OUR_UNDERSTANDING: { status: 'APPROVED', currentness: 'OUTDATED' },
+          },
+        },
+        implemented,
+      )?.reason,
+    ).toBe('prerequisite_document');
+  });
+
   it('reports an unimplemented document as unavailable before anything else', () => {
     const lock = lockFor(
       'STATEMENT_OF_WORK',
-      { availableUpstream: [], documentStatuses: {} },
+      { availableUpstream: [], documentStates: {} },
       implemented,
     );
 

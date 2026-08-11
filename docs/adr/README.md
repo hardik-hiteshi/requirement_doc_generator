@@ -68,3 +68,4 @@ think is part of the value.
 | [0032](0032-isolating-pdf-extraction-tests.md)         | PDF extraction tests get a process of their own                     | Accepted |
 | [0033](0033-shared-document-engine.md)                 | One document engine, seven documents                                | Accepted |
 | [0034](0034-document-authority.md)                     | A document quotes its inputs; it never decides them                 | Accepted |
+| [0035](0035-document-status-and-currentness.md)        | Lifecycle status and currentness are two axes                       | Accepted |

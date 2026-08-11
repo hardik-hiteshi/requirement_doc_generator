@@ -5,6 +5,7 @@ import {
   type DocumentRun,
   type DocumentSection,
   type DocumentSnapshot,
+  type DocumentCurrentness,
   type DocumentStatus,
   type DocumentType,
   type DocumentValidation,
@@ -45,6 +46,7 @@ export interface StoredContent {
 
 export interface AssembledExtras {
   readonly status?: DocumentStatus;
+  readonly currentness?: DocumentCurrentness;
   readonly blockers?: readonly DocumentBlocker[];
   readonly outdatedReasons?: DocumentSnapshot['outdatedReasons'];
   readonly coverage?: FeatureCoverage | null;
@@ -140,6 +142,11 @@ export function toDocumentSnapshot(
     projectId: record.projectId,
     version: content.version,
     status: extras.status ?? content.status,
+    /*
+     * Defaulted to CURRENT rather than derived here: this mapper has no upstream
+     * state to compare against. Every caller that has one passes it.
+     */
+    currentness: extras.currentness ?? 'CURRENT',
     title: record.title,
     ...(record.baselineId ? { baselineId: record.baselineId } : {}),
     ...(record.baselineVersion !== undefined ? { baselineVersion: record.baselineVersion } : {}),
@@ -175,13 +182,24 @@ export function toDocumentSnapshot(
   };
 }
 
-export function toVersionSummary(record: DocumentVersionDocument): DocumentVersionSummary {
+/**
+ * A stored version, with its currentness judged against today's upstream.
+ *
+ * The version's own recorded upstream versions are what it is judged on, so the
+ * history can say "the version we issued in March is no longer current" without
+ * anybody touching the March document.
+ */
+export function toVersionSummary(
+  record: DocumentVersionDocument,
+  currentness: DocumentCurrentness = 'CURRENT',
+): DocumentVersionSummary {
   const sections = record.sections as unknown as DocumentSection[];
   const features = record.features as unknown as FeatureRow[];
 
   return {
     version: record.version,
     status: record.status as DocumentStatus,
+    currentness,
     createdAt: record.createdAt.toISOString(),
     ...(record.approvedAt ? { approvedAt: record.approvedAt.toISOString() } : {}),
     ...(record.finalAt ? { finalAt: record.finalAt.toISOString() } : {}),
