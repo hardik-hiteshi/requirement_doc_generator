@@ -1,0 +1,622 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Put,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiCreatedResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
+import {
+  acknowledgeFindingSchema,
+  applyCorrectionSchema,
+  approveDocumentSchema,
+  attemptsEffortEdit,
+  DOCUMENT_ERROR_CODES,
+  DOCUMENT_TYPES,
+  documentTypeSchema,
+  generateDocumentSchema,
+  markFinalSchema,
+  regenerateSectionSchema,
+  reopenDocumentSchema,
+  resolveFeatureProposalSchema,
+  resolveSectionProposalSchema,
+  restoreVersionSchema,
+  updateFeatureRowSchema,
+  updateSectionSchema,
+  type AcknowledgeFinding,
+  type ApplyCorrection,
+  type ApproveDocument,
+  type CorrectionInstruction,
+  type DocumentDiff,
+  type DocumentRun,
+  type DocumentSnapshot,
+  type DocumentSummary,
+  type DocumentType,
+  type DocumentVersionSummary,
+  type FeatureRow,
+  type GenerateDocument,
+  type MarkFinal,
+  type RegenerateSection,
+  type ReopenDocument,
+  type ResolveFeatureProposal,
+  type ResolveSectionProposal,
+  type RestoreVersion,
+  type UpdateSection,
+} from '@wdrg/contracts';
+import { z } from 'zod';
+
+import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
+import {
+  ProjectSessionGuard,
+  type AuthenticatedRequest,
+} from '../project-access/project-session.guard';
+import { DocumentError } from './documents.errors';
+import { DocumentsAiService } from './documents-ai.service';
+import { DocumentsRepository } from './documents.repository';
+import { DocumentsService, type DocumentContext } from './documents.service';
+import { toDocumentRun } from './documents.mapper';
+
+const excludeRequirementSchema = z
+  .object({
+    requirementId: z.string().min(1).max(64),
+    reason: z.string().min(1).max(500),
+    expectedVersion: z.number().int().nonnegative(),
+  })
+  .strict();
+
+type ExcludeRequirement = z.infer<typeof excludeRequirementSchema>;
+
+const regenerateModuleSchema = z
+  .object({
+    module: z.string().min(1).max(200),
+    instruction: z.string().max(2_000).optional(),
+    useAi: z.boolean(),
+    expectedVersion: z.number().int().nonnegative(),
+  })
+  .strict();
+
+type RegenerateModule = z.infer<typeof regenerateModuleSchema>;
+
+/**
+ * The documents for the project the caller's session is bound to.
+ *
+ * One controller for every document type, with the type in the path. Seven
+ * documents cannot mean seven controllers — and because the type is validated
+ * against the contract's enum, an unimplemented one is refused with a message
+ * saying so rather than reaching a service that has no composer for it.
+ *
+ * The project comes from the verified session and never from the request, so
+ * every id in a path — a section, a feature, a version — is scoped by that
+ * session. An id belonging to another project resolves to "not found", the same
+ * answer as one that never existed.
+ *
+ * Every mutating route takes an `expectedVersion`. A document open in two tabs is
+ * ordinary, and a lost update here means somebody's paragraph quietly vanishing.
+ */
+@ApiTags('documents')
+@ApiUnauthorizedResponse({ description: 'No valid project session.' })
+@Controller({ path: 'projects/current/documents', version: '1' })
+@UseGuards(ProjectSessionGuard)
+export class DocumentsController {
+  constructor(
+    private readonly documents: DocumentsService,
+    private readonly ai: DocumentsAiService,
+    private readonly repository: DocumentsRepository,
+  ) {}
+
+  @Get()
+  @ApiOperation({
+    summary: 'Every document and its state',
+    description:
+      'All seven controlled documents, in order, with their status and — where they are not yet available — why. The five that Phase 7 does not implement are reported as unavailable rather than hidden.',
+  })
+  @ApiOkResponse({ description: 'The document list.' })
+  async list(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ documents: readonly DocumentSummary[] }> {
+    return { documents: await this.documents.list(context(request)) };
+  }
+
+  @Get(':type')
+  @ApiOperation({ summary: 'One document, with its content and assessment' })
+  @ApiParam({ name: 'type', enum: DOCUMENT_TYPES })
+  @ApiOkResponse({ description: 'The document.' })
+  @ApiNotFoundResponse({ description: 'No document of that type.' })
+  async read(
+    @Param('type') type: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return { document: await this.documents.read(context(request), documentType(type)) };
+  }
+
+  @Post(':type/generate')
+  @ApiOperation({
+    summary: 'Write the document, or write it again',
+    description:
+      'Runs the deterministic composition, and the model on top of it when `useAi` is true. Sections a person edited are carried forward and the new text is offered beside them as a proposal; nothing a person wrote is replaced without their decision.',
+  })
+  @ApiCreatedResponse({ description: 'The document as written.' })
+  async generate(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(generateDocumentSchema)) body: GenerateDocument,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return { document: await this.ai.generate(context(request), documentType(type), body) };
+  }
+
+  @Get(':type/versions')
+  @ApiOperation({ summary: 'Every version of this document, newest first' })
+  @ApiOkResponse({ description: 'The version list.' })
+  async versions(
+    @Param('type') type: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ versions: readonly DocumentVersionSummary[] }> {
+    return { versions: await this.documents.listVersions(context(request), documentType(type)) };
+  }
+
+  @Get(':type/versions/:version')
+  @ApiOperation({ summary: 'One earlier version, exactly as it stood' })
+  @ApiOkResponse({ description: 'The stored version.' })
+  async version(
+    @Param('type') type: string,
+    @Param('version') version: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.version(
+        context(request),
+        documentType(type),
+        positiveInteger(version),
+      ),
+    };
+  }
+
+  @Get(':type/compare')
+  @ApiOperation({ summary: 'What changed between two versions' })
+  @ApiQuery({ name: 'left', required: true })
+  @ApiQuery({ name: 'right', required: true })
+  @ApiOkResponse({ description: 'The difference, by section or feature.' })
+  async compare(
+    @Param('type') type: string,
+    @Query('left') left: string,
+    @Query('right') right: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ diff: DocumentDiff }> {
+    return {
+      diff: await this.documents.compare(
+        context(request),
+        documentType(type),
+        positiveInteger(left),
+        positiveInteger(right),
+      ),
+    };
+  }
+
+  @Post(':type/restore')
+  @ApiOperation({
+    summary: 'Bring an earlier version back',
+    description:
+      'Copies the chosen version forward as a new one. The version it came from is untouched — history here cannot be rewound.',
+  })
+  @ApiCreatedResponse({ description: 'The restored document, as a new version.' })
+  async restore(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(restoreVersionSchema)) body: RestoreVersion,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return { document: await this.documents.restore(context(request), documentType(type), body) };
+  }
+
+  @Put(':type/sections/:sectionId')
+  @ApiOperation({
+    summary: 'Edit a section',
+    description:
+      'From here the section is yours: regeneration will offer a rewrite beside it rather than replacing it.',
+  })
+  @ApiOkResponse({ description: 'The document with the edit applied.' })
+  async updateSection(
+    @Param('type') type: string,
+    @Param('sectionId') sectionId: string,
+    @Body(new ZodValidationPipe(updateSectionSchema)) body: UpdateSection,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.updateSection(
+        context(request),
+        documentType(type),
+        sectionId,
+        body,
+      ),
+    };
+  }
+
+  @Post(':type/sections/:sectionId/regenerate')
+  @ApiOperation({
+    summary: 'Rewrite one section',
+    description:
+      'A correction instruction is treated as a request about wording. It travels as evidence rather than as an instruction, and it cannot widen scope, name a technology or change a number.',
+  })
+  @ApiCreatedResponse({ description: 'The document, with the section rewritten or proposed.' })
+  async regenerateSection(
+    @Param('type') type: string,
+    @Param('sectionId') sectionId: string,
+    @Body(new ZodValidationPipe(regenerateSectionSchema)) body: RegenerateSection,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.ai.regenerateSection(
+        context(request),
+        documentType(type),
+        sectionId,
+        body.expectedVersion,
+        body.useAi,
+        body.instruction,
+      ),
+    };
+  }
+
+  @Post(':type/sections/:sectionId/proposal')
+  @ApiOperation({
+    summary: 'Decide what happens to a suggested rewrite',
+    description: 'Keep what you wrote, use the new version, or start from it and edit.',
+  })
+  @ApiCreatedResponse({ description: 'The document with the decision applied.' })
+  async resolveProposal(
+    @Param('type') type: string,
+    @Param('sectionId') sectionId: string,
+    @Body(new ZodValidationPipe(resolveSectionProposalSchema)) body: ResolveSectionProposal,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.resolveProposal(
+        context(request),
+        documentType(type),
+        sectionId,
+        body,
+      ),
+    };
+  }
+
+  @Post(':type/corrections')
+  @ApiOperation({
+    summary: 'Apply a correction instruction',
+    description:
+      'What you want different, and where — the whole document, one section, one feature or one module. Treated as a request about wording: it travels as evidence rather than as an instruction, and it cannot add scope, change a technology or change an hours figure. The request is recorded with what it targeted and what came of it.',
+  })
+  @ApiCreatedResponse({ description: 'The document, and anything the correction could not do.' })
+  async applyCorrection(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(applyCorrectionSchema)) body: ApplyCorrection,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot; limits: readonly string[] }> {
+    const result = await this.ai.applyCorrection(context(request), documentType(type), body);
+
+    return { document: result.snapshot, limits: result.limits };
+  }
+
+  @Get(':type/corrections')
+  @ApiOperation({ summary: 'Every correction asked for on this document, newest first' })
+  @ApiOkResponse({ description: 'The correction history.' })
+  async corrections(
+    @Param('type') type: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ corrections: readonly CorrectionInstruction[] }> {
+    return {
+      corrections: await this.documents.listCorrections(context(request), documentType(type)),
+    };
+  }
+
+  @Post(':type/features/:featureId/regenerate')
+  @ApiOperation({
+    summary: 'Rewrite one feature row’s wording',
+    description:
+      'Every other row is carried forward unchanged. Hours are never touched — they come from the estimate you approved, and the generation schema has nowhere to put one.',
+  })
+  @ApiCreatedResponse({ description: 'The document, with that row rewritten or proposed.' })
+  async regenerateFeature(
+    @Param('type') type: string,
+    @Param('featureId') featureId: string,
+    @Body(new ZodValidationPipe(regenerateSectionSchema)) body: RegenerateSection,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    const result = await this.ai.regenerateFeatures(
+      context(request),
+      documentType(type),
+      { featureIds: [featureId] },
+      body.expectedVersion,
+      body.useAi,
+      body.instruction,
+    );
+
+    return { document: result.snapshot };
+  }
+
+  @Post(':type/features/regenerate-module')
+  @ApiOperation({
+    summary: 'Rewrite every row in one module',
+    description: 'Rows in other modules are carried forward unchanged, hours included.',
+  })
+  @ApiCreatedResponse({ description: 'The document, with that module rewritten or proposed.' })
+  async regenerateModule(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(regenerateModuleSchema)) body: RegenerateModule,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    const result = await this.ai.regenerateFeatures(
+      context(request),
+      documentType(type),
+      { module: body.module },
+      body.expectedVersion,
+      body.useAi,
+      body.instruction,
+    );
+
+    return { document: result.snapshot };
+  }
+
+  @Post(':type/features/:featureId/proposal')
+  @ApiOperation({ summary: 'Decide what happens to a row’s suggested rewrite' })
+  @ApiCreatedResponse({ description: 'The document with the decision applied.' })
+  async resolveFeatureProposal(
+    @Param('type') type: string,
+    @Param('featureId') featureId: string,
+    @Body(new ZodValidationPipe(resolveFeatureProposalSchema)) body: ResolveFeatureProposal,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.resolveFeatureProposal(
+        context(request),
+        documentType(type),
+        featureId,
+        body,
+      ),
+    };
+  }
+
+  @Get(':type/features')
+  @ApiOperation({ summary: 'The feature rows' })
+  @ApiOkResponse({ description: 'The rows, in display order.' })
+  async features(
+    @Param('type') type: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ features: readonly FeatureRow[] }> {
+    return { features: await this.documents.listFeatures(context(request), documentType(type)) };
+  }
+
+  @Patch(':type/features/:featureId')
+  @ApiOperation({
+    summary: 'Edit a feature row',
+    description:
+      'Descriptive fields only. Hours come from the estimate you approved, so they are changed there — an attempt to change one here is refused with a pointer to the estimation step.',
+  })
+  @ApiOkResponse({ description: 'The document with the edit applied.' })
+  async updateFeature(
+    @Param('type') type: string,
+    @Param('featureId') featureId: string,
+    @Body() raw: Record<string, unknown>,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    /*
+     * Checked before validation, so the user gets the message that says where
+     * hours are changed rather than "unrecognised key: effort". The strict schema
+     * would refuse it either way; this makes the refusal useful.
+     */
+    if (attemptsEffortEdit(raw)) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.EFFORT_NOT_EDITABLE_HERE, 422);
+    }
+
+    const body = updateFeatureRowSchema.parse(raw);
+
+    return {
+      document: await this.documents.updateFeature(
+        context(request),
+        documentType(type),
+        featureId,
+        body,
+      ),
+    };
+  }
+
+  @Post(':type/exclusions')
+  @ApiOperation({
+    summary: 'Record that a requirement is deliberately not in this document',
+    description:
+      'A disposition rather than an absence: coverage counts it as handled, and the reason is kept with it.',
+  })
+  @ApiCreatedResponse({ description: 'The document with the exclusion recorded.' })
+  async exclude(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(excludeRequirementSchema)) body: ExcludeRequirement,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.excludeRequirement(
+        context(request),
+        documentType(type),
+        body.requirementId,
+        body.reason,
+        body.expectedVersion,
+      ),
+    };
+  }
+
+  @Get(':type/csv')
+  @ApiOperation({
+    summary: 'The strict eight-column CSV',
+    description:
+      'Exactly the schema the Feature Listing export requires: eight columns in a fixed order, every value quoted, additional roles named in the last column.',
+  })
+  @ApiOkResponse({ description: 'The serialised sheet.' })
+  async csv(
+    @Param('type') type: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ csv: string }> {
+    return { csv: await this.documents.csv(context(request), documentType(type)) };
+  }
+
+  @Post(':type/validate')
+  @ApiOperation({
+    summary: 'Check the document against what it claims to be based on',
+    description:
+      'Deterministic checks are authoritative. A model may add findings a checker cannot see, and can never clear or downgrade one.',
+  })
+  @ApiCreatedResponse({ description: 'The document with its validation result.' })
+  async validate(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(z.object({ useAi: z.boolean() }).strict()))
+    body: { useAi: boolean },
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.ai.validate(context(request), documentType(type), body.useAi),
+    };
+  }
+
+  @Post(':type/validation/acknowledge')
+  @ApiOperation({ summary: 'Record that a warning has been read and accepted' })
+  @ApiCreatedResponse({ description: 'The document with the warning acknowledged.' })
+  async acknowledge(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(acknowledgeFindingSchema)) body: AcknowledgeFinding,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.acknowledgeFinding(
+        context(request),
+        documentType(type),
+        body.kind,
+        body.expectedVersion,
+      ),
+    };
+  }
+
+  @Post(':type/approve')
+  @ApiOperation({
+    summary: 'Approve the document',
+    description:
+      'Requires current validation with nothing blocking. Approving unlocks whatever depends on this document.',
+  })
+  @ApiCreatedResponse({ description: 'The approved document.' })
+  async approve(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(approveDocumentSchema)) body: ApproveDocument,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return { document: await this.documents.approve(context(request), documentType(type), body) };
+  }
+
+  @Post(':type/reopen')
+  @ApiOperation({
+    summary: 'Withdraw approval',
+    description:
+      'Documents built on this one are marked out of date. None of them is regenerated or changed — that decision stays yours.',
+  })
+  @ApiCreatedResponse({ description: 'The reopened document.' })
+  async reopen(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(reopenDocumentSchema)) body: ReopenDocument,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return { document: await this.documents.reopen(context(request), documentType(type), body) };
+  }
+
+  @Post(':type/revise')
+  @ApiOperation({
+    summary: 'Start a new working version from an issued document',
+    description:
+      'The issued version is untouched and stays on the record as what was sent. A copy becomes the new working version, with every section marked as yours — somebody chose that text when they issued it.',
+  })
+  @ApiCreatedResponse({ description: 'The new working version.' })
+  async revise(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(reopenDocumentSchema)) body: ReopenDocument,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return { document: await this.documents.revise(context(request), documentType(type), body) };
+  }
+
+  @Post(':type/final')
+  @ApiOperation({
+    summary: 'Mark the document issued',
+    description: 'Irreversible. A revision after this is a new version, not a change to this one.',
+  })
+  @ApiCreatedResponse({ description: 'The issued document.' })
+  async markFinal(
+    @Param('type') type: string,
+    @Body(new ZodValidationPipe(markFinalSchema)) body: MarkFinal,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return { document: await this.documents.markFinal(context(request), documentType(type), body) };
+  }
+
+  @Get(':type/run/current')
+  @ApiOperation({ summary: 'The current or most recent generation run' })
+  @ApiOkResponse({ description: 'The run, or null when there has never been one.' })
+  async currentRun(
+    @Param('type') type: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<DocumentRun | null> {
+    const session = context(request);
+    const run =
+      (await this.repository.activeRun(session.projectId, documentType(type))) ??
+      (await this.repository.latestRun(session.projectId, documentType(type)));
+
+    return run ? toDocumentRun(run) : null;
+  }
+}
+
+function context(request: AuthenticatedRequest): DocumentContext {
+  const projectId = request.projectSession?.projectId;
+
+  if (!projectId) {
+    // Unreachable: the guard rejects before the handler runs. Throwing rather
+    // than defaulting means a future refactor that removes the guard fails
+    // loudly instead of quietly serving somebody else's project.
+    throw new Error('Session guard did not attach a project.');
+  }
+
+  const id = (request as { id?: unknown }).id;
+
+  return { projectId, correlationId: typeof id === 'string' ? id : 'unknown' };
+}
+
+/**
+ * A document type from the path.
+ *
+ * Parsed rather than cast: an unknown value is a 422 naming the problem, and an
+ * unimplemented-but-declared one reaches the service, which refuses it with the
+ * message that says so.
+ */
+function documentType(value: string): DocumentType {
+  const parsed = documentTypeSchema.safeParse(value);
+
+  if (!parsed.success) {
+    throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_NOT_IMPLEMENTED, 422);
+  }
+
+  return parsed.data;
+}
+
+function positiveInteger(value: string): number {
+  const parsed = z.coerce.number().int().positive().safeParse(value);
+
+  if (!parsed.success) {
+    throw new DocumentError(DOCUMENT_ERROR_CODES.VERSION_NOT_FOUND, 404);
+  }
+
+  return parsed.data;
+}

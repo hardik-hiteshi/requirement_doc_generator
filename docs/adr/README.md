@@ -66,3 +66,6 @@ think is part of the value.
 | [0030](0030-effort-duration-capacity.md)               | Effort, duration and capacity are three numbers, never one          | Accepted |
 | [0031](0031-hybrid-estimation.md)                      | The model assesses; the application does the arithmetic             | Accepted |
 | [0032](0032-isolating-pdf-extraction-tests.md)         | PDF extraction tests get a process of their own                     | Accepted |
+| [0033](0033-shared-document-engine.md)                 | One document engine, seven documents                                | Accepted |
+| [0034](0034-document-authority.md)                     | A document quotes its inputs; it never decides them                 | Accepted |
+| [0035](0035-document-status-and-currentness.md)        | Lifecycle status and currentness are two axes                       | Accepted |

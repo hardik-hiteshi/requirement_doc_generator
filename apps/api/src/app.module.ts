@@ -3,6 +3,7 @@ import { APP_FILTER } from '@nestjs/core';
 
 import { AnalysisModule } from './analysis/analysis.module';
 import { StackModule } from './stack/stack.module';
+import { DocumentsModule } from './documents/documents.module';
 import { EstimationModule } from './estimation/estimation.module';
 import { AuditModule } from './audit/audit.module';
 import { AllExceptionsFilter } from './common/errors';
@@ -39,6 +40,7 @@ import { RequirementsModule } from './requirements/requirements.module';
     AnalysisModule,
     StackModule,
     EstimationModule,
+    DocumentsModule,
   ],
   providers: [
     {

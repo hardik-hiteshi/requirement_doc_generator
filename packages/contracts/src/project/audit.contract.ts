@@ -102,6 +102,22 @@ export const AUDIT_EVENT_TYPES = [
   'ESTIMATE_OUTDATED',
   'ESTIMATE_SUPERSEDED',
   'TIMELINE_RISK_ACKNOWLEDGED',
+
+  /* Phase 7 — controlled documents. Types, versions, section keys and severities
+     are safe to keep. Document prose, prompts and requirement text never are:
+     an audit record must be safe to read, to export and to hand over. */
+  'DOCUMENT_GENERATION_STARTED',
+  'DOCUMENT_GENERATION_COMPLETED',
+  'DOCUMENT_GENERATION_FAILED',
+  'DOCUMENT_SECTION_REGENERATED',
+  'DOCUMENT_EDITED',
+  'DOCUMENT_VERSION_RESTORED',
+  'DOCUMENT_APPROVED',
+  'DOCUMENT_REOPENED',
+  'DOCUMENT_MARKED_FINAL',
+  'DOCUMENT_OUTDATED',
+  'DOCUMENT_VALIDATED',
+  'FEATURE_LIST_VALIDATED',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
