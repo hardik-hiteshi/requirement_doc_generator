@@ -111,3 +111,6 @@ export * from './documents/document-errors';
 /* Phase 9 — the Work Breakdown Structure and the Client Dependency Sheet. */
 export * from './documents/work-breakdown.contract';
 export * from './documents/client-dependency.contract';
+
+/* Phase 10 — editing, versioning, invalidation and traceability. */
+export * from './documents/traceability.contract';

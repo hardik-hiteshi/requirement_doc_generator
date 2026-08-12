@@ -2,6 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import {
   CORRECTION_OUTCOMES,
   CORRECTION_TARGET_KINDS,
+  DOCUMENT_CHANGE_TYPES,
   DOCUMENT_ROW_KINDS,
   DOCUMENT_RUN_KINDS,
   DOCUMENT_RUN_STATUSES,
@@ -366,6 +367,34 @@ export class DocumentVersionRecord {
 
   @Prop({ type: Date, required: false })
   finalAt?: Date;
+
+  /*
+   * Why this version exists, recorded at the moment it was cut.
+   *
+   * Not inferred later from what differs: "this row's wording changed" and "this came
+   * back from version 4 and the wording happens to differ" produce the same diff and
+   * are different events. A history that cannot tell them apart is a list of numbers.
+   */
+  @Prop({ type: String, required: false, enum: DOCUMENT_CHANGE_TYPES })
+  changeType?: string;
+
+  /** The version this content was restored from, when it was. */
+  @Prop({ type: Number, required: false })
+  restoredFromVersion?: number;
+
+  /** The issued version this working revision was opened beside. */
+  @Prop({ type: Number, required: false })
+  revisedFromVersion?: number;
+
+  /**
+   * Who caused it: `USER` or `SYSTEM`.
+   *
+   * Deliberately not a name. Projects here are anonymous by design — there is no
+   * account to attribute to — so recording anything more specific would either be
+   * empty or invented.
+   */
+  @Prop({ type: String, required: false })
+  actor?: string;
 
   createdAt!: Date;
 }

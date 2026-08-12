@@ -166,6 +166,22 @@ export const addRowSchema = z
 
 export type AddRow = z.infer<typeof addRowSchema>;
 
+/**
+ * Taking a row out of the working document.
+ *
+ * The reason is required and kept in the audit trail, because "why did AC-014
+ * disappear between v3 and v4?" is a question somebody asks months later, and the
+ * diff alone cannot answer it.
+ */
+export const removeRowSchema = z
+  .object({
+    reason: z.string().min(1).max(500),
+    expectedVersion: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type RemoveRow = z.infer<typeof removeRowSchema>;
+
 export const excludeRowSchema = z
   .object({
     reason: z.string().min(1).max(500),

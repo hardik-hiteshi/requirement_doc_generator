@@ -271,6 +271,17 @@ export class DocumentsRepository {
     return this.rows.findOne({ projectId, rowId }).exec();
   }
 
+  /**
+   * Take a row out of the working document.
+   *
+   * Deletes only the row belonging to the given version. Every archived version keeps
+   * its own copy of the rows it had, so history is untouched by construction — there
+   * is nothing here that could reach a version somebody has already been shown.
+   */
+  async deleteRow(projectId: string, rowId: string): Promise<void> {
+    await this.rows.deleteOne({ projectId, rowId }).exec();
+  }
+
   async updateRow(
     projectId: string,
     rowId: string,

@@ -16,7 +16,10 @@ import {
   type EffortReconciliation,
   type FeatureCoverage,
   type FeatureRow,
+  type ContentEntry,
   type DependencySummary,
+  type DiffChangeKind,
+  type DocumentChangeType,
   type ReverseDependencyIndex,
   type SowScopeReconciliation,
   type WbsCoverage,
@@ -267,10 +270,19 @@ export function toVersionSummary(
     ...(record.baselineVersion !== undefined ? { baselineVersion: record.baselineVersion } : {}),
     ...(record.stackVersion !== undefined ? { stackVersion: record.stackVersion } : {}),
     ...(record.estimateVersion !== undefined ? { estimateVersion: record.estimateVersion } : {}),
-    contentCount: sections.length + features.length,
+    /* Rows count too: four of the seven documents have no sections at all. */
+    contentCount: sections.length + features.length + (record.rows?.length ?? 0),
     userEditedCount: sections.filter((section) => section.origin !== 'GENERATED').length,
     ...(record.regenerationReason ? { regenerationReason: record.regenerationReason } : {}),
     validationSeverity: (record.validation as { severity?: string } | null)?.severity ?? null,
+    ...(record.changeType ? { changeType: record.changeType as DocumentChangeType } : {}),
+    ...(record.restoredFromVersion !== undefined
+      ? { restoredFromVersion: record.restoredFromVersion }
+      : {}),
+    ...(record.revisedFromVersion !== undefined
+      ? { revisedFromVersion: record.revisedFromVersion }
+      : {}),
+    ...(record.actor ? { actor: record.actor } : {}),
   };
 }
 
@@ -296,4 +308,192 @@ export function toDocumentRun(record: DocumentRunDocument): DocumentRun {
     ...(record.failureCode ? { failureCode: record.failureCode } : {}),
     deterministicOnly: record.deterministicOnly,
   };
+}
+
+/* --------------------------------------------- Phase 10: comparable fields */
+
+/**
+ * The fields of a row, as a reader compares them.
+ *
+ * Two decisions here carry the weight.
+ *
+ * **Each field says what kind of change it represents.** An acceptance criterion
+ * whose wording was rewritten and one that now cites a different requirement are
+ * both "changed", and a reviewer deciding whether to re-approve needs to know which.
+ * `TRACEABILITY` marks the citation fields, `LIFECYCLE` the status ones, `CONTENT`
+ * the words and figures.
+ *
+ * **Values are rendered as text.** A diff is read by a person, so an array of
+ * requirement keys becomes "REQ-001, REQ-004" rather than JSON. Nothing here is
+ * parsed back — this projection is for comparison only.
+ */
+type ComparableField = NonNullable<ContentEntry['fields']>[number];
+
+/** One value, as a person reads it in a comparison. */
+function renderValue(value: unknown): string {
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => renderValue(entry)).join(', ');
+  }
+
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+
+  /* eslint-disable-next-line @typescript-eslint/no-base-to-string -- primitives only by here. */
+  return String(value);
+}
+
+const field = (
+  name: string,
+  label: string,
+  changeKind: DiffChangeKind,
+  value: unknown,
+): ComparableField => ({
+  field: name,
+  label,
+  changeKind,
+  /*
+   * Rendered for a person to read, so an array becomes "REQ-001, REQ-004" and an
+   * object becomes JSON rather than "[object Object]". Nothing here is parsed back:
+   * this projection exists only to be compared and displayed.
+   */
+  value: renderValue(value),
+});
+
+/** A row's heading in a comparison: its key and what it is about. */
+export function rowTitle(row: DocumentRow): string {
+  const payload = row.payload as Record<string, unknown>;
+  const key =
+    payloadText(payload, 'criterionKey') ||
+    payloadText(payload, 'assumptionKey') ||
+    payloadText(payload, 'wbsId') ||
+    payloadText(payload, 'dependencyKey');
+
+  const subject =
+    payloadText(payload, 'statement') ||
+    payloadText(payload, 'then') ||
+    payloadText(payload, 'task') ||
+    payloadText(payload, 'dependency') ||
+    payloadText(payload, 'feature');
+
+  return [key, subject].filter(Boolean).join(' — ').slice(0, 300);
+}
+
+/** One line summarising a row, for the collapsed view of a comparison. */
+export function rowSummary(row: DocumentRow): string {
+  return (rowFields(row) ?? [])
+    .filter((entry) => entry.changeKind === 'CONTENT' && entry.value.length > 0)
+    .map((entry) => entry.value)
+    .join(' · ')
+    .slice(0, 20_000);
+}
+
+/** Comparable fields for a Feature Listing row. */
+export function featureFields(feature: FeatureRow): readonly ComparableField[] {
+  return [
+    field('module', 'Module', 'CONTENT', feature.module),
+    field('submodule', 'Sub module', 'CONTENT', feature.submodule),
+    field('screen', 'Screen', 'CONTENT', feature.screen),
+    field('description', 'Description', 'CONTENT', feature.description),
+    field('totalHours', 'Hours', 'CONTENT', feature.totalHours),
+    field('requirementIds', 'Requirements', 'TRACEABILITY', feature.requirementIds),
+    field('estimateUnitIds', 'Estimate items', 'TRACEABILITY', feature.estimateUnitIds),
+    field('technologyIds', 'Technologies', 'TRACEABILITY', feature.technologyIds),
+    field('reviewStatus', 'Review state', 'LIFECYCLE', feature.reviewStatus),
+  ];
+}
+
+/**
+ * Comparable fields for a row in the generic channel.
+ *
+ * Per document kind, because the fields that matter differ: a criterion's `then` is
+ * its substance, an assumption's `status` is its authority, a work package's hours
+ * are what somebody will plan against, and a dependency's status is whether the
+ * project is blocked.
+ */
+export function rowFields(row: DocumentRow): readonly ComparableField[] {
+  const payload = row.payload as Record<string, unknown>;
+
+  const shared = [
+    field('origin', 'Where it came from', 'LIFECYCLE', row.origin),
+    field('excludedReason', 'Excluded because', 'LIFECYCLE', row.excludedReason ?? ''),
+  ];
+
+  if (row.kind === 'ACCEPTANCE_CRITERION') {
+    return [
+      field('aspect', 'Kind of condition', 'CONTENT', payload.aspect),
+      field('given', 'Given', 'CONTENT', payload.given),
+      field('when', 'When', 'CONTENT', payload.when),
+      field('then', 'Then', 'CONTENT', payload.then),
+      field('rule', 'Rule', 'CONTENT', payload.rule),
+      field('module', 'Module', 'CONTENT', payload.module),
+      field('requirementIds', 'Requirements', 'TRACEABILITY', payload.requirementIds),
+      field('featureIds', 'Features', 'TRACEABILITY', payload.featureIds),
+      field('status', 'Status', 'LIFECYCLE', payload.status),
+      ...shared,
+    ];
+  }
+
+  if (row.kind === 'ASSUMPTION') {
+    return [
+      field('statement', 'Assumption', 'CONTENT', payload.statement),
+      field('category', 'Category', 'CONTENT', payload.category),
+      field('impact', 'Impact', 'CONTENT', payload.impact),
+      field('impactIfFalse', 'If it is wrong', 'CONTENT', payload.impactIfFalse),
+      field('validationNeeded', 'How to check it', 'CONTENT', payload.validationNeeded),
+      field('requirementIds', 'Requirements', 'TRACEABILITY', payload.requirementIds),
+      field('status', 'Status', 'LIFECYCLE', payload.status),
+      field('provenance', 'Who stands behind it', 'LIFECYCLE', payload.provenance),
+      field('owner', 'Owner', 'LIFECYCLE', payload.owner),
+      ...shared,
+    ];
+  }
+
+  if (row.kind === 'WORK_PACKAGE') {
+    return [
+      field('level', 'Level', 'CONTENT', payload.level),
+      field('workKind', 'Kind of work', 'CONTENT', payload.workKind),
+      field('task', 'Task', 'CONTENT', payload.task),
+      field('description', 'What it involves', 'CONTENT', payload.description),
+      field('deliverable', 'What it produces', 'CONTENT', payload.deliverable),
+      field('totalEffort', 'Hours', 'CONTENT', payload.totalEffort),
+      field('ownerRole', 'Role', 'CONTENT', payload.ownerRole),
+      field('relativeStartDay', 'Starts on working day', 'AUTHORITY', payload.relativeStartDay),
+      field('relativeFinishDay', 'Finishes on working day', 'AUTHORITY', payload.relativeFinishDay),
+      field('onCriticalPath', 'On the critical path', 'AUTHORITY', payload.onCriticalPath),
+      field('predecessors', 'After', 'CONTENT', payload.predecessors),
+      field('requirementIds', 'Requirements', 'TRACEABILITY', payload.requirementIds),
+      field('featureIds', 'Features', 'TRACEABILITY', payload.featureIds),
+      field('estimateUnitIds', 'Estimate items', 'TRACEABILITY', payload.estimateUnitIds),
+      field('status', 'Status', 'LIFECYCLE', payload.status),
+      ...shared,
+    ];
+  }
+
+  if (row.kind === 'CLIENT_DEPENDENCY') {
+    return [
+      field('category', 'Category', 'CONTENT', payload.category),
+      field('dependency', 'What is needed', 'CONTENT', payload.dependency),
+      field('description', 'Description', 'CONTENT', payload.description),
+      field('purpose', 'Why', 'CONTENT', payload.purpose),
+      field('expectedFormat', 'What good looks like', 'CONTENT', payload.expectedFormat),
+      field('impactIfDelayed', 'If it is late', 'CONTENT', payload.impactIfDelayed),
+      field('relativeDue', 'Needed by', 'CONTENT', payload.relativeDue),
+      field('priority', 'Priority', 'CONTENT', payload.priority),
+      field('blocking', 'What it blocks', 'CONTENT', payload.blocking),
+      field('clientOwner', 'Your owner', 'CONTENT', payload.clientOwner),
+      field('internalOwner', 'Our owner', 'CONTENT', payload.internalOwner),
+      field('requirementIds', 'Requirements', 'TRACEABILITY', payload.requirementIds),
+      field('wbsIds', 'Work packages', 'TRACEABILITY', payload.wbsIds),
+      field('status', 'Status', 'LIFECYCLE', payload.status),
+      field('validationNote', 'What the check showed', 'LIFECYCLE', payload.validationNote),
+      ...shared,
+    ];
+  }
+
+  return shared;
 }

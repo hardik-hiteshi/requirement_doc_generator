@@ -114,6 +114,17 @@ export const DOCUMENT_ROUTES = {
   /** POST — record that a row is deliberately left out, with a reason. */
   excludeRow: (type: string, rowId: string) =>
     buildApiPath('projects/current/documents', type, 'rows', rowId, 'exclude'),
+  /**
+   * DELETE — take a row out of the working document.
+   *
+   * Different from excluding it. An exclusion is a decision that stays on the sheet
+   * with its reason, which is what a client should see for scope deliberately left
+   * out. A removal is for a row that should never have been there — a duplicate, or
+   * something a reviewer added by mistake — and it disappears from the working
+   * document while remaining in every version that had it.
+   */
+  removeRow: (type: string, rowId: string) =>
+    buildApiPath('projects/current/documents', type, 'rows', rowId),
 
   /* ------------------------------------------ Phase 8: assumptions */
 
@@ -151,6 +162,14 @@ export const DOCUMENT_ROUTES = {
   /** POST — record what checking it showed: accepted, or rejected with a reason. */
   validateDependency: (type: string, rowId: string) =>
     buildApiPath('projects/current/documents', type, 'rows', rowId, 'validate'),
+
+  /**
+   * GET — every approved requirement, followed through every document.
+   *
+   * One request rather than per-document calls: the interesting output is the *gaps*,
+   * and a gap is only visible when every document has been read together.
+   */
+  traceability: buildApiPath('projects/current/documents/traceability'),
 
   /** GET — the current or most recent generation run. */
   currentRun: (type: string) => buildApiPath('projects/current/documents', type, 'run/current'),
