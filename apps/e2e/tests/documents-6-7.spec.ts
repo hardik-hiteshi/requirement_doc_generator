@@ -405,6 +405,42 @@ test.describe('Documents 6 and 7', () => {
     await expect(dependencyPanel(page).getByTestId('dependency-rows')).toBeVisible();
   });
 
+  /* 29, 30, 31, 32. */
+  test('shows what each task delivers and what it waits on', async ({ page }) => {
+    await throughWbs(page);
+
+    /* 29. Feature coverage is a figure on screen, measured against the approved listing. */
+    await openDocument(page, 'WORK_BREAKDOWN_STRUCTURE');
+    await expect(wbsPanel(page).getByTestId('wbs-coverage')).toContainText('approved');
+    await expect(wbsPanel(page).getByTestId('wbs-unmapped-features')).toBeHidden();
+
+    /* 30. Overhead says what it is rather than looking like untraced feature work. */
+    await expect(wbsPanel(page).getByText('Delivery overhead').first()).toBeVisible();
+
+    /* The sheet, which owns the relationship. */
+    await openDocument(page, 'CLIENT_DEPENDENCY_SHEET');
+    await page.getByTestId('generate-without-ai').click();
+    await expect(dependencyPanel(page)).toBeVisible({ timeout: 90_000 });
+
+    /* 31. The sheet names the work each item is needed for. */
+    await expect(dependencyPanel(page).getByTestId('dependency-source-CD-001')).toContainText(
+      'needed for',
+    );
+
+    /*
+     * 32. And the breakdown shows the same relationship from the other side — derived on
+     * read, so generating the sheet never rewrote the breakdown.
+     */
+    await openDocument(page, 'WORK_BREAKDOWN_STRUCTURE');
+    await expect(
+      wbsPanel(page)
+        .getByText(/Waiting on CD-\d+/)
+        .first(),
+    ).toBeVisible({
+      timeout: 30_000,
+    });
+  });
+
   /* ------------------------------------------------- responsive and axe */
 
   test.describe('both documents stay usable', () => {

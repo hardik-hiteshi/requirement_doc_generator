@@ -13,6 +13,7 @@ import {
   type ValidationFinding,
   type WbsLevel,
   type WbsReconciliation,
+  type WbsWorkKind,
   type WorkPackage,
 } from '@wdrg/contracts';
 
@@ -94,6 +95,8 @@ export class WorkBreakdownComposer implements DocumentComposer {
     const keyById = new Map(
       context.requirements.map((requirement) => [requirement.id, requirement.key]),
     );
+    /* Which approved Feature Listing rows each estimate unit was priced into. */
+    const featureIdsByUnit = this.featureIndex(context, keyById);
 
     const rows: WorkPackage[] = [];
     /** Which WBS row each estimate unit became, for predecessor mapping. */
@@ -227,6 +230,7 @@ export class WorkBreakdownComposer implements DocumentComposer {
                   task: tasks.get(unit.id),
                   plan,
                   keyById,
+                  featureIds: featureIdsByUnit.get(unit.id) ?? [],
                 }),
               );
             });
@@ -250,6 +254,7 @@ export class WorkBreakdownComposer implements DocumentComposer {
           phase: phaseLabel,
           label: phaseLabel,
           deliverable: 'Environments, review, stabilisation and coordination',
+          workKind: 'OVERHEAD',
         }),
       );
 
@@ -275,6 +280,7 @@ export class WorkBreakdownComposer implements DocumentComposer {
             feature: activityLabel,
             label: activityLabel,
             deliverable: activityLabel,
+            workKind: 'OVERHEAD',
           }),
         );
 
@@ -294,6 +300,7 @@ export class WorkBreakdownComposer implements DocumentComposer {
               task: tasks.get(unit.id),
               plan,
               keyById,
+              featureIds: featureIdsByUnit.get(unit.id) ?? [],
             }),
           );
         });
@@ -352,6 +359,65 @@ export class WorkBreakdownComposer implements DocumentComposer {
 
   /* ------------------------------------------------------------ building */
 
+  /**
+   * Which approved Feature Listing rows each estimate unit belongs to.
+   *
+   * Nothing here is inferred. A Feature Listing row records the estimate units it was
+   * priced from, so that link — approved when the listing was approved — is the mapping,
+   * and one unit legitimately belonging to several rows keeps all of them.
+   *
+   * The requirement-key fallback exists for a listing written before that link was
+   * stored: two rows sharing a requirement is also an approved relationship, just a
+   * coarser one. It is used only where the direct link is absent, so it can never
+   * override the better answer.
+   */
+  private featureIndex(
+    context: UpstreamContext,
+    keyById: ReadonlyMap<string, string>,
+  ): ReadonlyMap<string, readonly string[]> {
+    const features = context.documents.featureListing?.features ?? [];
+    const index = new Map<string, string[]>();
+
+    const add = (unitId: string, featureId: string): void => {
+      const existing = index.get(unitId) ?? [];
+
+      if (!existing.includes(featureId)) {
+        index.set(unitId, [...existing, featureId]);
+      }
+    };
+
+    for (const feature of features) {
+      for (const unitId of feature.estimateUnitIds) {
+        add(unitId, feature.featureId);
+      }
+    }
+
+    /* The fallback, for units the listing did not link directly. */
+    for (const unit of context.estimateUnits) {
+      if (index.has(unit.id) || unit.overheadActivity) {
+        continue;
+      }
+
+      const keys = new Set(
+        unit.requirementIds
+          .map((id) => keyById.get(id))
+          .filter((key): key is string => key !== undefined),
+      );
+
+      if (keys.size === 0) {
+        continue;
+      }
+
+      for (const feature of features) {
+        if (feature.requirementIds.some((key) => keys.has(key))) {
+          add(unit.id, feature.featureId);
+        }
+      }
+    }
+
+    return index;
+  }
+
   private container(input: {
     readonly wbsId: string;
     readonly parentId?: string;
@@ -363,6 +429,7 @@ export class WorkBreakdownComposer implements DocumentComposer {
     readonly feature?: string;
     readonly label: string;
     readonly deliverable: string;
+    readonly workKind?: WbsWorkKind;
   }): WorkPackage {
     return {
       wbsId: input.wbsId,
@@ -375,6 +442,7 @@ export class WorkBreakdownComposer implements DocumentComposer {
       feature: input.feature ?? '',
       task: '',
       description: input.label,
+      workKind: input.workKind ?? 'FEATURE',
       requirementIds: [],
       featureIds: [],
       estimateUnitIds: [],
@@ -386,8 +454,6 @@ export class WorkBreakdownComposer implements DocumentComposer {
       parallelizable: false,
       onCriticalPath: false,
       deliverable: input.deliverable,
-      clientDependencyIds: [],
-      internalDependencyIds: [],
       status: 'NOT_STARTED',
       notes: '',
     };
@@ -409,6 +475,8 @@ export class WorkBreakdownComposer implements DocumentComposer {
     readonly plan: UpstreamPlan;
     /** Stored requirement id to human-facing key. */
     readonly keyById: ReadonlyMap<string, string>;
+    /** Feature Listing rows this unit was priced into. */
+    readonly featureIds: readonly string[];
   }): WorkPackage {
     const { unit, task, plan } = input;
 
@@ -436,10 +504,11 @@ export class WorkBreakdownComposer implements DocumentComposer {
       feature: unit.feature,
       task: activity,
       description: unit.rationale.slice(0, 2_000),
+      workKind: unit.overheadActivity ? 'OVERHEAD' : 'FEATURE',
       requirementIds: unit.requirementIds
         .map((id) => input.keyById.get(id))
         .filter((key): key is string => key !== undefined),
-      featureIds: [],
+      featureIds: [...input.featureIds],
       estimateUnitIds: [unit.id],
       technologyIds: [
         ...new Set(
@@ -468,8 +537,6 @@ export class WorkBreakdownComposer implements DocumentComposer {
       predecessors: [],
       ...(milestone ? { milestoneId: milestone.id } : {}),
       deliverable: `${activity} for ${unit.feature}`,
-      clientDependencyIds: [],
-      internalDependencyIds: [],
       uncertainty: unit.uncertainty,
       status: unit.excluded ? 'EXCLUDED' : 'NOT_STARTED',
       notes: '',
@@ -535,7 +602,7 @@ export class WorkBreakdownComposer implements DocumentComposer {
       const effort: Record<string, number> = {};
 
       for (const child of counted) {
-        for (const [role, hours] of Object.entries(child.effort)) {
+        for (const [role, hours] of Object.entries(child.effort ?? {})) {
           effort[role] = roundHours((effort[role] ?? 0) + hours);
         }
       }
@@ -793,6 +860,32 @@ export class WorkBreakdownComposer implements DocumentComposer {
       });
     }
 
+    /*
+     * 6b. Feature Listing citations. A task naming a feature the current listing does
+     * not contain is pointing at scope that was renamed or removed, which makes the
+     * traceability chain wrong in the direction nobody checks by eye.
+     */
+    const approvedFeatures = new Set(
+      (input.context.documents.featureListing?.features ?? []).map((feature) => feature.featureId),
+    );
+    const unknownFeatures = [
+      ...new Set(
+        packages.flatMap((row) => row.featureIds.filter((id) => !approvedFeatures.has(id))),
+      ),
+    ];
+
+    if (unknownFeatures.length > 0) {
+      findings.push({
+        kind: 'unknown_feature_reference',
+        severity: 'BLOCKING',
+        detectedBy: 'DETERMINISTIC',
+        summary: `${unknownFeatures.length} task cites a feature that is not in the current Feature Listing.`,
+        action:
+          'Work can only be traced to scope somebody agreed to. Regenerate this breakdown against the current listing.',
+        subjectIds: unknownFeatures,
+      });
+    }
+
     /* 7. Work for scope somebody deliberately left out. */
     const excludedScope = new Set(input.excludedRequirementIds);
     const forExcluded = leaves.filter(
@@ -942,7 +1035,13 @@ export class WorkBreakdownComposer implements DocumentComposer {
 
     return calculateWbsCoverage({
       applicableRequirementIds: this.applicableRequirementIds(input.context),
-      applicableFeatureIds: [],
+      /*
+       * The approved Feature Listing, so feature coverage is a real measurement. An
+       * agreed feature with no work package against it drops this below complete.
+       */
+      applicableFeatureIds: (input.context.documents.featureListing?.features ?? []).map(
+        (feature) => feature.featureId,
+      ),
       applicableEstimateUnitIds: input.context.estimateUnits
         .filter((unit) => !unit.excluded)
         .map((unit) => unit.id),
@@ -954,6 +1053,8 @@ export class WorkBreakdownComposer implements DocumentComposer {
           featureIds: row.featureIds,
           estimateUnitIds: row.estimateUnitIds,
           status: row.status,
+          workKind: row.workKind,
+          totalEffort: row.totalEffort,
         })),
     });
   }

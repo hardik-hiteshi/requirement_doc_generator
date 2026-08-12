@@ -6,6 +6,7 @@ import {
   ESTIMATION_ROLE_LABELS,
   WBS_LEVEL_LABELS,
   WBS_TASK_STATUS_LABELS,
+  WBS_WORK_KIND_LABELS,
   isStandardRole,
   type DocumentRow,
   type DocumentSnapshot,
@@ -61,7 +62,16 @@ export function WbsTable({
   });
 
   const reconciliation = document.wbsReconciliation;
+  const coverage = document.wbsCoverage;
   const rows = document.rows;
+  /*
+   * Client dependencies that name each task, derived from the current sheet.
+   *
+   * The sheet owns the relationship; this is the reverse view, so somebody reading a
+   * task can see what it is waiting on without the breakdown having been rewritten when
+   * the sheet was generated.
+   */
+  const reverse = document.reverseDependencies;
 
   const packageOf = (row: DocumentRow): WorkPackage => row.payload as WorkPackage;
 
@@ -126,6 +136,27 @@ export function WbsTable({
               </div>
             )}
           </div>
+        ) : null}
+
+        {coverage ? (
+          <p className="text-sm" data-testid="wbs-coverage">
+            {coverage.mappedFeatures} of {coverage.applicableFeatures} approved{' '}
+            {coverage.applicableFeatures === 1 ? 'feature' : 'features'} covered ·{' '}
+            {coverage.mappedRequirements} of {coverage.applicableRequirements} priced{' '}
+            {coverage.applicableRequirements === 1 ? 'requirement' : 'requirements'} ·{' '}
+            {coverage.overheadWbsIds.length} delivery-overhead{' '}
+            {coverage.overheadWbsIds.length === 1 ? 'task' : 'tasks'} ({coverage.overheadHours} h)
+            {coverage.unmappedFeatureIds.length > 0 ? (
+              <>
+                {' · '}
+                <span className="text-danger" data-testid="wbs-unmapped-features">
+                  {coverage.unmappedFeatureIds.length} agreed{' '}
+                  {coverage.unmappedFeatureIds.length === 1 ? 'feature has' : 'features have'} no
+                  work against {coverage.unmappedFeatureIds.length === 1 ? 'it' : 'them'}
+                </span>
+              </>
+            ) : null}
+          </p>
         ) : null}
 
         {rows.length === 0 ? (
@@ -203,6 +234,18 @@ export function WbsTable({
                       ) : null}
                       {entry.requirementIds.length > 0 ? (
                         <span>Covers {entry.requirementIds.join(', ')}</span>
+                      ) : null}
+                      {entry.featureIds.length > 0 ? (
+                        <span data-testid={`wbs-features-${entry.wbsId}`}>
+                          Delivers {entry.featureIds.length}{' '}
+                          {entry.featureIds.length === 1 ? 'agreed feature' : 'agreed features'}
+                        </span>
+                      ) : null}
+                      {entry.workKind === 'OVERHEAD' ? (
+                        <span data-testid={`wbs-overhead-${entry.wbsId}`}>
+                          {WBS_WORK_KIND_LABELS.OVERHEAD} — supports delivery rather than one
+                          feature
+                        </span>
                       ) : null}
                       {entry.slackDays !== undefined && entry.slackDays > 0 ? (
                         <span>
@@ -302,6 +345,43 @@ export function WbsTable({
                           Reword with AI
                         </Button>
                       ) : null}
+                    </div>
+                  ) : null}
+
+                  {/*
+                   * What this task waits on, and how much to trust the answer. A stale
+                   * sheet is still worth showing — the dependency probably still exists
+                   * — but saying so is the difference between a useful link and a
+                   * current claim the breakdown cannot support.
+                   */}
+                  {(reverse?.byWbsId[entry.wbsId] ?? []).length > 0 ? (
+                    <div
+                      className="mt-2 flex flex-col gap-1 text-xs"
+                      data-testid={`wbs-dependencies-${entry.wbsId}`}
+                    >
+                      {reverse!.byWbsId[entry.wbsId]!.map((related) => (
+                        <span
+                          key={related.dependencyKey}
+                          className="flex flex-wrap items-baseline gap-1"
+                        >
+                          <span
+                            className={related.blockingOutstanding ? 'text-danger' : 'text-muted'}
+                          >
+                            Waiting on {related.dependencyKey}: {related.dependency}
+                          </span>
+                          {related.blockingOutstanding ? (
+                            <Badge tone="danger">Outstanding</Badge>
+                          ) : null}
+                          {related.sheetCurrentness === 'OUTDATED' ? (
+                            <Badge
+                              tone="warning"
+                              data-testid={`wbs-dependency-stale-${entry.wbsId}`}
+                            >
+                              From a dependency sheet that is out of date
+                            </Badge>
+                          ) : null}
+                        </span>
+                      ))}
                     </div>
                   ) : null}
 

@@ -636,27 +636,40 @@ export class ClientDependencyComposer implements DocumentComposer {
       });
     }
 
-    /* 7. Work that waits on a client dependency the sheet does not carry. */
+    /*
+     * 7. Blocking work with nothing asked for on its behalf.
+     *
+     * The sheet owns the relationship, so "a task waiting on a dependency that is not
+     * here" cannot be read off the work package — that would need a field on the WBS
+     * which generating this document would have to write, and that is the cycle this
+     * design avoids. What can be checked is the other direction: a critical-path task in
+     * a module where dependencies were raised, with none of its own. A heuristic rather
+     * than a fact, so it warns rather than blocks.
+     */
+    const linkedModules = new Set(
+      dependencies.flatMap((dependency) => (dependency.module ? [dependency.module] : [])),
+    );
     const covered = new Set(dependencies.flatMap((dependency) => dependency.wbsIds));
-    const uncoveredTasks = packages.filter(
+
+    const criticalUncovered = packages.filter(
       (row) =>
         row.level === 'TASK' &&
         row.status !== 'EXCLUDED' &&
-        row.clientDependencyIds.length > 0 &&
-        !row.clientDependencyIds.some((key) =>
-          dependencies.some((dependency) => dependency.dependencyKey === key),
-        ) &&
+        row.workKind === 'FEATURE' &&
+        row.onCriticalPath &&
+        linkedModules.has(row.module) &&
         !covered.has(row.wbsId),
     );
 
-    if (uncoveredTasks.length > 0) {
+    if (criticalUncovered.length > 0) {
       findings.push({
         kind: 'dependency_missing_for_task',
-        severity: 'BLOCKING',
+        severity: 'WARNING',
         detectedBy: 'DETERMINISTIC',
-        summary: `${uncoveredTasks.length} task in the work breakdown waits on a client dependency this sheet does not list.`,
-        action: 'Add the missing rows, or the plan depends on something nobody has asked for.',
-        subjectIds: uncoveredTasks.map((row) => row.wbsId),
+        summary: `${criticalUncovered.length} task on the critical path sits in a module with client dependencies and has none of its own.`,
+        action:
+          'Worth a look: either it genuinely needs nothing from the client, or a request is missing.',
+        subjectIds: criticalUncovered.map((row) => row.wbsId),
       });
     }
 

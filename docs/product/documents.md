@@ -319,6 +319,20 @@ you never agreed. Agree one and the real dates appear.
 **The critical path is marked where the schedule put it.** So is the work that has
 slack and can run alongside something else.
 
+**Every task says which agreed features it delivers.** Taken from the feature listing you
+approved, not guessed — and the panel says how many of your agreed features have work
+against them. If one has none, it says so in red, because a feature that was sold and
+not planned is the expensive kind of gap.
+
+**Work that supports everything says so.** Environment setup, CI and release
+stabilisation are marked as delivery overhead rather than being listed as features
+nobody agreed to, or counted as features you are missing. Their hours are shown
+separately.
+
+**Each task shows what it is waiting on.** If a client dependency is holding a task up,
+it appears on the task — and if the dependency sheet has gone out of date since, the row
+says that too rather than letting you read a stale answer as a current one.
+
 **You can reword anything and change the plan nowhere.** Rename a task, describe it
 better, say what it produces. Try to move a start day and it says so, and points at the
 estimation step — change it there, re-approve, regenerate, and the two documents still

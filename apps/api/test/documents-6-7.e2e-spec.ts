@@ -2,11 +2,14 @@ import { VersioningType } from '@nestjs/common';
 import { getConnectionToken } from '@nestjs/mongoose';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
+import request from 'supertest';
 import {
   API_PREFIX,
   API_VERSION,
+  CLIENT_DEPENDENCY_CATEGORIES,
   DOCUMENT_ROUTES,
   ESTIMATION_ROUTES,
+  PROJECT_ROUTES,
   type ClientDependency,
   type DocumentSnapshot,
   type DocumentSummary,
@@ -85,6 +88,34 @@ describe('Documents 6–7 (e2e)', () => {
   async function documents(session: FixtureSession): Promise<readonly DocumentSummary[]> {
     return (await session.agent.get(DOCUMENT_ROUTES.documents).expect(200)).body
       .documents as DocumentSummary[];
+  }
+
+  /**
+   * A project with a session and nothing else.
+   *
+   * Deliberately not the full fixture chain: this is only ever used to prove that
+   * another project cannot reach this one's documents, and a second complete chain
+   * doubles the heaviest fixture in the suite for no extra coverage.
+   */
+  async function bareProject(): Promise<FixtureSession> {
+    const agent = request.agent(app.getHttpServer());
+    const created = await agent
+      .post(PROJECT_ROUTES.create)
+      .send({ name: 'A different project', projectTypes: ['WEB_APPLICATION'] })
+      .expect(201);
+
+    const raw: unknown = created.headers['set-cookie'];
+    const cookies: string[] = Array.isArray(raw)
+      ? raw.filter((value): value is string => typeof value === 'string')
+      : [];
+
+    const csrf =
+      cookies
+        .find((value) => value.startsWith('wdrg_csrf'))
+        ?.split(';')[0]
+        ?.split('=')[1] ?? '';
+
+    return { agent, csrf };
   }
 
   async function read(session: FixtureSession, type: string): Promise<DocumentSnapshot> {
@@ -200,6 +231,9 @@ describe('Documents 6–7 (e2e)', () => {
 
   const leavesOf = (document: DocumentSnapshot): readonly WorkPackage[] =>
     packagesOf(document).filter((row) => row.level === 'TASK');
+
+  /** The same read, under a name the cross-project test can use unshadowed. */
+  const readDocument = read;
 
   const dependenciesOf = (document: DocumentSnapshot): readonly ClientDependency[] =>
     document.rows.map((row) => row.payload as ClientDependency);
@@ -938,5 +972,419 @@ describe('Documents 6–7 (e2e)', () => {
         expect(paths.some((path) => path.includes(expected))).toBe(true);
       }
     }, 120_000);
+  });
+
+  /* ============================= 5. traceability in both directions ====== */
+
+  /**
+   * The two relationships the breakdown and the sheet owe each other.
+   *
+   * Feature Listing traceability is derived from an approved chain — a listing row
+   * records the estimate units it was priced from — so these assert the chain end to
+   * end rather than the mapping function in isolation.
+   *
+   * The dependency relationship is stored once, on the sheet, and read backwards for
+   * the breakdown. That is what makes generating document 7 leave document 6 untouched,
+   * which test 47 checks byte for byte on an issued version.
+   */
+  describe('traceability', () => {
+    it('40. every feature work package carries the Feature Listing rows it delivers', async () => {
+      const session = await throughStatementOfWork();
+      const document = await generate(session, WBS);
+      const listing = await read(session, 'FEATURE_LISTING');
+
+      const approved = new Set(listing.features.map((feature) => feature.featureId));
+      const featureWork = leavesOf(document).filter((leaf) => leaf.workKind === 'FEATURE');
+
+      expect(featureWork.length).toBeGreaterThan(0);
+
+      for (const leaf of featureWork) {
+        expect(leaf.featureIds.length).toBeGreaterThan(0);
+
+        /* And every one of them is a row the client actually agreed to. */
+        for (const featureId of leaf.featureIds) {
+          expect(approved.has(featureId)).toBe(true);
+        }
+      }
+    });
+
+    it('41. reports live feature coverage, and classifies overhead rather than hiding it', async () => {
+      const session = await throughStatementOfWork();
+      await generate(session, WBS);
+      const document = await read(session, WBS);
+      const listing = await read(session, 'FEATURE_LISTING');
+
+      const coverage = document.wbsCoverage!;
+
+      /* Measured against the approved listing, not against an empty list. */
+      expect(coverage.applicableFeatures).toBe(listing.features.length);
+      expect(coverage.applicableFeatures).toBeGreaterThan(0);
+      expect(coverage.mappedFeatures).toBe(coverage.applicableFeatures);
+      expect(coverage.unmappedFeatureIds).toEqual([]);
+      expect(coverage.unknownFeatureIds).toEqual([]);
+      expect(coverage.untracedFeatureWorkIds).toEqual([]);
+
+      /* Overhead is named, with its hours, rather than silently excluded. */
+      const overhead = leavesOf(document).filter((leaf) => leaf.workKind === 'OVERHEAD');
+
+      expect(coverage.overheadWbsIds).toHaveLength(overhead.length);
+
+      if (overhead.length > 0) {
+        expect(coverage.overheadHours).toBeGreaterThan(0);
+        expect(overhead.every((leaf) => leaf.featureIds.length === 0)).toBe(true);
+      }
+    });
+
+    it('42. regenerating the breakdown preserves the Feature Listing mapping', async () => {
+      const session = await throughStatementOfWork();
+      const first = await generate(session, WBS);
+
+      const before = new Map(
+        leavesOf(first).map((leaf) => [leaf.estimateUnitIds[0]!, [...leaf.featureIds].sort()]),
+      );
+
+      const second = await generate(session, WBS);
+
+      const after = new Map(
+        leavesOf(second).map((leaf) => [leaf.estimateUnitIds[0]!, [...leaf.featureIds].sort()]),
+      );
+
+      expect(after.size).toBe(before.size);
+
+      for (const [unitId, featureIds] of before) {
+        expect(after.get(unitId)).toEqual(featureIds);
+      }
+    });
+
+    it('43. a Feature Listing change makes the breakdown out of date', async () => {
+      const session = await throughWbs();
+
+      const listing = await read(session, 'FEATURE_LISTING');
+
+      await session.agent
+        .post(DOCUMENT_ROUTES.reopen('FEATURE_LISTING'))
+        .set('x-csrf-token', session.csrf)
+        .send({ reason: 'Revising the agreed features', expectedVersion: listing.recordVersion })
+        .expect(201);
+
+      const document = await read(session, WBS);
+
+      /*
+       * Through the existing authority chain, transitively: the breakdown's own
+       * prerequisite is the statement of work, and Feature Listing sits above that.
+       */
+      expect(document.currentness).toBe('OUTDATED');
+      expect(document.rows.length).toBeGreaterThan(0);
+    });
+
+    it('44. a dependency row names the work packages that wait for it', async () => {
+      const session = await throughWbs();
+      const wbs = await read(session, WBS);
+      const sheet = await generate(session, CDS);
+
+      const wbsIds = new Set(packagesOf(wbs).map((row) => row.wbsId));
+      const linked = dependenciesOf(sheet).filter((entry) => entry.wbsIds.length > 0);
+
+      expect(linked.length).toBeGreaterThan(0);
+
+      for (const dependency of linked) {
+        for (const id of dependency.wbsIds) {
+          expect(wbsIds.has(id)).toBe(true);
+        }
+      }
+    });
+
+    it('45. the breakdown surfaces the dependencies waiting on each task', async () => {
+      const session = await throughWbs();
+      const sheet = await generate(session, CDS);
+
+      const linked = dependenciesOf(sheet).find((entry) => entry.wbsIds.length > 0)!;
+      const wbsId = linked.wbsIds[0]!;
+
+      /* Derived on read, from the sheet as it stands. */
+      const document = await read(session, WBS);
+      const reverse = document.reverseDependencies!;
+
+      expect(reverse.sheetVersion).toBe(sheet.version);
+      expect(reverse.byWbsId[wbsId]).toBeDefined();
+      expect(reverse.byWbsId[wbsId]!.map((entry) => entry.dependencyKey)).toContain(
+        linked.dependencyKey,
+      );
+      expect(reverse.byWbsId[wbsId]![0]!.sheetCurrentness).toBe('CURRENT');
+    });
+
+    it('46. one dependency spans every task it affects, and one task lists all of its own', async () => {
+      const session = await throughWbs();
+      const generated = await generate(session, CDS);
+      const wbs = await read(session, WBS);
+
+      const tasks = packagesOf(wbs)
+        .filter((row) => row.level === 'TASK' && row.status !== 'EXCLUDED')
+        .slice(0, 2)
+        .map((row) => row.wbsId);
+
+      expect(tasks).toHaveLength(2);
+
+      const first = generated.rows[0]!;
+      const dependency = first.payload as ClientDependency;
+
+      /* One dependency naming both tasks. */
+      const spanning = (
+        await session.agent
+          .patch(DOCUMENT_ROUTES.row(CDS, first.rowId))
+          .set('x-csrf-token', session.csrf)
+          .send({
+            payload: { ...dependency, wbsIds: tasks },
+            expectedVersion: generated.recordVersion,
+          })
+          .expect(200)
+      ).body.document as DocumentSnapshot;
+
+      /*
+       * A second dependency on the first task only, added by hand — this fixture's
+       * approved scope legitimately yields one generated row, and "two dependencies on
+       * one task" needs two.
+       */
+      await session.agent
+        .post(DOCUMENT_ROUTES.addRow(CDS))
+        .set('x-csrf-token', session.csrf)
+        .send({
+          payload: {
+            ...dependency,
+            category: 'CONTENT',
+            dependency: 'Product catalogue export for the import',
+            wbsIds: [tasks[0]!],
+          },
+          attribution: 'Raised during the delivery walkthrough.',
+          expectedVersion: spanning.recordVersion,
+        })
+        .expect(201);
+
+      const reverse = (await read(session, WBS)).reverseDependencies!;
+
+      /*
+       * The first task waits on both; the second waits only on the one that named it.
+       * The added row's key is assigned by the application, so it is read rather than
+       * assumed — a hand-added row cannot claim an existing key.
+       */
+      const added = dependenciesOf(await read(session, CDS)).find(
+        (entry) => entry.category === 'CONTENT',
+      )!;
+
+      expect(added.dependencyKey).not.toBe(dependency.dependencyKey);
+      expect(reverse.byWbsId[tasks[0]!]!.map((entry) => entry.dependencyKey).sort()).toEqual(
+        [added.dependencyKey, dependency.dependencyKey].sort(),
+      );
+      expect(reverse.byWbsId[tasks[1]!]!.map((entry) => entry.dependencyKey)).toEqual([
+        dependency.dependencyKey,
+      ]);
+    });
+
+    it('46b. numbers a hand-added work package under the parent it was given', async () => {
+      /*
+       * Regression. `withNextKey` handled only the two Phase 8 row kinds, so adding a
+       * row by hand to either Phase 9 document stamped it with an `assumptionKey` and
+       * the payload was then refused — which made manual rows, and their attribution,
+       * impossible on both new documents.
+       */
+      const session = await throughStatementOfWork();
+      const document = await generate(session, WBS);
+      const parent = packagesOf(document).find((row) => row.level === 'FEATURE')!;
+      const template = leavesOf(document)[0]!;
+
+      const added = (
+        await session.agent
+          .post(DOCUMENT_ROUTES.addRow(WBS))
+          .set('x-csrf-token', session.csrf)
+          .send({
+            payload: {
+              ...template,
+              parentId: parent.wbsId,
+              task: 'Write the migration runbook',
+              effort: {},
+              totalEffort: 0,
+            },
+            attribution: 'Agreed with the delivery lead during planning.',
+            expectedVersion: document.recordVersion,
+          })
+          .expect(201)
+      ).body.document as DocumentSnapshot;
+
+      const mine = packagesOf(added).find((row) => row.task === 'Write the migration runbook')!;
+
+      expect(mine.wbsId.startsWith(`${parent.wbsId}.`)).toBe(true);
+
+      /* An unknown parent has nothing to hang the work under. */
+      const refused = await session.agent
+        .post(DOCUMENT_ROUTES.addRow(WBS))
+        .set('x-csrf-token', session.csrf)
+        .send({
+          payload: { ...template, parentId: '77.77', task: 'Orphan' },
+          attribution: 'Testing the refusal.',
+          expectedVersion: added.recordVersion,
+        });
+
+      expect(refused.status).toBe(422);
+      expect(JSON.stringify(refused.body)).toContain('WBS_PARENT_NOT_FOUND');
+    });
+
+    it('47. refuses a dependency pointing at work that is not in the breakdown', async () => {
+      const session = await throughWbs();
+      const document = await generate(session, CDS);
+      const row = document.rows[0]!;
+      const dependency = row.payload as ClientDependency;
+
+      const response = await session.agent
+        .patch(DOCUMENT_ROUTES.row(CDS, row.rowId))
+        .set('x-csrf-token', session.csrf)
+        .send({
+          payload: { ...dependency, wbsIds: ['99.99.99'] },
+          expectedVersion: document.recordVersion,
+        });
+
+      expect(response.status).toBe(422);
+      expect(JSON.stringify(response.body)).toContain('UNKNOWN_WBS_REFERENCE');
+    });
+
+    it('48. refuses another project any reach into this project’s dependency rows', async () => {
+      /*
+       * The cross-project protection, at the level where it actually lives.
+       *
+       * A WBS id is an outline number — "1.1.1.1.1" exists in every project — so a value
+       * copied from another project cannot be told apart from a legitimate one, and
+       * pretending to detect that would be theatre. What is real is that resolution
+       * happens inside the caller's own project: the row and the breakdown are both read
+       * for the session's project, so another project cannot reference, read or edit
+       * anything here. It is refused as not found, the same answer as one that never
+       * existed.
+       */
+      const mine = await throughWbs();
+      const document = await generate(mine, CDS);
+      const row = document.rows[0]!;
+
+      const stranger = await bareProject();
+
+      /*
+       * The stranger's read succeeds and returns *their* sheet, which has nothing in it.
+       * Scoping, not a blanket refusal: every project sees its own documents, and that
+       * is why an id cannot leak between them.
+       */
+      const theirs = await stranger.agent.get(DOCUMENT_ROUTES.document(CDS));
+
+      if (theirs.status === 200) {
+        expect((theirs.body.document as DocumentSnapshot).rows).toEqual([]);
+      } else {
+        expect([401, 404, 422]).toContain(theirs.status);
+      }
+
+      const edit = await stranger.agent
+        .patch(DOCUMENT_ROUTES.row(CDS, row.rowId))
+        .set('x-csrf-token', stranger.csrf)
+        .send({
+          payload: { ...(row.payload as ClientDependency), wbsIds: ['1.1.1.1.1'] },
+          expectedVersion: document.recordVersion,
+        });
+
+      expect([401, 404, 422]).toContain(edit.status);
+
+      /* And this project's row is exactly as it was. */
+      const after = dependenciesOf(await readDocument(mine, CDS)).find(
+        (entry) => entry.dependencyKey === (row.payload as ClientDependency).dependencyKey,
+      )!;
+
+      expect(after.wbsIds).toEqual((row.payload as ClientDependency).wbsIds);
+    });
+
+    it('49. generating the sheet leaves an issued breakdown byte for byte unchanged', async () => {
+      const session = await throughWbs();
+      const wbs = await read(session, WBS);
+
+      const issued = (
+        await session.agent
+          .post(DOCUMENT_ROUTES.markFinal(WBS))
+          .set('x-csrf-token', session.csrf)
+          .send({ acknowledged: true, expectedVersion: wbs.recordVersion })
+          .expect(201)
+      ).body.document as DocumentSnapshot;
+
+      expect(issued.status).toBe('FINAL');
+
+      /* The exact stored content, before the sheet exists. */
+      const before = JSON.stringify(issued.rows);
+
+      await generate(session, CDS);
+
+      const after = await read(session, WBS);
+
+      /* Not one byte of the issued document moved. */
+      expect(JSON.stringify(after.rows)).toBe(before);
+      expect(after.status).toBe('FINAL');
+      expect(after.version).toBe(issued.version);
+
+      /* And the reverse view is there beside it, derived rather than written in. */
+      expect(after.reverseDependencies).not.toBeNull();
+    });
+
+    it('50. marks the sheet as out of date when its links are read through the breakdown', async () => {
+      const session = await throughWbs();
+      await settle(session, CDS);
+
+      /* Reopening the breakdown makes the sheet built on it stale. */
+      const wbs = await read(session, WBS);
+
+      await session.agent
+        .post(DOCUMENT_ROUTES.reopen(WBS))
+        .set('x-csrf-token', session.csrf)
+        .send({ reason: 'Revising the breakdown', expectedVersion: wbs.recordVersion })
+        .expect(201);
+
+      const sheet = await read(session, CDS);
+
+      expect(sheet.currentness).toBe('OUTDATED');
+
+      const reverse = (await read(session, WBS)).reverseDependencies!;
+      const entries = Object.values(reverse.byWbsId).flat();
+
+      expect(entries.length).toBeGreaterThan(0);
+      expect(reverse.sheetCurrentness).toBe('OUTDATED');
+
+      /* Every entry says so, so a reader cannot take a stale link as a current claim. */
+      for (const entry of entries) {
+        expect(entry.sheetCurrentness).toBe('OUTDATED');
+      }
+    });
+
+    it('51. an internal sequencing dependency never becomes a client dependency', async () => {
+      const session = await throughWbs();
+      const wbs = await read(session, WBS);
+      const sheet = await generate(session, CDS);
+
+      /* The breakdown has internal ordering: tasks that follow other tasks. */
+      const sequenced = packagesOf(wbs).filter((row) => row.predecessors.length > 0);
+
+      expect(sequenced.length).toBeGreaterThan(0);
+
+      /*
+       * None of that ordering appears on the sheet. Every row there is something a
+       * person outside the delivery team hands over — there is no category for
+       * "internal sequencing" to file one under.
+       */
+      for (const dependency of dependenciesOf(sheet)) {
+        expect(dependency.sourceKinds.length).toBeGreaterThan(0);
+        expect(dependency.sourceKinds).not.toContain('INTERNAL');
+        expect(CLIENT_DEPENDENCY_CATEGORIES).toContain(dependency.category);
+      }
+
+      /* And a task's predecessors are not reported as things the client owes. */
+      const reverse = (await read(session, WBS)).reverseDependencies!;
+
+      for (const row of sequenced) {
+        const related = (reverse.byWbsId[row.wbsId] ?? []).map((entry) => entry.dependencyKey);
+
+        for (const predecessor of row.predecessors) {
+          expect(related).not.toContain(predecessor);
+        }
+      }
+    });
   });
 });

@@ -91,12 +91,32 @@ is how you ask for the things on it. What is outstanding, and what of it is hold
 up, is reported through `dependencySummary` and as a validation finding, where a reader
 sees it without being stopped by it.
 
+**The sheet owns the link to the breakdown, and the reverse view is derived.** A
+dependency row names the work packages waiting on it in `wbsIds`; the breakdown's own view
+of that relationship is computed on read by `reverseDependencyIndex`, never stored.
+
+The alternative — a `clientDependencyIds` field on each work package — would mean
+generating document 7 had to write into document 6. Document 6 may already be issued, and
+an issued document is history. A stored copy could also drift out of step with the sheet,
+which is the failure that matters: a task claiming to wait on a dependency the sheet no
+longer contains. Derived, there is nothing to drift.
+
+Every derived entry carries the sheet's `status` and `currentness`. A reverse link out of
+a stale sheet is still worth showing — the dependency probably still exists — but it has
+to be labelled, or the breakdown appears to make a current claim it cannot support.
+
+`wbsIds` is validated on the write path against this project's breakdown, so a dangling
+reference cannot be stored and an id belonging only to another project cannot resolve.
+
 ## Consequences
 
 Closing an item takes three deliberate actions and a note, where one tick would do. On
 a forty-row sheet that is real friction, and it is the friction that makes the record
 worth anything three months later when somebody asks when the project was unblocked and
 on whose word.
+
+Reading the breakdown costs one extra query for the sheet's rows. That is the price of
+having one authority for the relationship instead of two copies that can disagree.
 
 Refusing secret-shaped text will occasionally reject a legitimate description — a row
 about a token whose example format happens to match a pattern. The message says what it

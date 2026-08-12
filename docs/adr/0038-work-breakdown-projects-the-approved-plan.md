@@ -67,6 +67,19 @@ breakdown publishes working days, because turning day 12 into a Tuesday would in
 the commencement the estimate deliberately left open — and a client reads a date as a
 promise. A date on a relative-only plan is a BLOCKING `invented_date` finding.
 
+**Traceability runs to all four authorities, and feature coverage is measured.** A work
+package cites approved requirements, the Feature Listing rows it delivers, its Phase 6
+estimate units, and locked technologies. The feature link is derived from the approved
+chain — a listing row records the estimate units it was priced from — so nothing is
+inferred, and a unit spanning several rows keeps all of them.
+
+`workKind` separates feature work from delivery overhead. CI setup has hours and no
+listing row, because a client never agreed to it as a feature: counting it as unmapped
+would report a correct breakdown as incompletely traced, and counting it as mapped would
+invent a feature it supports. Classified, it is excluded from feature coverage and still
+fully present in the effort reconciliation. An approved feature with no work against it
+is then a BLOCKING finding rather than a number nobody computed.
+
 **A model contributes wording and grouping.** `wbsTaskDraftSchema` has no field for an
 hours figure, a day, a date, a critical-path flag or a status, so a model that tries to
 state one produces a parse failure rather than a plausible number that quietly
@@ -82,6 +95,10 @@ there, re-approve, and regenerate. Three steps instead of one.
 
 That is the right trade. The alternative is a plan that changed without an approval
 behind it, and an estimate that no longer describes the project it was approved for.
+
+Feature coverage means this document can be blocked by a gap that is genuinely upstream's
+to fix — an agreed feature the estimate never priced. That is the right place to find out,
+and the finding names the feature rather than the symptom.
 
 Re-estimating underneath an approved breakdown correctly makes the whole downstream
 chain non-authoritative, so the engine reports `prerequisite_not_approved` before it

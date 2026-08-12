@@ -9,7 +9,11 @@ import { documentRowSchema } from './document-row.contract';
 import { criteriaCoverageSchema } from './acceptance-criteria.contract';
 import { assumptionSummarySchema } from './assumptions.contract';
 import { dependencySummarySchema } from './client-dependency.contract';
-import { wbsCoverageSchema, wbsReconciliationSchema } from './work-breakdown.contract';
+import {
+  reverseDependencyIndexSchema,
+  wbsCoverageSchema,
+  wbsReconciliationSchema,
+} from './work-breakdown.contract';
 import { sowScopeReconciliationSchema } from './statement-of-work.contract';
 import {
   featureCoverageSchema,
@@ -155,6 +159,15 @@ export const documentSnapshotSchema = z
     wbsCoverage: wbsCoverageSchema.nullable(),
     /** What is outstanding on the dependency sheet, and what of it blocks work. */
     dependencySummary: dependencySummarySchema.nullable(),
+    /**
+     * Client dependencies that name each work package, derived on read.
+     *
+     * Present on the work breakdown only, and null until a dependency sheet exists. Not
+     * stored content: the sheet owns the relationship, and this is it read backwards so
+     * a reader on a task can see what it waits for without generating document 7 having
+     * to rewrite document 6.
+     */
+    reverseDependencies: reverseDependencyIndexSchema.nullable(),
 
     /* Provenance. */
     generator: generatorMetadataSchema.nullable(),

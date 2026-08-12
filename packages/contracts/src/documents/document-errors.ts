@@ -52,6 +52,7 @@ export const DOCUMENT_ERROR_CODES = {
   DEPENDENCY_VALIDATION_NOTE_REQUIRED: 'DEPENDENCY_VALIDATION_NOTE_REQUIRED',
   DEPENDENCY_STATUS_NOT_EDITABLE_HERE: 'DEPENDENCY_STATUS_NOT_EDITABLE_HERE',
   WBS_PARENT_NOT_FOUND: 'WBS_PARENT_NOT_FOUND',
+  UNKNOWN_WBS_REFERENCE: 'UNKNOWN_WBS_REFERENCE',
 } as const;
 
 export type DocumentErrorCode = (typeof DOCUMENT_ERROR_CODES)[keyof typeof DOCUMENT_ERROR_CODES];
@@ -121,4 +122,6 @@ export const DOCUMENT_ERROR_MESSAGES: Readonly<Record<DocumentErrorCode, string>
     'Whether something has been requested, received or accepted is recorded through the actions on the row, so the dates and the decision are captured together rather than typed in.',
   WBS_PARENT_NOT_FOUND:
     'That parent is not part of this breakdown, so there is nothing to add the work under.',
+  UNKNOWN_WBS_REFERENCE:
+    'One of the work items referenced is not in this project’s work breakdown. A dependency has to point at work that exists, or nobody can tell what it is holding up.',
 };

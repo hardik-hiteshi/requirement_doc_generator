@@ -2,6 +2,7 @@ import {
   UNDERSTANDING_SECTIONS,
   type ClientDependency,
   type EstimateUnit,
+  type FeatureRow,
   type RequirementItem,
   type WorkPackage,
 } from '@wdrg/contracts';
@@ -82,6 +83,17 @@ function unit(overrides: Partial<EstimateUnit> = {}): EstimateUnit {
   } as EstimateUnit;
 }
 
+/** No approved documents. Each suite fills in only what it needs. */
+const emptyDocuments: UpstreamContext['documents'] = {
+  understanding: null,
+  featureListing: null,
+  acceptanceCriteria: null,
+  assumptions: null,
+  statementOfWork: null,
+  workBreakdown: null,
+  clientDependencies: null,
+};
+
 function context(overrides: Partial<UpstreamContext> = {}): UpstreamContext {
   const requirements = overrides.requirements ?? [requirement()];
 
@@ -107,16 +119,7 @@ function context(overrides: Partial<UpstreamContext> = {}): UpstreamContext {
     upstreamBlockers: [],
     timeline: { basis: 'RELATIVE', workingWeeks: 4, acknowledgedRisk: false },
     plan: null,
-    /* No approved documents by default: each suite fills in what it needs. */
-    documents: {
-      understanding: null,
-      featureListing: null,
-      acceptanceCriteria: null,
-      assumptions: null,
-      statementOfWork: null,
-      workBreakdown: null,
-      clientDependencies: null,
-    },
+    documents: emptyDocuments,
     ...overrides,
   };
 }
@@ -752,6 +755,184 @@ describe('WorkBreakdownComposer', () => {
 
   it('produces nothing at all without an approved plan', () => {
     expect(composer.compose(context({ plan: null })).rows).toEqual([]);
+  });
+
+  /* ------------------------------------- Feature Listing traceability */
+
+  /**
+   * The approved chain, not a guess.
+   *
+   * A Feature Listing row records the estimate units it was priced from, so that link —
+   * approved when the listing was — is the mapping. Nothing here infers one.
+   */
+  const listing = (
+    features: readonly Partial<FeatureRow>[] = [{ featureId: 'ftr_1', estimateUnitIds: ['eu_1'] }],
+  ) => ({
+    version: 1,
+    features: features.map(
+      (feature) =>
+        ({
+          featureId: 'ftr_1',
+          requirementIds: ['REQ-001'],
+          module: 'Timesheets',
+          submodule: '',
+          screen: '',
+          description: 'Record a timesheet',
+          effort: {},
+          totalHours: 18,
+          estimateUnitIds: ['eu_1'],
+          technologyIds: [],
+          references: [],
+          reviewStatus: 'GENERATED',
+          mappingConfidence: 0.8,
+          notes: '',
+          order: 0,
+          ...feature,
+        }) as unknown as FeatureRow,
+    ),
+    excludedRequirementIds: [],
+  });
+
+  it('carries the Feature Listing ids the estimate unit was priced into', () => {
+    const rows = packages(
+      context({ plan: plan(), documents: { ...emptyDocuments, featureListing: listing() } }),
+    );
+
+    const leaf = rows.find((row) => row.level === 'TASK')!;
+
+    expect(leaf.featureIds).toEqual(['ftr_1']);
+    expect(leaf.workKind).toBe('FEATURE');
+  });
+
+  it('keeps every feature row that shares the estimate unit', () => {
+    const rows = packages(
+      context({
+        plan: plan(),
+        documents: {
+          ...emptyDocuments,
+          featureListing: listing([
+            { featureId: 'ftr_1', estimateUnitIds: ['eu_1'] },
+            { featureId: 'ftr_2', estimateUnitIds: ['eu_1'] },
+          ]),
+        },
+      }),
+    );
+
+    expect(rows.find((row) => row.level === 'TASK')!.featureIds).toEqual(['ftr_1', 'ftr_2']);
+  });
+
+  it('falls back to the shared requirement when the listing has no unit link', () => {
+    /* Also an approved relationship, just a coarser one — used only where the better one is absent. */
+    const rows = packages(
+      context({
+        plan: plan(),
+        documents: {
+          ...emptyDocuments,
+          featureListing: listing([
+            { featureId: 'ftr_9', estimateUnitIds: [], requirementIds: ['REQ-001'] },
+          ]),
+        },
+      }),
+    );
+
+    expect(rows.find((row) => row.level === 'TASK')!.featureIds).toEqual(['ftr_9']);
+  });
+
+  it('classifies overhead as delivery work with no feature, rather than inventing one', () => {
+    const rows = packages(
+      context({
+        plan: plan({
+          effortByRole: { BACKEND: 8, FRONTEND: 6, QA: 4, DEVOPS: 6 },
+          tasks: [
+            ...plan().tasks,
+            {
+              taskId: 'eu_ci',
+              startDay: 1,
+              endDay: 1,
+              durationDays: 1,
+              role: 'DEVOPS',
+              hours: 6,
+              predecessorIds: [],
+              slackDays: 2,
+              onCriticalPath: false,
+            },
+          ],
+        }),
+        documents: { ...emptyDocuments, featureListing: listing() },
+        estimateUnits: [
+          unit(),
+          unit({
+            id: 'eu_ci',
+            key: 'EST-002',
+            feature: 'Pipeline',
+            overheadActivity: 'ci_cd',
+            effort: { DEVOPS: 6 },
+            totalHours: 6,
+            requirementIds: [],
+          }),
+        ],
+      }),
+    );
+
+    const overhead = rows.find(
+      (row) => row.estimateUnitIds.includes('eu_ci') && row.level === 'TASK',
+    )!;
+
+    expect(overhead.workKind).toBe('OVERHEAD');
+    expect(overhead.featureIds).toEqual([]);
+  });
+
+  it('reports live feature coverage, and drops when an approved feature has no work', () => {
+    const ctx = context({
+      plan: plan(),
+      documents: {
+        ...emptyDocuments,
+        featureListing: listing([
+          { featureId: 'ftr_1', estimateUnitIds: ['eu_1'] },
+          { featureId: 'ftr_unbuilt', estimateUnitIds: [], requirementIds: ['REQ-404'] },
+        ]),
+      },
+    });
+
+    const coverage = composer.coverageFor({
+      context: ctx,
+      sections: [],
+      features: [],
+      rows: packages(ctx).map((payload, index) => ({
+        rowId: `drw_${index}`,
+        kind: 'WORK_PACKAGE' as const,
+        order: index,
+        origin: 'GENERATED' as const,
+        references: [],
+        payload,
+        updatedAt: '2026-08-10T00:00:00.000Z',
+      })),
+      excludedRequirementIds: [],
+      baselineCurrent: true,
+    });
+
+    expect(coverage.applicableFeatures).toBe(2);
+    expect(coverage.mappedFeatures).toBe(1);
+    expect(coverage.unmappedFeatureIds).toEqual(['ftr_unbuilt']);
+    expect(coverage.complete).toBe(false);
+  });
+
+  it('blocks a task citing a feature the listing does not contain', () => {
+    const ctx = context({
+      plan: plan(),
+      documents: { ...emptyDocuments, featureListing: listing() },
+    });
+
+    const rows = packages(ctx).map((row) =>
+      row.level === 'TASK' ? { ...row, featureIds: ['ftr_gone'] } : row,
+    );
+
+    expect(
+      validate(ctx, rows).some(
+        (finding) =>
+          finding.kind === 'unknown_feature_reference' && finding.severity === 'BLOCKING',
+      ),
+    ).toBe(true);
   });
 
   /* ------------------------------------------------------- validation */

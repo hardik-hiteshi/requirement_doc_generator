@@ -27,6 +27,10 @@ import {
   assumptionSchema,
   canTransitionDependency,
   clientDependencySchema,
+  isDependencySatisfied,
+  nextDependencyKey,
+  nextOutlineNumber,
+  reverseDependencyIndex,
   secretsInDependency,
   workPackageSchema,
   canTransitionAssumption,
@@ -68,6 +72,8 @@ import {
   type DocumentSummary,
   type ClientDependency,
   type DependencyStatus,
+  type WorkPackage,
+  type ReverseDependencyIndex,
   type ReceiveDependency,
   type RequestDependency,
   type ValidateDependency,
@@ -1787,6 +1793,20 @@ export class DocumentsService {
         ? this.clientDependencies.summaryFor(validationInput)
         : null;
 
+    /*
+     * The reverse view of the dependency relationship, derived on every read.
+     *
+     * The sheet owns the link in its own `wbsIds`; this reads it backwards so somebody
+     * on a work package can see what it waits for. Derived rather than stored, because
+     * storing it would mean generating document 7 had to rewrite document 6 — including
+     * an issued one — and an issued document is history. It also cannot drift: there is
+     * no second copy to disagree with the sheet.
+     */
+    const reverseDependencies =
+      type === 'WORK_BREAKDOWN_STRUCTURE'
+        ? await this.reverseDependencyLinks(context, upstream)
+        : null;
+
     const unapproved = DOCUMENT_DEPENDENCIES[type].documents.filter((prerequisite) => {
       const state = upstream.documentStates[prerequisite];
 
@@ -1840,6 +1860,52 @@ export class DocumentsService {
       wbsReconciliation,
       wbsCoverage,
       dependencySummary,
+      reverseDependencies,
+    });
+  }
+
+  /**
+   * Client dependencies that name each work package, read from the sheet as it stands.
+   *
+   * The sheet is read whatever state it is in — draft, approved, issued or stale — and
+   * its status and currentness travel with every entry. A reverse link into a stale
+   * sheet is still useful, and a reader has to be told it is stale or the breakdown
+   * appears to make a current claim it cannot support.
+   */
+  private async reverseDependencyLinks(
+    context: DocumentContext,
+    upstream: UpstreamSnapshot,
+  ): Promise<ReverseDependencyIndex | null> {
+    const sheet = await this.repository.find(context.projectId, 'CLIENT_DEPENDENCY_SHEET');
+
+    if (!sheet) {
+      return null;
+    }
+
+    const rows = await this.repository.listRows(
+      context.projectId,
+      'CLIENT_DEPENDENCY_SHEET',
+      sheet.version,
+    );
+
+    const state = upstream.documentStates.CLIENT_DEPENDENCY_SHEET;
+
+    return reverseDependencyIndex({
+      dependencies: rows
+        .filter((row) => !row.excludedReason)
+        .map((row) => row.payload as unknown as ClientDependency)
+        .map((dependency) => ({
+          dependencyKey: dependency.dependencyKey,
+          dependency: dependency.dependency,
+          category: dependency.category,
+          status: dependency.status,
+          blocking: dependency.blocking,
+          wbsIds: dependency.wbsIds,
+          satisfied: isDependencySatisfied(dependency.status),
+        })),
+      sheetVersion: sheet.version,
+      sheetStatus: sheet.status,
+      sheetCurrentness: state?.currentness ?? 'CURRENT',
     });
   }
 
@@ -2003,6 +2069,19 @@ export class DocumentsService {
     const merged = { ...row.payload, ...(request.payload as Record<string, unknown>) };
     const payload = this.parseRowPayload(type, merged, row.payload);
 
+    /*
+     * A dependency may only point at work that exists in *this* project's breakdown.
+     *
+     * Checked here rather than only in validation because this is the field that makes
+     * the reverse view work: a dangling id would produce a navigation link to nothing,
+     * and an id belonging to another project would be a cross-project reference. The
+     * breakdown is read through the caller's own session, so an id from elsewhere is
+     * simply not found — the same answer as one that never existed.
+     */
+    if (type === 'CLIENT_DEPENDENCY_SHEET') {
+      await this.assertKnownWbsIds(context, payload);
+    }
+
     const references = request.referenceIds
       ? await this.verifiedReferences(context, type, request.referenceIds)
       : (row.references as unknown as DocumentReference[]);
@@ -2048,6 +2127,11 @@ export class DocumentsService {
       this.withNextKey(type, request.payload as Record<string, unknown>, existing),
       null,
     );
+
+    /* A hand-added dependency may only point at work that exists here, as on edit. */
+    if (type === 'CLIENT_DEPENDENCY_SHEET') {
+      await this.assertKnownWbsIds(context, payload);
+    }
 
     const references = await this.verifiedReferences(context, type, request.referenceIds ?? []);
 
@@ -2513,6 +2597,46 @@ export class DocumentsService {
     return this.reload(context, type);
   }
 
+  /**
+   * Every WBS id a dependency names must be in this project's current breakdown.
+   *
+   * The breakdown is fetched for the session's own project, so an id from another
+   * project cannot resolve — cross-project references are refused by the same check that
+   * refuses a typo, and neither is told apart in the response.
+   */
+  private async assertKnownWbsIds(
+    context: DocumentContext,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const wbsIds = (payload.wbsIds as string[] | undefined) ?? [];
+
+    if (wbsIds.length === 0) {
+      return;
+    }
+
+    const breakdown = await this.repository.find(context.projectId, 'WORK_BREAKDOWN_STRUCTURE');
+
+    const known = breakdown
+      ? new Set(
+          (
+            await this.repository.listRows(
+              context.projectId,
+              'WORK_BREAKDOWN_STRUCTURE',
+              breakdown.version,
+            )
+          ).map((row) => (row.payload as unknown as WorkPackage).wbsId),
+        )
+      : new Set<string>();
+
+    const unknown = wbsIds.filter((id) => !known.has(id));
+
+    if (unknown.length > 0) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.UNKNOWN_WBS_REFERENCE, 422, undefined, {
+        unknown: unknown.slice(0, 20),
+      });
+    }
+  }
+
   /* ----------------------------------------------------- row internals */
 
   private async expectRow(
@@ -2725,9 +2849,34 @@ export class DocumentsService {
   ): Record<string, unknown> {
     const keys = existing.map((row) => DocumentsService.rowKey(row.payload));
 
-    return type === 'ACCEPTANCE_CRITERIA'
-      ? { ...payload, criterionKey: nextCriterionKey(keys) }
-      : { ...payload, assumptionKey: nextAssumptionKey(keys) };
+    if (type === 'ACCEPTANCE_CRITERIA') {
+      return { ...payload, criterionKey: nextCriterionKey(keys) };
+    }
+
+    if (type === 'CLIENT_DEPENDENCY_SHEET') {
+      return { ...payload, dependencyKey: nextDependencyKey(keys) };
+    }
+
+    if (type === 'WORK_BREAKDOWN_STRUCTURE') {
+      /*
+       * A hand-added work package is numbered under the parent it was given, so it
+       * lands in the outline where somebody put it rather than at the end of the tree.
+       * An unknown parent is refused: there is nothing to add the work under, and a row
+       * numbered against a parent that does not exist would break the hierarchy checks.
+       */
+      const parentId = typeof payload.parentId === 'string' ? payload.parentId : undefined;
+
+      if (
+        parentId !== undefined &&
+        !existing.some((row) => (row.payload as { wbsId?: string }).wbsId === parentId)
+      ) {
+        throw new DocumentError(DOCUMENT_ERROR_CODES.WBS_PARENT_NOT_FOUND, 422);
+      }
+
+      return { ...payload, wbsId: nextOutlineNumber(parentId, keys) };
+    }
+
+    return { ...payload, assumptionKey: nextAssumptionKey(keys) };
   }
 
   /**
@@ -3102,6 +3251,7 @@ export class DocumentsService {
       wbsReconciliation: null,
       wbsCoverage: null,
       dependencySummary: null,
+      reverseDependencies: null,
       scopeReconciliation: null,
       validation: null,
       blockers: [

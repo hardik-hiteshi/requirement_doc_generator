@@ -20,6 +20,7 @@ import {
 import {
   WBS_LEVELS,
   allocateEffort,
+  reverseDependencyIndex,
   allocateRoleEffort,
   calculateWbsCoverage,
   isLeafLevel,
@@ -66,6 +67,7 @@ function workPackage(overrides: Partial<WorkPackage> = {}): WorkPackage {
     feature: 'Card payment',
     task: 'Implement the card payment endpoint',
     description: 'Server-side card charge against the approved provider.',
+    workKind: 'FEATURE',
     requirementIds: ['REQ-001'],
     featureIds: ['F-001'],
     estimateUnitIds: ['E-001'],
@@ -80,8 +82,6 @@ function workPackage(overrides: Partial<WorkPackage> = {}): WorkPackage {
     parallelizable: false,
     onCriticalPath: true,
     deliverable: 'A working card payment endpoint',
-    clientDependencyIds: [],
-    internalDependencyIds: [],
     status: 'NOT_STARTED',
     notes: '',
     ...overrides,
@@ -318,6 +318,79 @@ describe('calculateWbsCoverage', () => {
 
     expect(coverage.complete).toBe(true);
     expect(coverage.mappedRequirements).toBe(1);
+    expect(coverage.mappedFeatures).toBe(1);
+  });
+
+  /*
+   * Feature coverage is a measurement, not a formality. These four are the ones that
+   * would pass whether or not the calculation looked at features at all, so each is
+   * written to fail if it ever stops doing so.
+   */
+  it('drops below complete when an approved feature has no work against it', () => {
+    const coverage = calculateWbsCoverage({
+      applicableRequirementIds: ['REQ-001'],
+      applicableFeatureIds: ['F-001', 'F-002'],
+      applicableEstimateUnitIds: ['E-001'],
+      leaves: [workPackage()],
+    });
+
+    expect(coverage.unmappedFeatureIds).toEqual(['F-002']);
+    expect(coverage.mappedFeatures).toBe(1);
+    expect(coverage.applicableFeatures).toBe(2);
+    expect(coverage.complete).toBe(false);
+  });
+
+  it('rejects a task citing a feature the listing does not contain', () => {
+    const coverage = calculateWbsCoverage({
+      applicableRequirementIds: ['REQ-001'],
+      applicableFeatureIds: ['F-001'],
+      applicableEstimateUnitIds: ['E-001'],
+      leaves: [workPackage({ featureIds: ['F-001', 'F-999'] })],
+    });
+
+    expect(coverage.unknownFeatureIds).toEqual(['F-999']);
+    expect(coverage.complete).toBe(false);
+  });
+
+  it('does not let overhead work reduce feature coverage', () => {
+    /*
+     * CI setup has no Feature Listing row and should not have one. Counting it as
+     * untraced would report a breakdown as incomplete for being exactly right.
+     */
+    const coverage = calculateWbsCoverage({
+      applicableRequirementIds: ['REQ-001'],
+      applicableFeatureIds: ['F-001'],
+      applicableEstimateUnitIds: ['E-001', 'E-002'],
+      leaves: [
+        workPackage(),
+        workPackage({
+          wbsId: '1.2.1',
+          workKind: 'OVERHEAD',
+          featureIds: [],
+          requirementIds: [],
+          estimateUnitIds: ['E-002'],
+          effort: { DEVOPS: 6 },
+          totalEffort: 6,
+        }),
+      ],
+    });
+
+    expect(coverage.complete).toBe(true);
+    expect(coverage.overheadWbsIds).toEqual(['1.2.1']);
+    expect(coverage.overheadHours).toBe(6);
+    expect(coverage.untracedFeatureWorkIds).toEqual([]);
+  });
+
+  it('flags feature work that carries no feature', () => {
+    const coverage = calculateWbsCoverage({
+      applicableRequirementIds: [],
+      applicableFeatureIds: [],
+      applicableEstimateUnitIds: ['E-001'],
+      leaves: [workPackage({ featureIds: [], workKind: 'FEATURE' })],
+    });
+
+    expect(coverage.untracedFeatureWorkIds).toEqual(['1.1.1']);
+    expect(coverage.complete).toBe(false);
   });
 
   it('names the requirements no task covers', () => {
@@ -783,5 +856,94 @@ describe('clientDependencyDraftSchema', () => {
     ]) {
       expect(clientDependencyDraftSchema.safeParse({ ...base, ...extra }).success).toBe(false);
     }
+  });
+});
+
+/* ============================================ the derived reverse index */
+
+/**
+ * The reverse view of the dependency relationship.
+ *
+ * The Client Dependency Sheet owns the link in its own `wbsIds`; this reads it backwards
+ * so a work package can show what it waits for. Derived rather than stored, so
+ * generating document 7 never has to rewrite document 6 — including an issued one.
+ */
+describe('reverseDependencyIndex', () => {
+  const link = (overrides: Record<string, unknown> = {}) => ({
+    dependencyKey: 'CD-001',
+    dependency: 'Sandbox credentials for the payment provider',
+    category: 'CREDENTIALS',
+    status: 'REQUESTED',
+    blocking: 'FEATURE',
+    wbsIds: ['1.1.1'],
+    satisfied: false,
+    ...overrides,
+  });
+
+  const index = (dependencies: readonly ReturnType<typeof link>[], overrides = {}) =>
+    reverseDependencyIndex({
+      dependencies,
+      sheetVersion: 1,
+      sheetStatus: 'APPROVED',
+      sheetCurrentness: 'CURRENT' as const,
+      ...overrides,
+    });
+
+  it('lets a work package find the dependency that names it', () => {
+    const result = index([link()]);
+
+    expect(result.byWbsId['1.1.1']).toHaveLength(1);
+    expect(result.byWbsId['1.1.1']![0]!.dependencyKey).toBe('CD-001');
+  });
+
+  it('lists every dependency waiting on one task', () => {
+    const result = index([link(), link({ dependencyKey: 'CD-002', category: 'CONTENT' })]);
+
+    expect(result.byWbsId['1.1.1']!.map((entry) => entry.dependencyKey)).toEqual([
+      'CD-001',
+      'CD-002',
+    ]);
+  });
+
+  it('shows one dependency against every task it affects', () => {
+    const result = index([link({ wbsIds: ['1.1.1', '1.1.2', '1.2.1'] })]);
+
+    for (const wbsId of ['1.1.1', '1.1.2', '1.2.1']) {
+      expect(result.byWbsId[wbsId]!.map((entry) => entry.dependencyKey)).toEqual(['CD-001']);
+    }
+  });
+
+  it('has no entry for a task nothing waits on', () => {
+    expect(index([link()]).byWbsId['9.9.9']).toBeUndefined();
+  });
+
+  it('marks a blocking outstanding item, and a satisfied one as not blocking', () => {
+    expect(index([link()]).byWbsId['1.1.1']![0]!.blockingOutstanding).toBe(true);
+
+    expect(
+      index([link({ status: 'ACCEPTED', satisfied: true })]).byWbsId['1.1.1']![0]!
+        .blockingOutstanding,
+    ).toBe(false);
+
+    /* Nothing waiting on it is not blocking, whatever its status. */
+    expect(index([link({ blocking: 'NONE' })]).byWbsId['1.1.1']![0]!.blockingOutstanding).toBe(
+      false,
+    );
+  });
+
+  it('carries the sheet’s currentness onto every entry', () => {
+    /*
+     * A reverse link into a stale sheet is still worth showing — the dependency probably
+     * still exists — but a reader has to be told, or the breakdown appears to make a
+     * current claim it cannot support.
+     */
+    const result = index([link()], { sheetCurrentness: 'OUTDATED' as const });
+
+    expect(result.sheetCurrentness).toBe('OUTDATED');
+    expect(result.byWbsId['1.1.1']![0]!.sheetCurrentness).toBe('OUTDATED');
+  });
+
+  it('is empty when no dependency names any work', () => {
+    expect(index([link({ wbsIds: [] })]).byWbsId).toEqual({});
   });
 });

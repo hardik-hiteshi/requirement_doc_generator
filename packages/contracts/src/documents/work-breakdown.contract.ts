@@ -67,6 +67,27 @@ export function isLeafLevel(level: WbsLevel): boolean {
   return level === 'TASK';
 }
 
+/**
+ * Whether this work delivers an agreed feature or supports the delivery of all of them.
+ *
+ * The distinction exists to keep feature coverage honest. Environment setup, CI, code
+ * review and release stabilisation are real work with real hours and no Feature Listing
+ * row — because a client never agreed to "CI setup" as a feature. Counting them as
+ * unmapped feature work would report a breakdown as incompletely traced for doing
+ * exactly the right thing; counting them as mapped would invent a feature they support.
+ *
+ * So they are classified, explicitly, and excluded from the feature-coverage judgement
+ * while remaining fully present in the effort reconciliation.
+ */
+export const WBS_WORK_KINDS = ['FEATURE', 'OVERHEAD'] as const;
+
+export type WbsWorkKind = (typeof WBS_WORK_KINDS)[number];
+
+export const WBS_WORK_KIND_LABELS: Readonly<Record<WbsWorkKind, string>> = {
+  FEATURE: 'Feature work',
+  OVERHEAD: 'Delivery overhead',
+};
+
 /* --------------------------------------------------------------- status */
 
 export const WBS_TASK_STATUSES = [
@@ -109,8 +130,26 @@ export const workPackageSchema = z
     task: z.string().max(300),
     description: z.string().max(2_000),
 
+    /**
+     * Whether this delivers an agreed feature or supports delivery generally.
+     *
+     * Feature work must trace to at least one Feature Listing row; overhead must not
+     * pretend to. See `WBS_WORK_KINDS`.
+     */
+    workKind: z.enum(WBS_WORK_KINDS),
+
     /* Traceability. Every leaf has at least one estimate unit. */
     requirementIds: z.array(z.string().max(64)).max(60),
+    /**
+     * Feature Listing rows this work delivers.
+     *
+     * Derived from the approved chain rather than guessed: a Feature Listing row already
+     * records the estimate units it was priced from, so a task built from unit E-004
+     * belongs to whichever rows cite E-004. Where the listing predates that link, the
+     * shared requirement keys are the fallback — also an approved relationship.
+     *
+     * Empty for overhead work, and empty is then the correct answer.
+     */
     featureIds: z.array(z.string().max(64)).max(60),
     estimateUnitIds: z.array(z.string().max(64)).max(60),
     technologyIds: z.array(z.string().max(64)).max(40),
@@ -159,14 +198,18 @@ export const workPackageSchema = z
     slackDays: z.number().int().min(0).optional(),
     onCriticalPath: z.boolean(),
 
-    /* What it produces and what it waits for. */
+    /* What it produces. */
     /** Approved milestone this contributes to. */
     milestoneId: z.string().max(64).optional(),
     deliverable: z.string().max(300),
-    /** Client Dependency Sheet rows this work waits on. */
-    clientDependencyIds: z.array(z.string().max(64)).max(40),
-    /** Other WBS rows it depends on for reasons other than sequence. */
-    internalDependencyIds: z.array(z.string().max(64)).max(40),
+    /*
+     * Client dependencies are deliberately *not* stored here.
+     *
+     * The Client Dependency Sheet is generated after this document and owns the link,
+     * in its own `wbsIds`. Storing the reverse direction on a work package would mean
+     * generating document 7 had to rewrite document 6 — including an issued one — so
+     * the reverse view is derived on read instead. See `reverseDependencyIndex`.
+     */
     /** The estimate's own uncertainty for this work, quoted not judged. */
     uncertainty: z.string().max(20).optional(),
 
@@ -308,7 +351,8 @@ export function reconcileWbsEffort(input: {
   const wbsByRole: Record<string, number> = {};
 
   for (const leaf of counted) {
-    for (const [role, hours] of Object.entries(leaf.effort)) {
+    /* A task with no hours recorded is legitimate; it must not be a crash. */
+    for (const [role, hours] of Object.entries(leaf.effort ?? {})) {
       wbsByRole[role] = roundHours((wbsByRole[role] ?? 0) + hours);
     }
   }
@@ -357,29 +401,60 @@ export const wbsCoverageSchema = z
     applicableRequirements: z.number().int().nonnegative(),
     mappedRequirements: z.number().int().nonnegative(),
     unmappedRequirementIds: z.array(z.string().max(64)).max(500),
+    /** Approved Feature Listing rows this breakdown is answerable for. */
     applicableFeatures: z.number().int().nonnegative(),
     mappedFeatures: z.number().int().nonnegative(),
+    /** Approved features with no work package against them. */
     unmappedFeatureIds: z.array(z.string().max(64)).max(500),
     applicableEstimateUnits: z.number().int().nonnegative(),
     mappedEstimateUnits: z.number().int().nonnegative(),
     /** Tasks that trace to nothing at all. */
     unsupportedWbsIds: z.array(z.string().max(64)).max(500),
+    /**
+     * Work deliberately classified as delivery overhead.
+     *
+     * Reported rather than hidden: a reader should be able to see that eleven tasks
+     * carry no feature because they support all of them, not wonder why the feature
+     * count is lower than the task count.
+     */
+    overheadWbsIds: z.array(z.string().max(64)).max(500),
+    overheadHours: z.number().min(0),
+    /** Feature work that cites a feature the current listing does not contain. */
+    unknownFeatureIds: z.array(z.string().max(64)).max(500),
+    /** Feature work carrying no feature at all, which overhead may legitimately do. */
+    untracedFeatureWorkIds: z.array(z.string().max(64)).max(500),
     complete: z.boolean(),
   })
   .strict();
 
 export type WbsCoverage = z.infer<typeof wbsCoverageSchema>;
 
+/**
+ * What this breakdown covers, and what it deliberately does not.
+ *
+ * Feature coverage is a real measurement here, not a formality: it is calculated from
+ * the feature ids the work packages actually carry, so an approved feature with no work
+ * against it drops the figure below complete. Overhead is excluded from that judgement
+ * by classification rather than by being quietly ignored — see `WBS_WORK_KINDS`.
+ */
 export function calculateWbsCoverage(input: {
   readonly applicableRequirementIds: readonly string[];
   readonly applicableFeatureIds: readonly string[];
   readonly applicableEstimateUnitIds: readonly string[];
   readonly leaves: readonly Pick<
     WorkPackage,
-    'wbsId' | 'requirementIds' | 'featureIds' | 'estimateUnitIds' | 'status'
+    | 'wbsId'
+    | 'requirementIds'
+    | 'featureIds'
+    | 'estimateUnitIds'
+    | 'status'
+    | 'workKind'
+    | 'totalEffort'
   >[];
 }): WbsCoverage {
   const counted = input.leaves.filter((leaf) => leaf.status !== 'EXCLUDED');
+  const featureWork = counted.filter((leaf) => leaf.workKind === 'FEATURE');
+  const overhead = counted.filter((leaf) => leaf.workKind === 'OVERHEAD');
 
   const requirements = new Set(counted.flatMap((leaf) => leaf.requirementIds));
   const features = new Set(counted.flatMap((leaf) => leaf.featureIds));
@@ -389,6 +464,21 @@ export function calculateWbsCoverage(input: {
     (id) => !requirements.has(id),
   );
   const unmappedFeatureIds = input.applicableFeatureIds.filter((id) => !features.has(id));
+
+  const approvedFeatures = new Set(input.applicableFeatureIds);
+  const unknownFeatureIds = [
+    ...new Set(
+      counted.flatMap((leaf) => leaf.featureIds.filter((id) => !approvedFeatures.has(id))),
+    ),
+  ];
+
+  /*
+   * Feature work with no feature. Overhead is excluded by construction: it is
+   * *supposed* to carry none, and flagging it would penalise the correct answer.
+   */
+  const untracedFeatureWorkIds = featureWork
+    .filter((leaf) => leaf.featureIds.length === 0)
+    .map((leaf) => leaf.wbsId);
 
   const unsupportedWbsIds = counted
     .filter(
@@ -409,9 +499,15 @@ export function calculateWbsCoverage(input: {
     applicableEstimateUnits: input.applicableEstimateUnitIds.length,
     mappedEstimateUnits: input.applicableEstimateUnitIds.filter((id) => units.has(id)).length,
     unsupportedWbsIds,
+    overheadWbsIds: overhead.map((leaf) => leaf.wbsId),
+    overheadHours: roundHours(overhead.reduce((sum, leaf) => sum + leaf.totalEffort, 0)),
+    unknownFeatureIds,
+    untracedFeatureWorkIds,
     complete:
       unmappedRequirementIds.length === 0 &&
       unmappedFeatureIds.length === 0 &&
+      unknownFeatureIds.length === 0 &&
+      untracedFeatureWorkIds.length === 0 &&
       unsupportedWbsIds.length === 0 &&
       input.applicableEstimateUnitIds.every((id) => units.has(id)),
   };
@@ -631,3 +727,96 @@ export const wbsTaskDraftSchema = z
   .strict();
 
 export type WbsTaskDraft = z.infer<typeof wbsTaskDraftSchema>;
+
+/* --------------------------------------------- the derived reverse index */
+
+/**
+ * One client dependency, as seen from the work package that waits for it.
+ *
+ * A projection, not stored content. The Client Dependency Sheet owns the relationship
+ * in its own `wbsIds`; this is that relationship read backwards so somebody looking at a
+ * task can see what it is waiting on.
+ *
+ * `sheetStatus` and `sheetCurrentness` travel with every entry because the answer is
+ * only as good as the document it came from. A reverse link into an approved-but-stale
+ * sheet is still worth showing — the client dependency probably still exists — but a
+ * reader has to be told, or the breakdown appears to make a current claim it cannot
+ * support.
+ */
+export const relatedDependencySchema = z
+  .object({
+    dependencyKey: z.string().max(64),
+    dependency: z.string().max(300),
+    category: z.string().max(40),
+    status: z.string().max(40),
+    blocking: z.string().max(40),
+    /** True when this is outstanding and something is waiting on it. */
+    blockingOutstanding: z.boolean(),
+    /** The state of the sheet this came from, so a stale answer says so. */
+    sheetStatus: z.string().max(40),
+    sheetCurrentness: z.enum(['CURRENT', 'OUTDATED']),
+  })
+  .strict();
+
+export type RelatedDependency = z.infer<typeof relatedDependencySchema>;
+
+export const reverseDependencyIndexSchema = z
+  .object({
+    /** Keyed by WBS outline number. Absent keys have nothing waiting on them. */
+    byWbsId: z.record(z.string().max(64), z.array(relatedDependencySchema).max(40)),
+    /** The sheet these links were derived from, or null when there is none yet. */
+    sheetVersion: z.number().int().nonnegative().nullable(),
+    sheetStatus: z.string().max(40).nullable(),
+    sheetCurrentness: z.enum(['CURRENT', 'OUTDATED']).nullable(),
+  })
+  .strict();
+
+export type ReverseDependencyIndex = z.infer<typeof reverseDependencyIndexSchema>;
+
+/**
+ * Turn the sheet's forward links into the reverse view a work package needs.
+ *
+ * Pure, so the engine can compute it on every read without a stored copy that could
+ * disagree with the sheet. A dependency naming three tasks appears against all three; a
+ * task waiting on two dependencies lists both.
+ */
+export function reverseDependencyIndex(input: {
+  readonly dependencies: readonly {
+    readonly dependencyKey: string;
+    readonly dependency: string;
+    readonly category: string;
+    readonly status: string;
+    readonly blocking: string;
+    readonly wbsIds: readonly string[];
+    readonly satisfied: boolean;
+  }[];
+  readonly sheetVersion: number | null;
+  readonly sheetStatus: string | null;
+  readonly sheetCurrentness: 'CURRENT' | 'OUTDATED' | null;
+}): ReverseDependencyIndex {
+  const byWbsId: Record<string, RelatedDependency[]> = {};
+
+  for (const dependency of input.dependencies) {
+    for (const wbsId of dependency.wbsIds) {
+      const entry: RelatedDependency = {
+        dependencyKey: dependency.dependencyKey,
+        dependency: dependency.dependency,
+        category: dependency.category,
+        status: dependency.status,
+        blocking: dependency.blocking,
+        blockingOutstanding: dependency.blocking !== 'NONE' && !dependency.satisfied,
+        sheetStatus: input.sheetStatus ?? 'NOT_STARTED',
+        sheetCurrentness: input.sheetCurrentness ?? 'CURRENT',
+      };
+
+      byWbsId[wbsId] = [...(byWbsId[wbsId] ?? []), entry];
+    }
+  }
+
+  return {
+    byWbsId,
+    sheetVersion: input.sheetVersion,
+    sheetStatus: input.sheetStatus,
+    sheetCurrentness: input.sheetCurrentness,
+  };
+}

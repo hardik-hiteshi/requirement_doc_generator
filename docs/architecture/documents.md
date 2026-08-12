@@ -403,6 +403,46 @@ hierarchy comes from the estimate's own module, submodule and feature grouping, 
 tier appearing only where the data justifies one; overhead activities become a separate
 phase so work like CI setup is visible rather than buried in a feature.
 
+### Traceability, in four directions
+
+A work package traces to approved requirements (by key), to **Feature Listing rows**, to
+Phase 6 estimate units, and to locked technologies. The feature link is derived from the
+approved chain rather than guessed: a Feature Listing row records the estimate units it
+was priced from, so a task built from unit E-004 belongs to whichever rows cite E-004,
+and one unit legitimately spanning several rows keeps all of them. Where a listing
+predates that link, shared requirement keys are the fallback — also an approved
+relationship, used only where the better one is absent.
+
+`workKind` separates `FEATURE` work from `OVERHEAD`. Environment setup, CI and release
+stabilisation have real hours and no Feature Listing row, because a client never agreed
+to "CI setup" as a feature. Counting them as unmapped would report a correct breakdown
+as incompletely traced; counting them as mapped would invent a feature. So they are
+classified and excluded from the feature-coverage judgement while remaining fully
+present in the effort reconciliation, with their hours reported as `overheadHours`.
+
+Feature coverage is therefore a live measurement: an approved feature with no work
+against it drops `complete` to false and raises a BLOCKING `feature_uncovered` finding,
+and a task citing a feature the current listing does not contain raises
+`unknown_feature_reference`.
+
+### The two documents point at each other without a generation cycle
+
+The Client Dependency Sheet is generated after the breakdown and owns the relationship,
+in its own `wbsIds`. The reverse direction — what a given work package is waiting on —
+is **derived on read** by `reverseDependencyIndex` and returned as `reverseDependencies`
+on the snapshot. Nothing is stored on the work package.
+
+That is what keeps the sequence honest. Storing the reverse link would mean generating
+document 7 had to rewrite document 6, including an issued one, and an issued document is
+history. It also cannot drift: there is no second copy to disagree with the sheet. Every
+entry carries the sheet's own `status` and `currentness`, so a link read out of a stale
+sheet says so rather than appearing to make a current claim.
+
+`wbsIds` is checked on the write path — `addRow` and `updateRow` both refuse an id that
+is not in this project's breakdown with `UNKNOWN_WBS_REFERENCE`. Because the breakdown is
+read for the caller's own project, an id that exists only in another project cannot
+resolve; cross-project references are refused by the same check that refuses a typo.
+
 `reconcileWbsEffort` proves the copy per role and in total, at hundredths of an hour
 because Phase 6's figures are fractional. A mismatch is BLOCKING and the document stays
 readable. `allocateEffort` splits a task by largest remainder in hundredths, so
@@ -431,20 +471,12 @@ how you ask. See ADR-0039.
 - **The work breakdown has no delivery tracking.** `status` and `percentComplete`
   exist on a work package and nothing moves them: this is a plan, not a progress
   tool, and nothing in this application observes real progress.
-- **The work breakdown does not link to Feature Listing rows.** A work package traces
-  to requirement keys and estimate units, and `featureIds` is always empty — so the
-  feature half of `calculateWbsCoverage` is inert for this document, and coverage is
-  measured against the scope the estimate priced rather than against the agreed feature
-  rows. Requirement-level tracing reaches the same scope by a different route; the
-  direct feature link would make a per-feature view possible and does not exist.
-- **`clientDependencyIds` on a work package is never populated by generation.** The
-  dependency sheet is generated after the breakdown and carries the link the other way,
-  in `wbsIds`, which avoids a cycle between the two documents. The consequence is that
-  the `dependency_missing_for_task` check only fires for a work package somebody has
-  hand-edited to name a dependency key — it will never fire on generated content.
 - **`resourceCount` and `percentComplete` are declared and unused.** Both are on the
   work-package shape and nothing sets either. They are where staffing-per-task and
   delivery tracking would go, and neither is implemented.
+- **The reverse dependency view is derived on every read**, which costs one extra query
+  per work-breakdown read. Stored denormalisation would be faster and could disagree
+  with the sheet, which is the failure that matters here.
 - **Client dependencies are inferred conservatively.** A row appears where an
   integration, a locked third-party technology, an unanswered clarification or a
   clearly client-facing assumption implies one. A dependency implied only by domain
