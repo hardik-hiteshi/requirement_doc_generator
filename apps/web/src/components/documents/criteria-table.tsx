@@ -15,6 +15,7 @@ import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitl
 import {
   useAddRow,
   useExcludeRow,
+  useRemoveRow,
   useRegenerateRow,
   useRegenerateRowGroup,
   useResolveRowProposal,
@@ -48,6 +49,7 @@ export function CriteriaTable({
   const regenerateGroup = useRegenerateRowGroup(type);
   const resolve = useResolveRowProposal(type);
   const exclude = useExcludeRow(type);
+  const remove = useRemoveRow(type);
   const add = useAddRow(type);
 
   const [editing, setEditing] = useState<string | null>(null);
@@ -305,6 +307,28 @@ export function CriteriaTable({
                         Leave it out
                       </Button>
                     ) : null}
+                    {/*
+                     * Removal, distinct from leaving something out. An exclusion stays on
+                     * the sheet with its reason, which is what a client should see for
+                     * scope deliberately not covered; this is for a condition that should
+                     * never have been here — a duplicate, or one added by mistake. Every
+                     * earlier version keeps it, so the history still shows what the
+                     * document said and when it went.
+                     */}
+                    <Button
+                      variant="secondary"
+                      disabled={remove.isPending}
+                      data-testid={`criterion-remove-${criterion.criterionKey}`}
+                      onClick={() =>
+                        remove.mutate({
+                          rowId: row.rowId,
+                          reason: 'Removed during review: it should not have been here.',
+                          expectedVersion: document.recordVersion,
+                        })
+                      }
+                    >
+                      Remove it
+                    </Button>
                     {isGherkinShaped(criterion) ? null : (
                       <span className="self-center text-xs text-muted">
                         Stated as a rule rather than a scenario
