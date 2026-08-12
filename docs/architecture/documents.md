@@ -521,6 +521,10 @@ and reported without penalty. See ADR-0041.
 - **A document accumulates a version per edit.** The history is longer than one somebody
   would design by hand; it is legible because each version says what it is rather than
   only when it was.
+- **Upgrading an existing database needs one manual step.** The old globally-unique id
+  indexes must be dropped, or the second version of any document fails to save. Nothing
+  drops them automatically — see
+  [operations/schema-changes](../operations/schema-changes.md).
 - **There is no bulk row-edit endpoint.** Rows are edited one at a time, so the atomicity
   question a bulk endpoint would raise does not arise yet.
 - **Client dependencies are inferred conservatively.** A row appears where an

@@ -255,7 +255,7 @@ test.describe('Document lifecycle', () => {
     await page.getByTestId('document-reason').fill('The summary needs more detail.');
     await page.getByTestId('reopen-document').click();
 
-    await expect(page.getByTestId('detail-status')).toHaveText('Needs revision', {
+    await expect(page.getByTestId('detail-status')).toHaveText('Needs changes', {
       timeout: 60_000,
     });
 
@@ -310,7 +310,7 @@ test.describe('Document lifecycle', () => {
     await restoreButtons.last().click();
 
     /* 19. Which needs review again — a restored version is not an approved one. */
-    await expect(page.getByTestId('detail-status')).toHaveText(/Draft|Needs revision/, {
+    await expect(page.getByTestId('detail-status')).toHaveText(/Draft|Needs changes/, {
       timeout: 60_000,
     });
 
@@ -374,7 +374,7 @@ test.describe('Document lifecycle', () => {
     await openDocument(page, 'FEATURE_LISTING');
     await page.getByTestId('document-reason').fill('Revising the agreed features.');
     await page.getByTestId('reopen-document').click();
-    await expect(page.getByTestId('detail-status')).toHaveText('Needs revision', {
+    await expect(page.getByTestId('detail-status')).toHaveText('Needs changes', {
       timeout: 60_000,
     });
 
