@@ -54,10 +54,28 @@ describe('API (e2e)', () => {
 
   describe('readiness', () => {
     it('reports MongoDB as up when the database is reachable', async () => {
-      const response = await request(app.getHttpServer()).get(HEALTH_ROUTES.readiness).expect(200);
+      const response = await request(app.getHttpServer()).get(HEALTH_ROUTES.readiness);
 
       expect(readinessResponseSchema.safeParse(response.body).success).toBe(true);
+
+      /*
+       * The database indicator is what this test is about, and it is asserted directly.
+       *
+       * The aggregate status is not, because `memory_heap` measures the heap of the
+       * process the probe runs in — which here is a Jest worker holding the test
+       * framework and several suites' fixtures, not a server. Under a full run that
+       * worker legitimately exceeds the 512 MB threshold and readiness reports 503 with
+       * MongoDB up, which says nothing about the application.
+       *
+       * So: MongoDB must be up, the scanner must not be down, and the only indicator
+       * allowed to fail is the one that is about this process rather than the service.
+       */
       expect(response.body.details.mongodb.status).toBe('up');
+      expect(response.body.details.malware_scanner.status).not.toBe('down');
+
+      if (response.status !== 200) {
+        expect(Object.keys(response.body.error ?? {})).toEqual(['memory_heap']);
+      }
     });
   });
 

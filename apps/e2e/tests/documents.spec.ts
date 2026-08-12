@@ -180,16 +180,18 @@ test.describe('Documents', () => {
     await expect(page.getByTestId('document-open-FEATURE_LISTING')).toBeDisabled();
 
     /*
-     * Documents 3 to 5 exist now and are locked behind their prerequisites; the last
-     * two are visible and honestly marked unavailable.
+     * All seven exist now, so every one of them is locked behind its prerequisite
+     * rather than marked unavailable. Nothing on this list is a placeholder.
      */
-    for (const type of ['ACCEPTANCE_CRITERIA', 'ASSUMPTIONS', 'STATEMENT_OF_WORK']) {
+    for (const type of [
+      'ACCEPTANCE_CRITERIA',
+      'ASSUMPTIONS',
+      'STATEMENT_OF_WORK',
+      'WORK_BREAKDOWN_STRUCTURE',
+      'CLIENT_DEPENDENCY_SHEET',
+    ]) {
       await expect(page.getByTestId(`document-lock-${type}`)).toContainText('Approve');
       await expect(page.getByTestId(`document-unavailable-${type}`)).toBeHidden();
-    }
-
-    for (const type of ['WORK_BREAKDOWN_STRUCTURE', 'CLIENT_DEPENDENCY_SHEET']) {
-      await expect(page.getByTestId(`document-unavailable-${type}`)).toBeVisible();
     }
   });
 

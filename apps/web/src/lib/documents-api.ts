@@ -7,7 +7,10 @@ import {
   type RegenerateRowGroup,
   type RejectAssumption,
   type ResolveRowProposal,
+  type ReceiveDependency,
+  type RequestDependency,
   type SettleAssumption,
+  type ValidateDependency,
   DOCUMENT_ROUTES,
   type AcknowledgeFinding,
   type ApplyCorrection,
@@ -397,6 +400,52 @@ export async function requestAssumptionCandidates(
   request: GenerateDocument,
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.assumptionCandidates(type), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+/* --------------------------------- Phase 9: client dependencies ---------- */
+
+/**
+ * The three lifecycle actions, as three calls.
+ *
+ * `receive` and `validate` are deliberately not one request. Something that arrived is
+ * not something that works, and a single call would let the interface offer "mark as
+ * received and accepted", which is the shortcut the whole status model exists to
+ * prevent.
+ */
+export async function requestDependency(
+  type: DocumentType,
+  rowId: string,
+  request: RequestDependency,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.requestDependency(type, rowId), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function receiveDependency(
+  type: DocumentType,
+  rowId: string,
+  request: ReceiveDependency,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.receiveDependency(type, rowId), {
+    method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function validateDependency(
+  type: DocumentType,
+  rowId: string,
+  request: ValidateDependency,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.validateDependency(type, rowId), {
     method: 'POST',
     body: request,
     headers: mutationHeaders(),

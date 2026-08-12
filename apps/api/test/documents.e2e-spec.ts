@@ -196,19 +196,25 @@ describe('Documents (e2e)', () => {
       expect(list.find((entry) => entry.type === 'FEATURE_LISTING')?.lock).toBeNull();
     }, 240_000);
 
-    it('shows the unimplemented documents as unavailable, never as broken', async () => {
+    it('shows a document not yet reachable as locked, never as broken', async () => {
+      /*
+       * Every document is implemented as of Phase 9, so what this now checks is the
+       * locking: the later steps say which prerequisite they are waiting on rather
+       * than appearing broken or vanishing from the list.
+       */
       const session = await project();
       const list = await documents(session);
 
-      const unavailable = list.filter((entry) => !entry.implemented);
+      expect(list.every((entry) => entry.implemented)).toBe(true);
 
-      /* The Work Breakdown Structure and the Client Dependency Sheet — Phase 9. */
-      expect(unavailable.map((entry) => entry.type)).toEqual([
-        'WORK_BREAKDOWN_STRUCTURE',
-        'CLIENT_DEPENDENCY_SHEET',
-      ]);
-      for (const entry of unavailable) {
-        expect(entry.lock?.reason).toBe('not_implemented');
+      const later = list.filter((entry) =>
+        ['WORK_BREAKDOWN_STRUCTURE', 'CLIENT_DEPENDENCY_SHEET'].includes(entry.type),
+      );
+
+      expect(later).toHaveLength(2);
+
+      for (const entry of later) {
+        expect(entry.lock?.reason).toBe('prerequisite_document');
         expect(entry.status).toBe('NOT_STARTED');
       }
     }, 240_000);

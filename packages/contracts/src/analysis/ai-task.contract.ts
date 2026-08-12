@@ -114,6 +114,25 @@ export const AI_TASK_IDS = [
   'assumptions.suggest',
   /** One section of a statement of work. Phase 8. */
   'sow.section.generate',
+  /**
+   * Task wording and decomposition for the work breakdown.
+   *
+   * Phase 9. Names and groups work; it cannot state an hours figure, a day, a date
+   * or a critical-path flag, because `wbsTaskDraftSchema` has nowhere to put one.
+   * Where it proposes splitting a unit of work, it gives relative sizes and the
+   * application divides the approved hours so the parts still sum to the whole.
+   */
+  'wbs.tasks.generate',
+  /** One work package, reworded. Phase 9. */
+  'wbs.tasks.regenerate',
+  /**
+   * Client dependencies the approved scope implies.
+   *
+   * Phase 9. Returns what appears to be needed and why. No owner, no due date, no
+   * status, no priority — and nowhere to put a credential value. Every row it
+   * suggests still has to be grounded in something approved before it is stored.
+   */
+  'client_dependencies.suggest',
 ] as const;
 
 export type AiTaskId = (typeof AI_TASK_IDS)[number];
@@ -143,6 +162,9 @@ export const AI_TASK_LABELS: Readonly<Record<AiTaskId, string>> = {
   'acceptance_criteria.regenerate': 'Rewriting an acceptance condition',
   'assumptions.suggest': 'Looking for what the plan is resting on',
   'sow.section.generate': 'Writing a section of the statement of work',
+  'wbs.tasks.generate': 'Naming the work in the breakdown',
+  'wbs.tasks.regenerate': 'Rewording a work package',
+  'client_dependencies.suggest': 'Looking for what we need from the client',
   'document.validate': 'Reading the document back',
 };
 
@@ -171,6 +193,15 @@ export const AI_FAILURE_REASONS = [
   'repair_exhausted',
   'budget_exceeded',
   'content_refused',
+  /**
+   * The model returned content this application will not store.
+   *
+   * Distinct from `content_refused`, which is the model declining, and from
+   * `schema_invalid`, which is a shape problem. This is well-formed output that
+   * breaks a rule about substance: a credential value in a client dependency sheet,
+   * or a request too vague for anybody to act on. Phase 9.
+   */
+  'disallowed_content',
   'cancelled',
 ] as const;
 
@@ -217,6 +248,8 @@ export const AI_FAILURE_MESSAGES: Readonly<Record<AiFailureReason, string>> = {
     'The model could not produce valid output after several attempts. Try again, or use a larger model.',
   budget_exceeded: 'This step would exceed the configured size limit.',
   content_refused: 'The model declined to process this content.',
+  disallowed_content:
+    'The model returned something this application will not record — a credential value, or a request too vague to act on. The result was discarded.',
   cancelled: 'Analysis was cancelled.',
 };
 

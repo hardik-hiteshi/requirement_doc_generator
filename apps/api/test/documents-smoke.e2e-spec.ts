@@ -56,7 +56,7 @@ describe('Documents wiring (e2e)', () => {
     return { agent, csrf };
   }
 
-  it('lists all seven documents, with the last two marked unavailable', async () => {
+  it('lists all seven documents, every one of them implemented', async () => {
     const { agent } = await session();
     const response = await agent.get(DOCUMENT_ROUTES.documents).expect(200);
 
@@ -72,8 +72,8 @@ describe('Documents wiring (e2e)', () => {
       'OUR_UNDERSTANDING',
       'FEATURE_LISTING',
     ]);
-    expect(documents.filter((document) => document.implemented)).toHaveLength(5);
-    expect(documents.filter((document) => !document.implemented)).toHaveLength(2);
+    /* Phases 7, 8 and 9 between them built all seven. */
+    expect(documents.filter((document) => document.implemented)).toHaveLength(7);
 
     /* Nothing is unlocked yet: there is no approved baseline. */
     for (const document of documents) {
@@ -81,15 +81,25 @@ describe('Documents wiring (e2e)', () => {
       expect(document.lock).not.toBeNull();
     }
 
+    /*
+     * With no approved baseline, the missing upstream artifact is the honest reason —
+     * it outranks the sequence, because telling somebody to approve a statement of
+     * work when they have not analysed any requirements yet would send them nowhere.
+     */
     expect(
       documents.find((document) => document.type === 'WORK_BREAKDOWN_STRUCTURE')?.lock?.reason,
-    ).toBe('not_implemented');
+    ).toBe('upstream_missing');
     expect(documents.find((document) => document.type === 'OUR_UNDERSTANDING')?.lock?.reason).toBe(
       'upstream_missing',
     );
   });
 
-  it('refuses to generate a document that is not implemented', async () => {
+  it('refuses to generate a document whose prerequisites are not approved', async () => {
+    /*
+     * Was a not-implemented refusal until Phase 9 built this document. The refusal is
+     * still a refusal — what changed is the reason, from "does not exist" to "the step
+     * before it has not been approved", which is the honest one.
+     */
     const { agent, csrf } = await session();
 
     const response = await agent
@@ -98,7 +108,7 @@ describe('Documents wiring (e2e)', () => {
       .send({ useAi: false, expectedVersion: 0 })
       .expect(422);
 
-    expect(JSON.stringify(response.body)).toContain('DOCUMENT_NOT_IMPLEMENTED');
+    expect(JSON.stringify(response.body)).toContain('DOCUMENT_LOCKED');
   });
 
   it('refuses every route without a session', async () => {

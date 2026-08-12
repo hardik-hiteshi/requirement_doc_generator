@@ -16,7 +16,11 @@ import {
   type EffortReconciliation,
   type FeatureCoverage,
   type FeatureRow,
+  type DependencySummary,
+  type ReverseDependencyIndex,
   type SowScopeReconciliation,
+  type WbsCoverage,
+  type WbsReconciliation,
 } from '@wdrg/contracts';
 
 import type {
@@ -57,6 +61,10 @@ export interface AssembledExtras {
   readonly criteriaCoverage?: CriteriaCoverage | null;
   readonly assumptionSummary?: AssumptionSummary | null;
   readonly scopeReconciliation?: SowScopeReconciliation | null;
+  readonly wbsReconciliation?: WbsReconciliation | null;
+  readonly wbsCoverage?: WbsCoverage | null;
+  readonly dependencySummary?: DependencySummary | null;
+  readonly reverseDependencies?: ReverseDependencyIndex | null;
   readonly blockers?: readonly DocumentBlocker[];
   readonly outdatedReasons?: DocumentSnapshot['outdatedReasons'];
   readonly coverage?: FeatureCoverage | null;
@@ -212,6 +220,10 @@ export function toDocumentSnapshot(
     criteriaCoverage: extras.criteriaCoverage ?? null,
     assumptionSummary: extras.assumptionSummary ?? null,
     scopeReconciliation: extras.scopeReconciliation ?? null,
+    wbsReconciliation: extras.wbsReconciliation ?? null,
+    wbsCoverage: extras.wbsCoverage ?? null,
+    dependencySummary: extras.dependencySummary ?? null,
+    reverseDependencies: extras.reverseDependencies ?? null,
     coverage: extras.coverage ?? (record.coverage as unknown as FeatureCoverage | null) ?? null,
     reconciliation:
       extras.reconciliation ??

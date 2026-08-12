@@ -9,8 +9,11 @@ import type {
   RegenerateRow,
   RegenerateRowGroup,
   RejectAssumption,
+  ReceiveDependency,
+  RequestDependency,
   ResolveRowProposal,
   SettleAssumption,
+  ValidateDependency,
   AcknowledgeFinding,
   ApplyCorrection,
   ApproveDocument,
@@ -36,7 +39,10 @@ import {
   rejectAssumption,
   requestAssumptionCandidates,
   resolveRowProposal,
+  receiveDependency,
+  requestDependency,
   settleAssumption,
+  validateDependency,
   updateRow,
   acknowledgeDocumentFinding,
   applyCorrection,
@@ -349,5 +355,27 @@ export function useSettleAssumption(type: DocumentType) {
 export function useAssumptionCandidates(type: DocumentType) {
   return useDocumentMutation(type, (request: GenerateDocument) =>
     requestAssumptionCandidates(type, request),
+  );
+}
+
+/* ---------------------------------- Phase 9: client dependencies --------- */
+
+export function useRequestDependency(type: DocumentType) {
+  return useDocumentMutation(type, ({ rowId, ...request }: RequestDependency & { rowId: string }) =>
+    requestDependency(type, rowId, request),
+  );
+}
+
+export function useReceiveDependency(type: DocumentType) {
+  return useDocumentMutation(type, ({ rowId, ...request }: ReceiveDependency & { rowId: string }) =>
+    receiveDependency(type, rowId, request),
+  );
+}
+
+export function useValidateDependency(type: DocumentType) {
+  return useDocumentMutation(
+    type,
+    ({ rowId, ...request }: ValidateDependency & { rowId: string }) =>
+      validateDependency(type, rowId, request),
   );
 }

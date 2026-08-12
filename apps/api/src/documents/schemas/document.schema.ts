@@ -581,7 +581,16 @@ DocumentValidationSchema.index({ projectId: 1, type: 1, createdAt: -1 });
  * reconciled against the approved estimate on every read, and folding them in here
  * would put a number that matters inside an opaque payload.
  */
-@Schema({ collection: 'document_rows', timestamps: true })
+/*
+ * `minimize: false` because a row payload is opaque content, not a Mongoose model.
+ *
+ * Mongoose strips empty objects by default, so a work package with `effort: {}` — a
+ * hand-added task with no hours on it yet — came back with the field missing, and every
+ * read of that document then threw. What was written has to be what is read back;
+ * deciding an empty object is not worth storing is a judgement for the document's own
+ * schema, which has already made it.
+ */
+@Schema({ collection: 'document_rows', timestamps: true, minimize: false })
 export class DocumentRowRecord {
   @Prop({ type: String, required: true, unique: true, index: true })
   rowId!: string;

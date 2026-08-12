@@ -6,6 +6,7 @@ import type { FeatureCoverage, EffortReconciliation } from './feature-listing.co
 import type { CriteriaCoverage } from './acceptance-criteria.contract';
 import type { AssumptionSummary } from './assumptions.contract';
 import type { SowScopeReconciliation } from './statement-of-work.contract';
+import type { WbsCoverage, WbsReconciliation } from './work-breakdown.contract';
 import { hasProposal } from './document-section.contract';
 
 /**
@@ -49,6 +50,8 @@ export interface DocumentBlockerInput {
   readonly assumptionSummary?: AssumptionSummary | null;
   /** SOW scope reconciliation, when this is that document. */
   readonly scopeReconciliation?: SowScopeReconciliation | null;
+  readonly wbsReconciliation?: WbsReconciliation | null;
+  readonly wbsCoverage?: WbsCoverage | null;
 }
 
 export function calculateDocumentBlockers(input: DocumentBlockerInput): readonly DocumentBlocker[] {
@@ -233,6 +236,61 @@ export function calculateDocumentBlockers(input: DocumentBlockerInput): readonly
       subjectIds: subjects.slice(0, 200),
     });
   }
+
+  /*
+   * The work breakdown against its own estimate. Blocking rather than advisory: this
+   * document exists to be planned against, and one whose hours differ from the
+   * approved plan will be planned against and then found wrong.
+   */
+  if (input.wbsReconciliation && !input.wbsReconciliation.reconciles) {
+    const roles = input.wbsReconciliation.mismatchedRoles;
+
+    blockers.push({
+      kind: 'wbs_not_reconciled',
+      count: Math.max(
+        roles.length,
+        input.wbsReconciliation.unmappedEstimateUnitIds.length,
+        input.wbsReconciliation.unknownEstimateUnitIds.length,
+        1,
+      ),
+      summary:
+        roles.length > 0
+          ? `The hours here do not match the approved estimate for ${roles.length === 1 ? roles[0]!.role : `${roles.length} roles`}.`
+          : `${input.wbsReconciliation.unmappedEstimateUnitIds.length} priced item has no work against it.`,
+      action:
+        'A breakdown has to total exactly what was approved. Regenerate it, or change the estimate and approve that instead.',
+      subjectIds: [
+        ...roles.map((entry) => entry.role),
+        ...input.wbsReconciliation.unmappedEstimateUnitIds,
+        ...input.wbsReconciliation.unknownEstimateUnitIds,
+      ].slice(0, 200),
+    });
+  }
+
+  if (input.wbsCoverage && !input.wbsCoverage.complete) {
+    blockers.push({
+      kind: 'coverage_incomplete',
+      count:
+        input.wbsCoverage.unmappedRequirementIds.length +
+        input.wbsCoverage.unsupportedWbsIds.length,
+      summary: `${input.wbsCoverage.unmappedRequirementIds.length} priced requirement has no work package.`,
+      action: 'Every requirement the estimate priced has to appear as work somebody will do.',
+      subjectIds: [
+        ...input.wbsCoverage.unmappedRequirementIds,
+        ...input.wbsCoverage.unsupportedWbsIds,
+      ].slice(0, 200),
+    });
+  }
+
+  /*
+   * Outstanding client dependencies are deliberately *not* a blocker.
+   *
+   * A blocker prevents approval, and a dependency sheet that could not be approved
+   * until the client had sent everything would be useless — sending it is how you ask
+   * for the things on it. What is outstanding, and what of it is holding work up, is
+   * reported through `dependencySummary` and as a validation finding, where a reader
+   * sees it without being stopped by it.
+   */
 
   if (input.reconciliation && !input.reconciliation.reconciles) {
     blockers.push({

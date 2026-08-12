@@ -28,8 +28,10 @@ import {
   useReviseDocument,
 } from '@/hooks/use-documents';
 import { AssumptionsPanel } from './assumptions-panel';
+import { DependencySheet } from './dependency-sheet';
 import { CriteriaTable } from './criteria-table';
 import { FeatureTable } from './feature-table';
+import { WbsTable } from './wbs-table';
 import { SectionEditor } from './section-editor';
 import { ValidationPanel } from './validation-panel';
 import { VersionHistory } from './version-history';
@@ -602,6 +604,16 @@ function DocumentDetail({ type }: { readonly type: DocumentType }) {
           editable={editable}
           aiAvailable={aiAvailable}
         />
+      ) : null}
+
+      {type === 'WORK_BREAKDOWN_STRUCTURE' &&
+      (document.rows.length > 0 || document.wbsReconciliation) ? (
+        <WbsTable type={type} document={document} editable={editable} aiAvailable={aiAvailable} />
+      ) : null}
+
+      {type === 'CLIENT_DEPENDENCY_SHEET' &&
+      (document.rows.length > 0 || document.dependencySummary) ? (
+        <DependencySheet type={type} document={document} editable={editable} />
       ) : null}
 
       <ValidationPanel type={type} document={document} aiAvailable={aiAvailable} />

@@ -130,6 +130,28 @@ export const DOCUMENT_ROUTES = {
   assumptionCandidates: (type: string) =>
     buildApiPath('projects/current/documents', type, 'rows/candidates'),
 
+  /* ---------------------------------- Phase 9: client dependencies */
+
+  /**
+   * The dependency lifecycle, as three actions rather than a status field.
+   *
+   * Each records *when* alongside *what*, which a writable status could not: a sheet
+   * whose whole job is tracking what arrived and when needs the timestamp captured by
+   * the act, not typed in afterwards. `validate` is separate from `receive` for the
+   * reason the whole status model exists — something that turned up is not something
+   * that works.
+   */
+
+  /** POST — record that this has been asked for. */
+  requestDependency: (type: string, rowId: string) =>
+    buildApiPath('projects/current/documents', type, 'rows', rowId, 'request'),
+  /** POST — record that it arrived, in full or in part. Not that it is usable. */
+  receiveDependency: (type: string, rowId: string) =>
+    buildApiPath('projects/current/documents', type, 'rows', rowId, 'receive'),
+  /** POST — record what checking it showed: accepted, or rejected with a reason. */
+  validateDependency: (type: string, rowId: string) =>
+    buildApiPath('projects/current/documents', type, 'rows', rowId, 'validate'),
+
   /** GET — the current or most recent generation run. */
   currentRun: (type: string) => buildApiPath('projects/current/documents', type, 'run/current'),
 } as const;

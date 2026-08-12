@@ -391,12 +391,98 @@ validation and approval all work; the prose is plainer. `DocumentsAiService` tak
 the provider `@Optional()`, so the module starts normally with none, and
 `useAi: false` is a first-class request rather than a fallback.
 
+## Documents 6 and 7 — the plan, and what the client owes
+
+Both use the shared row channel; neither adds a service, a status system or an
+endpoint family of its own.
+
+**The Work Breakdown Structure is a projection.** `UpstreamPlan` carries the approved
+Phase 6 plan — scheduled tasks with their days, slack and critical-path flags, plus the
+milestone list — and every figure the breakdown publishes is copied from it. The
+hierarchy comes from the estimate's own module, submodule and feature grouping, with a
+tier appearing only where the data justifies one; overhead activities become a separate
+phase so work like CI setup is visible rather than buried in a feature.
+
+### Traceability, in four directions
+
+A work package traces to approved requirements (by key), to **Feature Listing rows**, to
+Phase 6 estimate units, and to locked technologies. The feature link is derived from the
+approved chain rather than guessed: a Feature Listing row records the estimate units it
+was priced from, so a task built from unit E-004 belongs to whichever rows cite E-004,
+and one unit legitimately spanning several rows keeps all of them. Where a listing
+predates that link, shared requirement keys are the fallback — also an approved
+relationship, used only where the better one is absent.
+
+`workKind` separates `FEATURE` work from `OVERHEAD`. Environment setup, CI and release
+stabilisation have real hours and no Feature Listing row, because a client never agreed
+to "CI setup" as a feature. Counting them as unmapped would report a correct breakdown
+as incompletely traced; counting them as mapped would invent a feature. So they are
+classified and excluded from the feature-coverage judgement while remaining fully
+present in the effort reconciliation, with their hours reported as `overheadHours`.
+
+Feature coverage is therefore a live measurement: an approved feature with no work
+against it drops `complete` to false and raises a BLOCKING `feature_uncovered` finding,
+and a task citing a feature the current listing does not contain raises
+`unknown_feature_reference`.
+
+### The two documents point at each other without a generation cycle
+
+The Client Dependency Sheet is generated after the breakdown and owns the relationship,
+in its own `wbsIds`. The reverse direction — what a given work package is waiting on —
+is **derived on read** by `reverseDependencyIndex` and returned as `reverseDependencies`
+on the snapshot. Nothing is stored on the work package.
+
+That is what keeps the sequence honest. Storing the reverse link would mean generating
+document 7 had to rewrite document 6, including an issued one, and an issued document is
+history. It also cannot drift: there is no second copy to disagree with the sheet. Every
+entry carries the sheet's own `status` and `currentness`, so a link read out of a stale
+sheet says so rather than appearing to make a current claim.
+
+`wbsIds` is checked on the write path — `addRow` and `updateRow` both refuse an id that
+is not in this project's breakdown with `UNKNOWN_WBS_REFERENCE`. Because the breakdown is
+read for the caller's own project, an id that exists only in another project cannot
+resolve; cross-project references are refused by the same check that refuses a typo.
+
+`reconcileWbsEffort` proves the copy per role and in total, at hundredths of an hour
+because Phase 6's figures are fractional. A mismatch is BLOCKING and the document stays
+readable. `allocateEffort` splits a task by largest remainder in hundredths, so
+decomposition preserves the approved total exactly. Editing a start day or a
+critical-path flag is refused with `SCHEDULE_NOT_EDITABLE_HERE`; editing hours is
+allowed, because reconciliation is the check and restructuring work is legitimate. See
+ADR-0038.
+
+**The Client Dependency Sheet tracks arrival and acceptance separately.** Nine statuses,
+with `ACCEPTED` reachable only from `RECEIVED` or `VALIDATING`, and three endpoints —
+`request`, `receive`, `validate` — each stamping its own timestamp. Accepting or
+rejecting requires a note. `looksLikeSecret` refuses credential-shaped text in
+`parseRowPayload`, before storage rather than at approval, and the generation schema has
+nowhere to put a value. Rows are grounded in the approved baseline, the locked stack, the
+work breakdown, confirmed assumptions or unanswered clarifications; `isTooVague` refuses
+wording nobody can close. Outstanding items are reported, never a blocker — the sheet is
+how you ask. See ADR-0039.
+
 ## Known limitations
 
-- **Five of seven documents are declared, not implemented.** They are visible and
-  marked unavailable; nothing can generate, read or approve them.
+- **Export is a later phase.** See below.
 - **Export is Phase 11.** Copy-to-clipboard and the strict CSV serialisation exist
-  because the CSV schema is a Phase 7 requirement. DOCX, PDF and XLSX do not.
+  because the CSV schema is a Phase 7 requirement. DOCX, PDF and XLSX do not — and
+  the work breakdown and dependency sheet have no spreadsheet export yet, which is
+  the form both will most often be wanted in.
+- **The work breakdown has no delivery tracking.** `status` and `percentComplete`
+  exist on a work package and nothing moves them: this is a plan, not a progress
+  tool, and nothing in this application observes real progress.
+- **`resourceCount` and `percentComplete` are declared and unused.** Both are on the
+  work-package shape and nothing sets either. They are where staffing-per-task and
+  delivery tracking would go, and neither is implemented.
+- **The reverse dependency view is derived on every read**, which costs one extra query
+  per work-breakdown read. Stored denormalisation would be faster and could disagree
+  with the sheet, which is the failure that matters here.
+- **Client dependencies are inferred conservatively.** A row appears where an
+  integration, a locked third-party technology, an unanswered clarification or a
+  clearly client-facing assumption implies one. A dependency implied only by domain
+  knowledge — a payment provider that requires a signed merchant agreement — is not
+  found, because a false request the client cannot satisfy is worse than a missing
+  one they will raise.
 - **The deterministic module and screen names are crude** — derived from the
   requirement's own words. A model does this far better; what matters is that the
   fallback is derived rather than invented.
