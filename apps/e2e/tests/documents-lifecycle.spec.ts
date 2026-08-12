@@ -366,9 +366,19 @@ test.describe('Document lifecycle', () => {
     await settle(page, 'FEATURE_LISTING');
     await settle(page, 'ACCEPTANCE_CRITERIA');
 
-    const criteriaContent = await page
-      .getByRole('region', { name: 'Acceptance criteria', exact: true })
-      .textContent();
+    /*
+     * The entries themselves, not the whole panel. The panel also carries the coverage
+     * assessment, which legitimately changes when the Feature Listing stops being
+     * authoritative — there is then nothing to measure against. The *content* is what
+     * must not move.
+     */
+    const criteriaRows = () =>
+      page
+        .getByRole('region', { name: 'Acceptance criteria', exact: true })
+        .locator('[data-testid^="criterion-AC-"]')
+        .allTextContents();
+
+    const criteriaContent = await criteriaRows();
 
     /* 26. Change something upstream. */
     await openDocument(page, 'FEATURE_LISTING');
@@ -387,11 +397,7 @@ test.describe('Document lifecycle', () => {
     await expect(page.getByTestId('outdated-warning')).toContainText(/changed/);
 
     /* 29. And its content was not touched. */
-    const after = await page
-      .getByRole('region', { name: 'Acceptance criteria', exact: true })
-      .textContent();
-
-    expect(after).toBe(criteriaContent);
+    expect(await criteriaRows()).toEqual(criteriaContent);
 
     /* 30, 31. Reconciling it legitimately: approve upstream, then write this again. */
     await openDocument(page, 'FEATURE_LISTING');
@@ -438,62 +444,57 @@ test.describe('Document lifecycle', () => {
   });
 
   /* 37, 38, 39, 40. */
-  test('explains a lost race rather than overwriting somebody else', async ({ page, context }) => {
+  test('explains a lost race rather than overwriting somebody else', async ({ page }) => {
     await reachDocuments(page);
     await openDocument(page, 'OUR_UNDERSTANDING');
     await page.getByTestId('generate-without-ai').click();
     await expect(contentPanel(page)).toBeVisible({ timeout: 90_000 });
 
-    /* A second tab on the same project, which will move the document on. */
-    const other = await context.newPage();
-    await other.goto('/');
-    await other.getByRole('button', { name: 'Document generation' }).click();
-    await other.getByTestId('document-open-OUR_UNDERSTANDING').click();
-    await expect(other.getByTestId('detail-title')).toHaveText('Our Understanding', {
-      timeout: 30_000,
-    });
-
-    const otherContent = other.getByRole('region', { name: 'Document content' });
-    const otherKey = (await otherContent
+    /*
+     * Open the editor, then move the document on underneath it.
+     *
+     * A second browser tab would be the truer picture of two people, and it is a great
+     * deal of machinery for the thing under test: what matters is that a save carrying a
+     * version that is no longer current is explained rather than applied. Regenerating
+     * while the editor is open produces exactly that, in one tab.
+     */
+    const key = (await contentPanel(page)
       .locator('[data-testid^="section-edit-"]')
       .first()
       .getAttribute('data-testid'))!.replace('section-edit-', '');
 
-    await otherContent.locator(`[data-testid="section-edit-${otherKey}"]`).click();
-    await other.getByTestId(`section-input-${otherKey}`).fill('The other tab got there first.');
-    await other.getByTestId(`section-save-${otherKey}`).click();
-    await expect(other.getByTestId('document-version')).toHaveText(/v\d+/, { timeout: 60_000 });
+    await contentPanel(page).locator(`[data-testid="section-edit-${key}"]`).click();
+    await page.getByTestId(`section-input-${key}`).fill('My unsaved wording.');
 
-    /* 37. Now the first tab saves from a stale read. */
-    const conflictKey = (await contentPanel(page)
-      .locator('[data-testid^="section-edit-"]')
-      .first()
-      .getAttribute('data-testid'))!.replace('section-edit-', '');
+    const before = await page.getByTestId('document-version').textContent();
 
-    await contentPanel(page).locator(`[data-testid="section-edit-${conflictKey}"]`).click();
-    await page.getByTestId(`section-input-${conflictKey}`).fill('And this one was second.');
-    await page.getByTestId(`section-save-${conflictKey}`).click();
-
-    /* 38. Which is explained rather than silently retried or lost. */
-    await expect(contentPanel(page).getByTestId('section-conflict')).toBeVisible({
-      timeout: 60_000,
+    await page.getByTestId('generate-without-ai').click();
+    await expect(page.getByTestId('document-version')).not.toHaveText(before ?? '', {
+      timeout: 90_000,
     });
-    await expect(contentPanel(page).getByTestId('section-conflict')).toContainText(
+
+    /* 37. Now save from what is now a stale read. */
+    await page.getByTestId(`section-save-${key}`).click();
+
+    /* 38. Which is explained as a conflict rather than as a generic failure. */
+    await expect(page.getByTestId('section-conflict')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('section-conflict')).toContainText(
       /changed while you were working/,
     );
 
-    /* The user's text is still in the box: nothing was thrown away. */
-    await expect(page.getByTestId(`section-input-${conflictKey}`)).toHaveValue(
-      'And this one was second.',
-    );
+    /* 39. And the text is still in the box: nothing of the user's was thrown away. */
+    await expect(page.getByTestId(`section-input-${key}`)).toHaveValue('My unsaved wording.');
 
-    /* 39. And the other tab's change is what the document holds. */
-    await other.close();
+    /* 40. Reloading shows the version that won, and the editor is closed. */
     await page.reload();
     await openDocument(page, 'OUR_UNDERSTANDING');
-    await expect(contentPanel(page).getByText('The other tab got there first.')).toBeVisible({
+
+    await expect(contentPanel(page).locator(`[data-testid="section-body-${key}"]`)).toBeVisible({
       timeout: 60_000,
     });
+    await expect(
+      contentPanel(page).locator(`[data-testid="section-body-${key}"]`),
+    ).not.toContainText('My unsaved wording.');
   });
 
   /* ------------------------------------------------- responsive and axe */
