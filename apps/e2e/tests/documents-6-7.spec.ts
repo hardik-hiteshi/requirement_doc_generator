@@ -133,14 +133,23 @@ async function settleOpenDocument(page: Page): Promise<void> {
   await expect(page.getByTestId('detail-status')).toHaveText('Approved', { timeout: 60_000 });
 }
 
-/** Open a document, waiting for the pane to be showing *this* one, by name. */
+/**
+ * Open a document, waiting for the pane to be showing *this* one, by name.
+ *
+ * Idempotent, because the control is a toggle: clicking it on the document already open
+ * closes the pane, and the next assertion then waits for a title that has just been
+ * removed. Checking first makes "make sure this one is open" mean what it says.
+ */
 async function openDocument(page: Page, type: string): Promise<void> {
+  const title = DOCUMENT_LABELS[type as keyof typeof DOCUMENT_LABELS];
+
+  if (await page.getByTestId('detail-title').filter({ hasText: title }).count()) {
+    return;
+  }
+
   await expect(page.getByTestId(`document-open-${type}`)).toBeEnabled({ timeout: 60_000 });
   await page.getByTestId(`document-open-${type}`).click();
-  await expect(page.getByTestId('detail-title')).toHaveText(
-    DOCUMENT_LABELS[type as keyof typeof DOCUMENT_LABELS],
-    { timeout: 30_000 },
-  );
+  await expect(page.getByTestId('detail-title')).toHaveText(title, { timeout: 30_000 });
 }
 
 async function settle(page: Page, type: string): Promise<void> {
