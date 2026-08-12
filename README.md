@@ -7,8 +7,8 @@ documents.
 The public workspace needs no account: a project is reached through a private
 recovery link.
 
-> **Current state: Phase 9 — the Work Breakdown Structure and the Client Dependency
-> Sheet, which completes all seven controlled documents.**
+> **Current state: Phase 10 — editing, immutable version history, comparison,
+> restoration, invalidation and cross-document traceability.**
 > You can create a project without an account, receive a private recovery link,
 > upload and paste requirement documents, review what was extracted from them,
 > analyse them into a traceable requirement baseline — classification,
@@ -229,7 +229,14 @@ have done real damage and does not:
   [ADR-0038](docs/adr/0038-work-breakdown-projects-the-approved-plan.md);
 - **on the dependency sheet, received is not accepted**, and a credential value is
   refused before it can be stored —
-  [ADR-0039](docs/adr/0039-received-is-not-accepted.md).
+  [ADR-0039](docs/adr/0039-received-is-not-accepted.md);
+- **approval applies to the exact content that was approved.** Editing an approved
+  document requires approving it again; an upstream change leaves the approval standing
+  and marks the document out of date. Every content change keeps the version before it —
+  [ADR-0040](docs/adr/0040-a-version-per-change.md);
+- **traceability shows gaps rather than hiding them.** Every link is one a document
+  recorded, never inferred from prose —
+  [ADR-0041](docs/adr/0041-traceability-is-derived-never-inferred.md).
 
 ## Key decisions
 
@@ -362,7 +369,7 @@ of secrets.
 | 7     | Document engine + Our Understanding, Feature Listing | **Complete** |
 | 8     | Acceptance Criteria, Assumptions, Statement of Work  | **Complete** |
 | 9     | Work Breakdown Structure, Client Dependency Sheet    | **Complete** |
-| 10    | Editing, versioning, invalidation                    | Planned      |
+| 10    | Editing, versioning, invalidation                    | **Complete** |
 | 11    | Export and branding                                  | Planned      |
 | 12    | Security, abuse controls, retention                  | Planned      |
 | 13    | Admin, observability, operations                     | Planned      |

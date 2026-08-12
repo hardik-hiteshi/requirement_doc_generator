@@ -73,3 +73,5 @@ think is part of the value.
 | [0037](0037-statement-of-work-boundary.md)                | The Statement of Work is contract-ready, and is not a contract        | Accepted |
 | [0038](0038-work-breakdown-projects-the-approved-plan.md) | The work breakdown projects the approved plan; it never re-derives it | Accepted |
 | [0039](0039-received-is-not-accepted.md)                  | Received is not accepted, and credentials are never stored            | Accepted |
+| [0040](0040-a-version-per-change.md)                      | A version per content change, and identity that survives it           | Accepted |
+| [0041](0041-traceability-is-derived-never-inferred.md)    | Traceability is derived from recorded links, never inferred           | Accepted |
