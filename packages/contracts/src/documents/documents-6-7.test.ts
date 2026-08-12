@@ -47,6 +47,7 @@ function shaped(...parts: readonly string[]): string {
 const STRIPE_SHAPED = shaped('sk', 'live', '4eC39HqLyjWDarjtT1zdp7dc');
 const AWS_SHAPED = `AKIA${'IOSFODNN7EXAMPLE'}`;
 const GITHUB_SHAPED = shaped('ghp', '16C7e42F292c6912E7710c838347Ae178B4a');
+const PEM_SHAPED = `${'-'.repeat(5)}BEGIN RSA PRIVATE KEY${'-'.repeat(5)}`;
 const JWT_SHAPED = [
   'eyJhbGciOiJIUzI1NiJ9',
   'eyJzdWIiOiIxMjM0NTY3ODkwIn0',
@@ -694,7 +695,7 @@ describe('looksLikeSecret', () => {
       AWS_SHAPED,
       GITHUB_SHAPED,
       JWT_SHAPED,
-      '-----BEGIN RSA PRIVATE KEY-----',
+      PEM_SHAPED,
       'password: hunter2000',
       'client_secret=abcdef123456',
       'mongodb://admin:letmein@db.example.com:27017',
