@@ -1,6 +1,11 @@
 'use client';
 
-import type { DocumentSnapshot, DocumentType } from '@wdrg/contracts';
+import {
+  DIFF_CHANGE_KIND_LABELS,
+  DOCUMENT_CHANGE_TYPE_LABELS,
+  type DocumentSnapshot,
+  type DocumentType,
+} from '@wdrg/contracts';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@wdrg/ui';
 import { useState } from 'react';
 
@@ -12,6 +17,24 @@ import { useDocumentDiff, useDocumentVersions, useRestoreVersion } from '@/hooks
  * Restoring copies forward as a new version rather than rewinding, and the panel
  * says so — otherwise "restore" reads like an undo, and somebody will expect the
  * version they were on to disappear.
+ *
+ * ## Each version says what it is, not just when it was
+ *
+ * A list of nine numbered versions with timestamps is not a history: nobody can find
+ * the one they want in it. So each row says what produced it — an edit, a rewrite, an
+ * approval, content brought back from an earlier version — and where it came from where
+ * that applies. Approved and issued versions are marked, because those are the two
+ * somebody is usually looking for.
+ *
+ * ## A row diff shows the fields, not the row
+ *
+ * "This entry changed" is not useful when a row has a dozen fields and one of them is
+ * the hours somebody will plan against. Each changed field is listed with both values
+ * and what kind of change it is, so the difference between a rewording and a moved
+ * citation is visible at a glance.
+ *
+ * Old and new are stacked rather than side by side. A phone cannot show two columns of
+ * prose, and understanding a change should not require scrolling sideways.
  */
 export function VersionHistory({
   type,
@@ -50,14 +73,48 @@ export function VersionHistory({
                   Version {version.version}
                   {version.version === document.version ? ' — current' : ''}
                 </span>
+                <span
+                  className="text-xs text-muted"
+                  data-testid={`version-what-${version.version}`}
+                >
+                  {version.changeType ? DOCUMENT_CHANGE_TYPE_LABELS[version.changeType] : 'Written'}
+                  {version.restoredFromVersion !== undefined
+                    ? ` from version ${version.restoredFromVersion}`
+                    : ''}
+                  {version.revisedFromVersion !== undefined
+                    ? ` beside version ${version.revisedFromVersion}`
+                    : ''}
+                  {' · '}
+                  {new Date(version.createdAt).toLocaleString()}
+                </span>
                 <span className="text-xs text-muted">
-                  {version.contentCount} {document.features.length > 0 ? 'rows' : 'sections'}
+                  {version.contentCount} {document.sections.length > 0 ? 'sections' : 'entries'}
                   {version.userEditedCount > 0 ? `, ${version.userEditedCount} yours` : ''}
                   {version.regenerationReason ? ` — ${version.regenerationReason}` : ''}
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Badge tone="neutral">{version.status}</Badge>
+                {/*
+                 * The state of that version's inputs, per version. "The one we issued in
+                 * March is no longer current" is a fact the history can state without
+                 * anybody having edited the March document.
+                 */}
+                {version.currentness === 'OUTDATED' ? (
+                  <Badge tone="warning" data-testid={`version-outdated-${version.version}`}>
+                    Inputs have changed since
+                  </Badge>
+                ) : null}
+                {version.approvedAt ? (
+                  <Badge tone="success" data-testid={`version-approved-${version.version}`}>
+                    Approved
+                  </Badge>
+                ) : null}
+                {version.finalAt ? (
+                  <Badge tone="success" data-testid={`version-issued-${version.version}`}>
+                    Issued
+                  </Badge>
+                ) : null}
                 <Button
                   variant="secondary"
                   data-testid={`compare-left-${version.version}`}
@@ -125,14 +182,47 @@ export function VersionHistory({
                           <span className="font-medium">{entry.title}</span>
                           <Badge tone="neutral">{entry.kind}</Badge>
                         </div>
-                        {entry.left ? (
-                          <p className="mt-1 whitespace-pre-wrap text-xs text-muted">
-                            Before: {entry.left}
-                          </p>
-                        ) : null}
-                        {entry.right ? (
-                          <p className="mt-1 whitespace-pre-wrap text-xs">After: {entry.right}</p>
-                        ) : null}
+                        {/*
+                         * A row's changed fields, where there are any. Stacked old above
+                         * new, so a narrow screen reads top to bottom rather than
+                         * sideways.
+                         */}
+                        {entry.fields.length > 0 ? (
+                          <ul
+                            className="mt-2 flex flex-col gap-2"
+                            data-testid={`diff-fields-${entry.key}`}
+                          >
+                            {entry.fields.map((changed) => (
+                              <li key={changed.field} className="flex flex-col gap-1">
+                                <span className="flex flex-wrap items-baseline gap-2 text-xs font-medium">
+                                  {changed.label}
+                                  <Badge tone="neutral">
+                                    {DIFF_CHANGE_KIND_LABELS[changed.changeKind]}
+                                  </Badge>
+                                </span>
+                                <span className="whitespace-pre-wrap text-xs text-muted">
+                                  Before: {changed.left || '—'}
+                                </span>
+                                <span className="whitespace-pre-wrap text-xs">
+                                  After: {changed.right || '—'}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <>
+                            {entry.left ? (
+                              <p className="mt-1 whitespace-pre-wrap text-xs text-muted">
+                                Before: {entry.left}
+                              </p>
+                            ) : null}
+                            {entry.right ? (
+                              <p className="mt-1 whitespace-pre-wrap text-xs">
+                                After: {entry.right}
+                              </p>
+                            ) : null}
+                          </>
+                        )}
                       </li>
                     ))}
                 </ul>

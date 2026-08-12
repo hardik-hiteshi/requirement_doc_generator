@@ -10,6 +10,7 @@ import type {
   RegenerateRowGroup,
   RejectAssumption,
   ReceiveDependency,
+  RemoveRow,
   RequestDependency,
   ResolveRowProposal,
   SettleAssumption,
@@ -30,6 +31,8 @@ import type {
 } from '@wdrg/contracts';
 import { useCallback } from 'react';
 
+import { ApiClientError } from '@/lib/api-client';
+
 import {
   addRow,
   confirmAssumption,
@@ -40,6 +43,9 @@ import {
   requestAssumptionCandidates,
   resolveRowProposal,
   receiveDependency,
+  fetchDocumentTraceability,
+  fetchTraceability,
+  removeRow,
   requestDependency,
   settleAssumption,
   validateDependency,
@@ -157,12 +163,29 @@ function useDocumentMutation<TInput>(
       void client.invalidateQueries({ queryKey: queryKeys.documents });
       void client.invalidateQueries({ queryKey: queryKeys.documentVersions(type) });
       void client.invalidateQueries({ queryKey: queryKeys.documentCsv(type) });
+      void client.invalidateQueries({ queryKey: ['documents', 'traceability'] });
     },
     [client, type],
   );
 
   return useMutation({ mutationFn: run, onSuccess });
 }
+
+/**
+ * Whether a failed mutation lost a race with somebody else's change.
+ *
+ * A 409 here always means the document moved since it was read. It is worth telling
+ * apart from every other failure: the user's text is still on screen and still good,
+ * and what they need is to see what changed rather than a retry that would overwrite
+ * it — so the interface must never resubmit this automatically.
+ */
+export function isVersionConflict(error: unknown): boolean {
+  return error instanceof ApiClientError && error.status === 409;
+}
+
+/** What to tell somebody whose change lost the race. */
+export const VERSION_CONFLICT_MESSAGE =
+  'This document changed while you were working on it — probably in another tab. Your text is still here. Reload to see the current version, then apply your change again so nothing of theirs is lost.';
 
 export function useGenerateDocument(type: DocumentType) {
   return useDocumentMutation(type, (request: GenerateDocument) => generateDocument(type, request));
@@ -377,5 +400,35 @@ export function useValidateDependency(type: DocumentType) {
     type,
     ({ rowId, ...request }: ValidateDependency & { rowId: string }) =>
       validateDependency(type, rowId, request),
+  );
+}
+
+/* ---------------------------------- Phase 10: traceability --------------- */
+
+/**
+ * The traceability view.
+ *
+ * Deliberately not part of the document query: it reads all seven documents, and paying
+ * for that on every document read would slow the ordinary screen down for a view
+ * somebody opens occasionally.
+ */
+export function useTraceability() {
+  return useQuery({
+    queryKey: ['documents', 'traceability'],
+    queryFn: () => fetchTraceability(),
+  });
+}
+
+export function useDocumentArtifacts(type: DocumentType, enabled: boolean) {
+  return useQuery({
+    queryKey: ['documents', type, 'traceability'],
+    queryFn: () => fetchDocumentTraceability(type),
+    enabled,
+  });
+}
+
+export function useRemoveRow(type: DocumentType) {
+  return useDocumentMutation(type, ({ rowId, ...request }: RemoveRow & { rowId: string }) =>
+    removeRow(type, rowId, request),
   );
 }

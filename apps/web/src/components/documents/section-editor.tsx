@@ -9,7 +9,13 @@ import {
 import { Badge, Button } from '@wdrg/ui';
 import { useState } from 'react';
 
-import { useRegenerateSection, useResolveProposal, useUpdateSection } from '@/hooks/use-documents';
+import {
+  isVersionConflict,
+  useRegenerateSection,
+  useResolveProposal,
+  useUpdateSection,
+  VERSION_CONFLICT_MESSAGE,
+} from '@/hooks/use-documents';
 
 /**
  * One section, with everything a reviewer does to it.
@@ -107,9 +113,18 @@ export function SectionEditor({
               Cancel
             </Button>
           </div>
+          {/*
+           * A lost race is told apart from every other failure. The user's text is
+           * still in the box and still good; what they need is to see what changed,
+           * not a retry that would overwrite somebody else's work.
+           */}
           {update.isError ? (
-            <p role="alert" className="text-xs text-danger">
-              {update.error.message}
+            <p
+              role="alert"
+              className="text-xs text-danger"
+              data-testid={isVersionConflict(update.error) ? 'section-conflict' : 'section-error'}
+            >
+              {isVersionConflict(update.error) ? VERSION_CONFLICT_MESSAGE : update.error.message}
             </p>
           ) : null}
         </div>
