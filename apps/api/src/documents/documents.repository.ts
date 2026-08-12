@@ -165,17 +165,31 @@ export class DocumentsRepository {
     return this.sections.find({ projectId, type, documentVersion }).sort({ order: 1 }).exec();
   }
 
-  async findSection(projectId: string, sectionId: string): Promise<DocumentSectionDocument | null> {
-    return this.sections.findOne({ projectId, sectionId }).exec();
+  /*
+   * Scoped by version, because a section keeps its id when a new version is cut.
+   * Without the version an unscoped lookup matches every version that ever held this
+   * section and returns whichever one the index happens to yield first.
+   */
+  async findSection(
+    projectId: string,
+    sectionId: string,
+    documentVersion: number,
+  ): Promise<DocumentSectionDocument | null> {
+    return this.sections.findOne({ projectId, sectionId, documentVersion }).exec();
   }
 
   async updateSection(
     projectId: string,
     sectionId: string,
+    documentVersion: number,
     changes: Record<string, unknown>,
   ): Promise<DocumentSectionDocument | null> {
     return this.sections
-      .findOneAndUpdate({ projectId, sectionId }, { $set: changes }, { returnDocument: 'after' })
+      .findOneAndUpdate(
+        { projectId, sectionId, documentVersion },
+        { $set: changes },
+        { returnDocument: 'after' },
+      )
       .exec();
   }
 
@@ -204,17 +218,26 @@ export class DocumentsRepository {
     return this.features.find({ projectId, type, documentVersion }).sort({ order: 1 }).exec();
   }
 
-  async findFeature(projectId: string, featureId: string): Promise<DocumentFeatureDocument | null> {
-    return this.features.findOne({ projectId, featureId }).exec();
+  async findFeature(
+    projectId: string,
+    featureId: string,
+    documentVersion: number,
+  ): Promise<DocumentFeatureDocument | null> {
+    return this.features.findOne({ projectId, featureId, documentVersion }).exec();
   }
 
   async updateFeature(
     projectId: string,
     featureId: string,
+    documentVersion: number,
     changes: Record<string, unknown>,
   ): Promise<DocumentFeatureDocument | null> {
     return this.features
-      .findOneAndUpdate({ projectId, featureId }, { $set: changes }, { returnDocument: 'after' })
+      .findOneAndUpdate(
+        { projectId, featureId, documentVersion },
+        { $set: changes },
+        { returnDocument: 'after' },
+      )
       .exec();
   }
 
@@ -267,8 +290,12 @@ export class DocumentsRepository {
     return this.rows.find({ projectId, type, documentVersion }).sort({ order: 1 }).exec();
   }
 
-  async findRow(projectId: string, rowId: string): Promise<DocumentRowDocument | null> {
-    return this.rows.findOne({ projectId, rowId }).exec();
+  async findRow(
+    projectId: string,
+    rowId: string,
+    documentVersion: number,
+  ): Promise<DocumentRowDocument | null> {
+    return this.rows.findOne({ projectId, rowId, documentVersion }).exec();
   }
 
   /**
@@ -278,19 +305,20 @@ export class DocumentsRepository {
    * its own copy of the rows it had, so history is untouched by construction — there
    * is nothing here that could reach a version somebody has already been shown.
    */
-  async deleteRow(projectId: string, rowId: string): Promise<void> {
-    await this.rows.deleteOne({ projectId, rowId }).exec();
+  async deleteRow(projectId: string, rowId: string, documentVersion: number): Promise<void> {
+    await this.rows.deleteOne({ projectId, rowId, documentVersion }).exec();
   }
 
   async updateRow(
     projectId: string,
     rowId: string,
+    documentVersion: number,
     changes: Record<string, unknown>,
     unset: readonly string[] = [],
   ): Promise<void> {
     await this.rows
       .updateOne(
-        { projectId, rowId },
+        { projectId, rowId, documentVersion },
         {
           $set: changes,
           ...(unset.length > 0

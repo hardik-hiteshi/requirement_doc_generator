@@ -498,13 +498,13 @@ export class DocumentsService {
     request: UpdateSection,
   ): Promise<DocumentSnapshot> {
     const record = await this.editableDocument(context, type, request.expectedVersion);
-    const section = await this.repository.findSection(context.projectId, sectionId);
+    const section = await this.repository.findSection(context.projectId, sectionId, record.version);
 
     if (section?.type !== type || section.documentVersion !== record.version) {
       throw new DocumentError(DOCUMENT_ERROR_CODES.SECTION_NOT_FOUND, 404);
     }
 
-    await this.repository.updateSection(context.projectId, sectionId, {
+    await this.repository.updateSection(context.projectId, sectionId, record.version, {
       body: request.body,
       ...(request.title ? { title: request.title } : {}),
       /*
@@ -547,7 +547,7 @@ export class DocumentsService {
     reason?: string,
   ): Promise<DocumentSnapshot> {
     const record = await this.editableDocument(context, type, expectedVersion);
-    const section = await this.repository.findSection(context.projectId, sectionId);
+    const section = await this.repository.findSection(context.projectId, sectionId, record.version);
 
     if (section?.type !== type || section.documentVersion !== record.version) {
       throw new DocumentError(DOCUMENT_ERROR_CODES.SECTION_NOT_FOUND, 404);
@@ -555,7 +555,7 @@ export class DocumentsService {
 
     const protectedSection = isSectionProtected(section.origin as DocumentSection['origin']);
 
-    await this.repository.updateSection(context.projectId, sectionId, {
+    await this.repository.updateSection(context.projectId, sectionId, record.version, {
       /*
        * The whole edit-authority rule, in one branch. A section nobody has
        * touched is replaced. A section a person wrote keeps its body and gains a
@@ -588,7 +588,7 @@ export class DocumentsService {
     request: ResolveSectionProposal,
   ): Promise<DocumentSnapshot> {
     const record = await this.editableDocument(context, type, request.expectedVersion);
-    const section = await this.repository.findSection(context.projectId, sectionId);
+    const section = await this.repository.findSection(context.projectId, sectionId, record.version);
 
     if (section?.type !== type) {
       throw new DocumentError(DOCUMENT_ERROR_CODES.SECTION_NOT_FOUND, 404);
@@ -605,7 +605,7 @@ export class DocumentsService {
           ? section.proposedBody
           : (request.body ?? section.proposedBody);
 
-    await this.repository.updateSection(context.projectId, sectionId, {
+    await this.repository.updateSection(context.projectId, sectionId, record.version, {
       body,
       /*
        * Accepting a rewrite does not make the section the model's again. The
@@ -647,7 +647,7 @@ export class DocumentsService {
     request: UpdateFeatureRow,
   ): Promise<DocumentSnapshot> {
     const record = await this.editableDocument(context, type, request.expectedVersion);
-    const feature = await this.repository.findFeature(context.projectId, featureId);
+    const feature = await this.repository.findFeature(context.projectId, featureId, record.version);
 
     if (feature?.type !== type || feature.documentVersion !== record.version) {
       throw new DocumentError(DOCUMENT_ERROR_CODES.FEATURE_NOT_FOUND, 404);
@@ -655,7 +655,7 @@ export class DocumentsService {
 
     const { expectedVersion: _ignored, ...fields } = request;
 
-    await this.repository.updateFeature(context.projectId, featureId, {
+    await this.repository.updateFeature(context.projectId, featureId, record.version, {
       ...fields,
       reviewStatus: 'USER_EDITED',
     });
@@ -1524,24 +1524,112 @@ export class DocumentsService {
   ): Promise<void> {
     const wasApproved = record.status === 'APPROVED';
 
-    await this.repository.touch(context.projectId, type, {
+    /*
+     * Every content change cuts a **new version**.
+     *
+     * The mutation has already been applied to the rows or sections carrying the
+     * current version number, so the content is read back and re-keyed to the next
+     * version. The version it came from keeps the snapshot it was archived with, which
+     * is what makes "what did this say before I edited it?" answerable — and what makes
+     * a comparison between two versions of a document possible at all.
+     *
+     * Re-keying rather than copying-then-mutating because the mutation paths are
+     * many (a section, a row, a proposal, a correction) and each one would otherwise
+     * have to remember to version itself. One place, applied to all of them.
+     *
+     * Row and section ids change with the version; the *semantic* keys — a criterion
+     * key, a WBS outline number — travel with the content, which is what comparison
+     * and traceability match on.
+     */
+    const content = await this.currentContent(context.projectId, record);
+    const version = await this.repository.nextVersion(context.projectId, type);
+    const now = new Date();
+
+    /*
+     * Re-read for the current `recordVersion`.
+     *
+     * Some callers — recording an exclusion, for one — update the record themselves
+     * before handing over, which bumps `recordVersion`. Reusing the stale one made this
+     * update match nothing while the content below was still re-keyed to the new
+     * version: the document silently lost every row, because the record went on
+     * pointing at a version that no longer held any.
+     */
+    const live = (await this.repository.find(context.projectId, type)) ?? record;
+
+    const bumped = await this.repository.update(context.projectId, type, live.recordVersion, {
+      version,
       ...(wasApproved ? { status: 'DRAFT' } : {}),
+      supersedesVersion: record.version,
       /* The stored result described the previous content. */
       validation: null,
     });
+
+    if (!bumped) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_NOT_FOUND, 409, 'version_conflict');
+    }
+
+    await this.repository.replaceSections(
+      context.projectId,
+      type,
+      version,
+      content.sections.map((section) => ({
+        /* Identity carried forward: this is the same section, at a new version. */
+        sectionId: section.sectionId,
+        documentVersion: version,
+        key: section.key,
+        title: section.title,
+        order: section.order,
+        body: section.body,
+        origin: section.origin,
+        omittedReason: section.omittedReason ?? '',
+        references: section.references,
+        /* A pending proposal travels with the section: it is not yet decided. */
+        ...(section.proposedBody !== undefined ? { proposedBody: section.proposedBody } : {}),
+        ...(section.proposedAt ? { proposedAt: new Date(section.proposedAt) } : {}),
+        createdAt: now,
+      })),
+    );
+
+    await this.repository.replaceFeatures(
+      context.projectId,
+      type,
+      version,
+      content.features.map((feature) =>
+        toFeatureRecord(feature, version, { featureId: feature.featureId }),
+      ),
+    );
+
+    const rowKind = this.composerFor(type).rowKind;
+
+    if (rowKind) {
+      await this.repository.replaceRows(
+        context.projectId,
+        type,
+        rowKind,
+        version,
+        content.rows.map((row, index) => ({
+          /* Identity carried forward, so a caller's handle on this row still works. */
+          rowId: row.rowId,
+          documentVersion: version,
+          order: index,
+          origin: row.origin,
+          attribution: row.attribution ?? '',
+          payload: row.payload as Record<string, unknown>,
+          proposed: row.proposed ?? null,
+          ...(row.proposedAt ? { proposedAt: new Date(row.proposedAt) } : {}),
+          references: row.references,
+          excludedReason: row.excludedReason ?? '',
+        })),
+      );
+    }
 
     await this.audit.record({
       type: auditType,
       projectId: context.projectId,
       correlationId: context.correlationId,
-      metadata: { documentType: type, version: record.version, ...metadata },
+      metadata: { documentType: type, version, previousVersion: record.version, ...metadata },
     });
 
-    /*
-     * The archive of the *current* version is kept in step with every content
-     * change, so "restore version 2" restores what version 2 actually says. Past
-     * versions cannot be reached by this: they are no longer the current one.
-     */
     const current = await this.repository.find(context.projectId, type);
 
     if (current) {
@@ -2262,7 +2350,7 @@ export class DocumentsService {
       ? await this.verifiedReferences(context, type, request.referenceIds)
       : (row.references as unknown as DocumentReference[]);
 
-    await this.repository.updateRow(context.projectId, rowId, {
+    await this.repository.updateRow(context.projectId, rowId, record.version, {
       payload,
       references,
       origin: row.origin === 'USER_DEFINED' ? 'USER_DEFINED' : 'USER_EDITED',
@@ -2349,7 +2437,7 @@ export class DocumentsService {
     const record = await this.editableDocument(context, type, request.expectedVersion);
     await this.expectRow(context.projectId, type, record.version, rowId);
 
-    await this.repository.updateRow(context.projectId, rowId, {
+    await this.repository.updateRow(context.projectId, rowId, record.version, {
       excludedReason: request.reason,
     });
 
@@ -2384,7 +2472,7 @@ export class DocumentsService {
     const row = await this.expectRow(context.projectId, type, record.version, rowId);
     const rowKey = DocumentsService.rowKey(row.payload);
 
-    await this.repository.deleteRow(context.projectId, rowId);
+    await this.repository.deleteRow(context.projectId, rowId, record.version);
 
     await this.afterContentChange(
       context,
@@ -2575,6 +2663,7 @@ export class DocumentsService {
     await this.repository.updateRow(
       context.projectId,
       rowId,
+      record.version,
       {
         payload: this.parseRowPayload(type, chosen, row.payload),
         proposed: null,
@@ -2636,7 +2725,7 @@ export class DocumentsService {
       { allowStatusChange: true },
     );
 
-    await this.repository.updateRow(context.projectId, rowId, { payload });
+    await this.repository.updateRow(context.projectId, rowId, record.version, { payload });
 
     await this.afterContentChange(context, type, record, 'ASSUMPTION_CONFIRMED', {
       assumptionKey: assumption.assumptionKey,
@@ -2672,7 +2761,7 @@ export class DocumentsService {
       { allowStatusChange: true },
     );
 
-    await this.repository.updateRow(context.projectId, rowId, { payload });
+    await this.repository.updateRow(context.projectId, rowId, record.version, { payload });
 
     await this.afterContentChange(context, type, record, 'ASSUMPTION_REJECTED', {
       assumptionKey: assumption.assumptionKey,
@@ -2707,7 +2796,7 @@ export class DocumentsService {
       { allowStatusChange: true },
     );
 
-    await this.repository.updateRow(context.projectId, rowId, { payload });
+    await this.repository.updateRow(context.projectId, rowId, record.version, { payload });
 
     await this.afterContentChange(
       context,
@@ -2810,7 +2899,7 @@ export class DocumentsService {
       { allowStatusChange: true },
     );
 
-    await this.repository.updateRow(context.projectId, rowId, { payload });
+    await this.repository.updateRow(context.projectId, rowId, record.version, { payload });
 
     await this.afterContentChange(context, type, record, 'CLIENT_DEPENDENCY_STATUS_CHANGED', {
       /*
@@ -2875,7 +2964,7 @@ export class DocumentsService {
     version: number,
     rowId: string,
   ): Promise<DocumentRowDocument> {
-    const row = await this.repository.findRow(projectId, rowId);
+    const row = await this.repository.findRow(projectId, rowId, version);
 
     if (row?.type !== type || row.documentVersion !== version) {
       throw new DocumentError(DOCUMENT_ERROR_CODES.ROW_NOT_FOUND, 404);
@@ -3314,7 +3403,7 @@ export class DocumentsService {
     request: ResolveFeatureProposal,
   ): Promise<DocumentSnapshot> {
     const record = await this.editableDocument(context, type, request.expectedVersion);
-    const feature = await this.repository.findFeature(context.projectId, featureId);
+    const feature = await this.repository.findFeature(context.projectId, featureId, record.version);
 
     if (feature?.type !== type) {
       throw new DocumentError(DOCUMENT_ERROR_CODES.FEATURE_NOT_FOUND, 404);
@@ -3337,7 +3426,7 @@ export class DocumentsService {
               description: request.description ?? suggestion.description,
             };
 
-    await this.repository.updateFeature(context.projectId, featureId, {
+    await this.repository.updateFeature(context.projectId, featureId, record.version, {
       ...chosen,
       /* Their decision, so the row stays theirs. */
       reviewStatus: 'USER_EDITED',

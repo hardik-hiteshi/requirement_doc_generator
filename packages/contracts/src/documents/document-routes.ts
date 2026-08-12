@@ -170,6 +170,9 @@ export const DOCUMENT_ROUTES = {
    * and a gap is only visible when every document has been read together.
    */
   traceability: buildApiPath('projects/current/documents/traceability'),
+  /** GET — what each entry in one document traces back to. */
+  documentTraceability: (type: string) =>
+    buildApiPath('projects/current/documents', type, 'traceability'),
 
   /** GET — the current or most recent generation run. */
   currentRun: (type: string) => buildApiPath('projects/current/documents', type, 'run/current'),

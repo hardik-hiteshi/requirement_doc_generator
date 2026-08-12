@@ -219,7 +219,13 @@ export function toDocumentSnapshot(
       ...(extras.outdatedReasons ??
         (record.outdatedReasons as unknown as DocumentSnapshot['outdatedReasons'])),
     ],
-    rows: [...(extras.rows ?? [])],
+    /*
+     * From `extras` when the caller has assembled them, otherwise from the content
+     * itself. Taking them only from `extras` meant every historical version read back
+     * with no rows at all — so four of the seven documents had an unreadable history
+     * and an empty comparison, while looking fine.
+     */
+    rows: [...(extras.rows ?? content.rows)],
     criteriaCoverage: extras.criteriaCoverage ?? null,
     assumptionSummary: extras.assumptionSummary ?? null,
     scopeReconciliation: extras.scopeReconciliation ?? null,

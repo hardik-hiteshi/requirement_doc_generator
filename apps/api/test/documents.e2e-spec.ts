@@ -444,7 +444,12 @@ describe('Documents (e2e)', () => {
 
       const after = response.body.document as DocumentSnapshot;
 
-      expect(after.version).toBe(document.version);
+      /*
+       * Phase 10 cuts a version for every content change, including a targeted
+       * rewrite — that is what makes the change comparable afterwards. What the test is
+       * actually about is unchanged: the other sections are untouched.
+       */
+      expect(after.version).toBeGreaterThan(document.version);
       expect(after.sections.map((section) => section.body)).toEqual(before);
     }, 240_000);
 
@@ -503,22 +508,35 @@ describe('Documents (e2e)', () => {
       const first = await generate(session, 'OUR_UNDERSTANDING');
       const overview = sectionByKey(first, 'project-overview');
 
-      await editSection(session, 'OUR_UNDERSTANDING', overview.sectionId, 'Version one text.');
+      /*
+       * The edit is its own version now, so the numbers are relative rather than
+       * absolute: v1 generated, v2 the edit, v3 the second generation. Asserting exact
+       * numbers would pin the count of versions rather than the behaviour under test.
+       */
+      const edited = await editSection(
+        session,
+        'OUR_UNDERSTANDING',
+        overview.sectionId,
+        'Version one text.',
+      );
       const second = await generate(session, 'OUR_UNDERSTANDING', false, 'A second pass');
 
-      expect(second.version).toBe(2);
-      expect(second.supersedesVersion).toBe(1);
+      expect(second.version).toBeGreaterThan(edited.version);
+      expect(second.supersedesVersion).toBe(edited.version);
 
       const versions = (
         await session.agent.get(DOCUMENT_ROUTES.versions('OUR_UNDERSTANDING')).expect(200)
       ).body.versions as DocumentVersionSummary[];
 
-      expect(versions.map((entry) => entry.version)).toEqual([2, 1]);
-      expect(versions.find((entry) => entry.version === 1)?.userEditedCount).toBe(1);
+      expect(versions.map((entry) => entry.version)).toContain(second.version);
+      expect(versions.map((entry) => entry.version)).toContain(edited.version);
+      expect(versions.find((entry) => entry.version === edited.version)?.userEditedCount).toBe(1);
 
-      /* Version one still says what it said. */
+      /* The edited version still says what it said. */
       const stored = (
-        await session.agent.get(DOCUMENT_ROUTES.version('OUR_UNDERSTANDING', '1')).expect(200)
+        await session.agent
+          .get(DOCUMENT_ROUTES.version('OUR_UNDERSTANDING', String(edited.version)))
+          .expect(200)
       ).body.document as DocumentSnapshot;
 
       expect(stored.sections.find((section) => section.key === 'project-overview')?.body).toBe(
@@ -540,31 +558,39 @@ describe('Documents (e2e)', () => {
 
       const diff = (
         await session.agent
-          .get(`${DOCUMENT_ROUTES.compare('OUR_UNDERSTANDING')}?left=1&right=2`)
+          .get(
+            `${DOCUMENT_ROUTES.compare('OUR_UNDERSTANDING')}?left=${edited.version}&right=${(await read(session, 'OUR_UNDERSTANDING')).version}`,
+          )
           .expect(200)
       ).body.diff as { changedCount: number; entries: { key: string; kind: string }[] };
 
       expect(diff.changedCount).toBeGreaterThan(0);
       expect(diff.entries.find((entry) => entry.key === 'project-overview')?.kind).toBe('CHANGED');
 
-      /* Restoring copies forward as version three. */
+      /*
+       * Restoring copies content forward into a new version. Relative rather than
+       * absolute: Phase 10 cuts a version per content change, so the exact number
+       * counts the edits in this test rather than describing the behaviour.
+       */
       const current = await read(session, 'OUR_UNDERSTANDING');
       const restored = (
         await session.agent
           .post(DOCUMENT_ROUTES.restore('OUR_UNDERSTANDING'))
           .set('x-csrf-token', session.csrf)
-          .send({ version: 1, expectedVersion: current.recordVersion })
+          .send({ version: edited.version, expectedVersion: current.recordVersion })
           .expect(201)
       ).body.document as DocumentSnapshot;
 
-      expect(restored.version).toBe(3);
+      expect(restored.version).toBeGreaterThan(current.version);
       expect(sectionByKey(restored, 'project-overview').body).toBe('Version one text.');
       /* A restored section is protected: somebody chose that text. */
       expect(sectionByKey(restored, 'project-overview').origin).toBe('USER_EDITED');
 
-      /* And version one is exactly where it was. */
+      /* And the version it was restored from is exactly where it was. */
       const unchanged = (
-        await session.agent.get(DOCUMENT_ROUTES.version('OUR_UNDERSTANDING', '1')).expect(200)
+        await session.agent
+          .get(DOCUMENT_ROUTES.version('OUR_UNDERSTANDING', String(edited.version)))
+          .expect(200)
       ).body.document as DocumentSnapshot;
 
       expect(unchanged.sections.find((section) => section.key === 'project-overview')?.body).toBe(
