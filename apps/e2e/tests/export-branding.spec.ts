@@ -271,7 +271,10 @@ test.describe('Export and branding', () => {
 
     expect(csv.name).toMatch(/\.csv$/);
 
-    const header = csv.body.toString('utf8').replace(/^\uFEFF/, '').split('\r\n')[0];
+    const header = csv.body
+      .toString('utf8')
+      .replace(/^\uFEFF/, '')
+      .split('\r\n')[0];
 
     expect(header).toBe(
       '"Module","Sub Module","Screen","Detailed Feature Description","Estimated Hours - Backend Dev","Estimated Hours - Frontend Dev","Estimated Hours - QA","Estimated Hours - Other Roles (mention role)"',

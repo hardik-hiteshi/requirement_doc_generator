@@ -175,7 +175,10 @@ export class ProjectsService {
    * scope, and a document must never become outdated because a colour changed. The audit
    * records that branding was set and whether a logo is present, never the values.
    */
-  async updateBranding(branding: Branding, context: SectionUpdateContext): Promise<ProjectResponse> {
+  async updateBranding(
+    branding: Branding,
+    context: SectionUpdateContext,
+  ): Promise<ProjectResponse> {
     return this.applyUpdate(
       context,
       (status) => toBrandingMutation(branding, status),
