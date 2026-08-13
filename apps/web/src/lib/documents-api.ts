@@ -1,4 +1,6 @@
+import { publicEnv } from './env';
 import {
+  type ExportFormat,
   type AddRow,
   type ConfirmAssumption,
   type EditRow,
@@ -482,4 +484,70 @@ export async function removeRow(
     body: request,
     headers: mutationHeaders(),
   });
+}
+
+/**
+ * Fetches an export and hands it to the browser as a download.
+ *
+ * Fetched rather than navigated to, so a refused export shows the API's own message
+ * instead of replacing the workspace with an error page. The object URL is revoked as soon
+ * as the click has happened: the download already holds the data, and leaving the blob
+ * attached keeps the whole file in memory for the life of the tab.
+ *
+ * The filename comes from `Content-Disposition`, which the server built from a name it had
+ * already reduced to letters, digits and hyphens. Nothing here becomes a path.
+ */
+export async function downloadDocumentExport(
+  type: DocumentType,
+  format: ExportFormat,
+  version?: number,
+): Promise<void> {
+  const query = new URLSearchParams({ format });
+
+  if (version !== undefined) {
+    query.set('version', String(version));
+  }
+
+  const response = await fetch(
+    `${publicEnv.NEXT_PUBLIC_API_BASE_URL}${DOCUMENT_ROUTES.export(type)}?${query.toString()}`,
+    { credentials: 'include' },
+  );
+
+  if (!response.ok) {
+    throw await exportFailure(response);
+  }
+
+  const blob = await response.blob();
+  const filename = filenameFrom(response.headers.get('content-disposition'));
+  const url = URL.createObjectURL(blob);
+
+  try {
+    const anchor = window.document.createElement('a');
+
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.rel = 'noopener';
+    window.document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function exportFailure(response: Response): Promise<Error> {
+  try {
+    const body = (await response.json()) as { message?: string };
+
+    return new Error(body.message ?? 'That download could not be produced.');
+  } catch {
+    return new Error('That download could not be produced.');
+  }
+}
+
+/** The server's filename, or a plain fallback. Never used as a path. */
+function filenameFrom(header: string | null): string {
+  const match = header ? /filename="([A-Za-z0-9._-]+)"/.exec(header) : null;
+
+  return match?.[1] ?? 'document';
 }

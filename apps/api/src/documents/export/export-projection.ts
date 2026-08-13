@@ -148,5 +148,5 @@ export function metadataBlocks(metadata: ExportMetadata): readonly Block[] {
 
 /** Rows of a generic-row document, in stored order, payload-typed by the caller. */
 export function rowPayloads<T>(snapshot: DocumentSnapshot, kind: string): readonly T[] {
-  return snapshot.rows.filter((row) => row.kind === kind).map((row) => row.payload as unknown as T);
+  return snapshot.rows.filter((row) => row.kind === kind).map((row) => row.payload as T);
 }

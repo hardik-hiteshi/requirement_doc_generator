@@ -27,6 +27,7 @@ import { EstimationStep } from '@/components/estimation/estimation-step';
 import { BaselineStep } from '@/components/analysis/baseline-step';
 import { ClarificationsStep } from '@/components/analysis/clarifications-step';
 import { useSources } from '@/hooks/use-sources';
+import { BrandingSection } from '@/components/project/branding-section';
 import { OutputPreferencesSection } from '@/components/project/output-preferences-section';
 import { StartDateSection } from '@/components/project/start-date-section';
 import { TeamCapacitySection } from '@/components/project/team-capacity-section';
@@ -246,6 +247,7 @@ export function WorkspaceShell() {
                   <StartDateSection project={project} />
                   <TeamCapacitySection project={project} />
                   <OutputPreferencesSection project={project} />
+                  <BrandingSection project={project} />
 
                   {requirementsUnlocked ? (
                     <Button

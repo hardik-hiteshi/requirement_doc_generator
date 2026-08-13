@@ -91,7 +91,6 @@ import {
   EXPORT_FORMATS,
   brandingSchema,
   type Branding,
-  type ProjectDocument,
 } from '@wdrg/contracts';
 import { z } from 'zod';
 
@@ -930,7 +929,7 @@ export class DocumentsController {
 
     const result = await this.exports.export({
       context: documentContext,
-      document: documentType(type) as ProjectDocument,
+      document: documentType(type),
       format: parsedFormat.data,
       ...(version !== undefined ? { version: positiveInteger(version) } : {}),
       projectName: project.name,

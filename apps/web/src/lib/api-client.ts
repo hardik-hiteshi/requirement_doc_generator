@@ -39,6 +39,13 @@ export class ApiClientError extends Error {
 
 export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   readonly body?: unknown;
+  /**
+   * A body the browser must serialise itself, such as `FormData`.
+   *
+   * Sent as-is and with no `Content-Type`, because multipart needs a boundary the
+   * browser generates — naming the type here would replace it with one that has none.
+   */
+  readonly rawBody?: BodyInit;
   /** Aborts the request after this many milliseconds. */
   readonly timeoutMs?: number;
 }
@@ -55,7 +62,7 @@ export async function apiFetch<TResponse>(
   path: string,
   options: ApiRequestOptions = {},
 ): Promise<TResponse> {
-  const { body, timeoutMs = DEFAULT_TIMEOUT_MS, headers, signal, ...rest } = options;
+  const { body, rawBody, timeoutMs = DEFAULT_TIMEOUT_MS, headers, signal, ...rest } = options;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -72,10 +79,16 @@ export async function apiFetch<TResponse>(
       credentials: 'include',
       headers: {
         Accept: 'application/json',
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(body === undefined || rawBody !== undefined
+          ? {}
+          : { 'Content-Type': 'application/json' }),
         ...headers,
       },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...(rawBody !== undefined
+        ? { body: rawBody }
+        : body === undefined
+          ? {}
+          : { body: JSON.stringify(body) }),
     });
   } catch {
     // The browser deliberately hides the reason a cross-origin fetch failed, so

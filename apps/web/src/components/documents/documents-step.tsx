@@ -34,6 +34,7 @@ import { CriteriaTable } from './criteria-table';
 import { FeatureTable } from './feature-table';
 import { WbsTable } from './wbs-table';
 import { SectionEditor } from './section-editor';
+import { ExportPanel } from './export-panel';
 import { ValidationPanel } from './validation-panel';
 import { VersionHistory } from './version-history';
 
@@ -627,6 +628,7 @@ function DocumentDetail({ type }: { readonly type: DocumentType }) {
       ) : null}
 
       <ValidationPanel type={type} document={document} aiAvailable={aiAvailable} />
+      <ExportPanel type={type} document={document} />
       <VersionHistory type={type} document={document} />
     </div>
   );

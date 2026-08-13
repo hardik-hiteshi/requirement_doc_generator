@@ -1,5 +1,5 @@
 import {
-  CRITERION_ASPECTS,
+  type CRITERION_ASPECTS,
   ESTIMATION_ROLE_LABELS,
   ESTIMATION_ROLES,
   FEATURE_CSV_COLUMNS,
@@ -100,7 +100,10 @@ function understandingProse(snapshot: DocumentSnapshot, blocks: Block[]): ProseP
        */
       blocks.push({
         kind: 'note',
-        text: section.omittedReason || 'Nothing in the approved requirements covers this.',
+        text:
+          section.omittedReason === ''
+            ? 'Nothing in the approved requirements covers this.'
+            : section.omittedReason,
       });
       continue;
     }
@@ -166,7 +169,7 @@ function featureProse(snapshot: DocumentSnapshot, blocks: Block[]): ProseProject
   const byModule = new Map<string, typeof snapshot.features>();
 
   for (const feature of snapshot.features) {
-    const key = feature.module || 'Unassigned';
+    const key = feature.module === '' ? 'Unassigned' : feature.module;
     byModule.set(key, [...(byModule.get(key) ?? []), feature]);
   }
 
@@ -278,7 +281,7 @@ function criteriaProse(snapshot: DocumentSnapshot, blocks: Block[]): ProseProjec
   const byModule = new Map<string, CriterionPayload[]>();
 
   for (const criterion of criteria) {
-    const key = criterion.module || 'General';
+    const key = criterion.module === '' ? 'General' : criterion.module;
     byModule.set(key, [...(byModule.get(key) ?? []), criterion]);
   }
 
@@ -372,7 +375,7 @@ function assumptionsProse(snapshot: DocumentSnapshot, blocks: Block[]): ProsePro
   const byCategory = new Map<string, AssumptionPayload[]>();
 
   for (const assumption of assumptions) {
-    const key = assumption.category || 'General';
+    const key = assumption.category === '' ? 'General' : assumption.category;
     byCategory.set(key, [...(byCategory.get(key) ?? []), assumption]);
   }
 
@@ -542,7 +545,7 @@ function wbsProse(snapshot: DocumentSnapshot, blocks: Block[]): ProseProjection 
   const byPhase = new Map<string, WorkPackagePayload[]>();
 
   for (const item of packages) {
-    const key = item.phase || 'Delivery';
+    const key = item.phase === '' ? 'Delivery' : item.phase;
     byPhase.set(key, [...(byPhase.get(key) ?? []), item]);
   }
 

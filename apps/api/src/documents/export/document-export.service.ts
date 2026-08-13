@@ -120,7 +120,7 @@ export class DocumentExportService {
 
     try {
       content = await this.render({ ...input, snapshot, metadata });
-    } catch (error) {
+    } catch {
       await this.record('DOCUMENT_EXPORT_FAILED', input, {
         reason: 'render_failed',
         documentVersion: snapshot.version,
