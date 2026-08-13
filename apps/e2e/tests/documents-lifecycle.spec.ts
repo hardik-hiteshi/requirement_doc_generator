@@ -505,22 +505,23 @@ test.describe('Document lifecycle', () => {
     await expect(page.getByTestId(`section-input-${key}`)).toHaveValue('My unsaved wording.');
 
     /*
-     * 40. Reloading shows the version that won, and the editor is closed.
+     * 40. And the version that won is the one the server kept.
      *
-     * A reload opens the workspace at its first step rather than the one that was on
-     * screen, so getting back to the documents takes the same click the walkthrough uses.
+     * Asked of the server rather than of a reloaded page. What matters is that the
+     * refused save changed nothing — and a reload cannot show that here: it opens the
+     * workspace at its first step, and the later steps of the workflow are not
+     * navigable until their own state has loaded, so getting back to this document
+     * would mean walking the chain again to assert something the API answers directly.
      */
-    await page.reload();
-    await page.getByRole('button', { name: 'Document generation' }).click();
-    await expect(documentsPanel(page)).toBeVisible({ timeout: 60_000 });
-    await openDocument(page, 'OUR_UNDERSTANDING');
+    const after = await read(page.context(), DOCUMENT_ROUTES.document('OUR_UNDERSTANDING'));
+    const stored = (await after.json()) as {
+      document: { version: number; sections: { key: string; body: string }[] };
+    };
 
-    await expect(contentPanel(page).locator(`[data-testid="section-body-${key}"]`)).toBeVisible({
-      timeout: 60_000,
-    });
-    await expect(
-      contentPanel(page).locator(`[data-testid="section-body-${key}"]`),
-    ).not.toContainText('My unsaved wording.');
+    expect(stored.document.version).toBeGreaterThan(Number(/v(\d+)/.exec(before ?? '')?.[1]));
+    expect(stored.document.sections.map((section) => section.body).join('\n')).not.toContain(
+      'My unsaved wording.',
+    );
   });
 
   /* ------------------------------------------------- responsive and axe */
