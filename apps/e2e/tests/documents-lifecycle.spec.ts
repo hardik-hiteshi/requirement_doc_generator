@@ -504,8 +504,15 @@ test.describe('Document lifecycle', () => {
     /* 39. And the text is still in the box: nothing of the user's was thrown away. */
     await expect(page.getByTestId(`section-input-${key}`)).toHaveValue('My unsaved wording.');
 
-    /* 40. Reloading shows the version that won, and the editor is closed. */
+    /*
+     * 40. Reloading shows the version that won, and the editor is closed.
+     *
+     * A reload opens the workspace at its first step rather than the one that was on
+     * screen, so getting back to the documents takes the same click the walkthrough uses.
+     */
     await page.reload();
+    await page.getByRole('button', { name: 'Document generation' }).click();
+    await expect(documentsPanel(page)).toBeVisible({ timeout: 60_000 });
     await openDocument(page, 'OUR_UNDERSTANDING');
 
     await expect(contentPanel(page).locator(`[data-testid="section-body-${key}"]`)).toBeVisible({
