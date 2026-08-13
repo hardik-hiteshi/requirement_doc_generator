@@ -51,13 +51,16 @@ export default defineConfig({
    * what it claims. A leak going unnoticed is a worse outcome than a slow suite, so
    * the suite stays serial.
    *
-   * What that buys and what it costs, measured rather than assumed: a healthy full
-   * run is roughly 25–30 minutes locally and on a hosted runner, for ~130 scenarios
-   * that each walk the whole application. The CI job allows 45 minutes — headroom for
-   * a retry and a slow runner, not a target. It is not there to absorb a regression:
-   * the number above is what a green run takes, and a run that starts creeping toward
-   * the limit is a signal to investigate rather than to raise the limit again. The
-   * previous 30-minute limit cancelled the job outright, which reported nothing at all.
+   * What that costs, measured rather than assumed: a healthy full run of 134 scenarios
+   * is about 13 minutes locally and 15 on a hosted runner, one worker throughout.
+   *
+   * Earlier runs of 25 to 37 minutes were not the suite being slow. They were failing
+   * tests sitting out their budgets — a hung test costs its whole ten minutes, twice
+   * over once CI retries it — which is also what pushed the job past its original
+   * thirty-minute limit and had it cancelled rather than reported. The limit is now 45
+   * minutes so that one hung test and its retry still produce a report, and the figures
+   * above are the ones to compare against: a green run creeping toward the limit is a
+   * regression to investigate, not a limit to raise again.
    */
   fullyParallel: false,
   workers: 1,
