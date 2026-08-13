@@ -18,7 +18,7 @@ import type { CellValue, TableProjection } from '../export-projection';
  */
 
 export const CSV_LINE_ENDING = '\r\n';
-export const UTF8_BOM = '﻿';
+export const UTF8_BOM = '\uFEFF';
 
 function cell(value: CellValue): string {
   switch (value.kind) {

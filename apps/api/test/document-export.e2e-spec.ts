@@ -264,7 +264,7 @@ describe('Document export (e2e)', () => {
   /** CSV rows, quotes resolved. Enough of RFC 4180 to check a real file. */
   function csvRows(body: Buffer): readonly (readonly string[])[] {
     /* The BOM is deliberate in the output; strip it before parsing. */
-    const text = body.toString('utf8').replace(/^﻿/, '');
+    const text = body.toString('utf8').replace(/^\uFEFF/, '');
     const rows: string[][] = [];
 
     let row: string[] = [];
