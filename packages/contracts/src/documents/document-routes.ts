@@ -16,6 +16,15 @@ export const DOCUMENT_ROUTES = {
   /** GET — every document's state, locked or not. The step's landing view. */
   documents: buildApiPath('projects/current/documents'),
 
+  /**
+   * GET — the document as a file.
+   *
+   * A GET because it is a read: nothing about the document changes, so a download can be
+   * repeated, linked and retried. The format and the optional version travel as query
+   * parameters, which is also what lets the browser follow it as an ordinary link.
+   */
+  export: (type: string) => buildApiPath('projects/current/documents', type, 'export'),
+
   /** GET — one document with its content, validation and blockers. */
   document: (type: string) => buildApiPath('projects/current/documents', type),
 

@@ -1,5 +1,7 @@
 import {
+  brandingSchema,
   outputPreferencesSchema,
+  type Branding,
   projectResponseSchema,
   startDateSchema,
   teamCapacitySchema,
@@ -99,6 +101,18 @@ export function toTeamCapacityMutation(
   return { teamCapacity: capacity, status };
 }
 
+/**
+ * Branding changes presentation, so it leaves the project's status where it was.
+ *
+ * Every other section here calls `statusAfterEdit`, because editing scope, timeline or
+ * capacity is a change to what the project *is*. A logo is not: if changing an accent
+ * colour could move a project's status it could ripple into currentness, and a document
+ * would go out of date because somebody picked a different blue.
+ */
+export function toBrandingMutation(branding: Branding, status: ProjectStatus): ProjectMutation {
+  return { branding, status };
+}
+
 export function toOutputPreferencesMutation(
   preferences: OutputPreferences,
   status: ProjectStatus,
@@ -140,6 +154,7 @@ export function toProjectResponse(
     outputPreferences: parseSection(record.outputPreferences, (value) =>
       outputPreferencesSchema.parse(value),
     ),
+    branding: parseSection(record.branding, (value) => brandingSchema.parse(value)),
 
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),

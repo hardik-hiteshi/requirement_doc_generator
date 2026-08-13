@@ -9,6 +9,8 @@ import { ProjectAccessModule } from '../project-access/project-access.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { StackModule } from '../stack/stack.module';
 import { DocumentsController } from './documents.controller';
+import { FileStorageModule } from '../requirements/storage/file-storage.module';
+import { DocumentExportService } from './export/document-export.service';
 import { DocumentsRepository } from './documents.repository';
 import { DocumentsService } from './documents.service';
 import { DocumentsAiService } from './documents-ai.service';
@@ -62,6 +64,8 @@ import {
     AuditModule,
     ProjectAccessModule,
     ProjectsModule,
+    /* The branding logo is read from the project's own storage when rendering. */
+    FileStorageModule,
     AnalysisModule,
     StackModule,
     EstimationModule,
@@ -80,6 +84,7 @@ import {
   providers: [
     DocumentsRepository,
     UpstreamReader,
+    DocumentExportService,
     TraceabilityService,
     UnderstandingComposer,
     FeatureListingComposer,

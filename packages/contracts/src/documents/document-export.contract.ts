@@ -41,25 +41,6 @@ export function exportFormatsFor(document: ProjectDocument): readonly ExportForm
   return ALLOWED_FORMATS[document];
 }
 
-export const EXPORT_ERROR_CODES = {
-  /** The document/format pair is not in the matrix. */
-  UNSUPPORTED_EXPORT_FORMAT: 'UNSUPPORTED_EXPORT_FORMAT',
-  /** Nothing has been written yet, so there is no version to render. */
-  DOCUMENT_NOT_GENERATED: 'DOCUMENT_NOT_GENERATED',
-  /** A version number that does not exist for this document. */
-  EXPORT_VERSION_NOT_FOUND: 'EXPORT_VERSION_NOT_FOUND',
-  /** The renderer could not produce the file. The document is untouched. */
-  EXPORT_RENDER_FAILED: 'EXPORT_RENDER_FAILED',
-  /** Branding is stored but unusable — an unreadable logo, for instance. */
-  EXPORT_BRANDING_INVALID: 'EXPORT_BRANDING_INVALID',
-  /** The rendered file exceeded the renderer's output limit. */
-  EXPORT_TOO_LARGE: 'EXPORT_TOO_LARGE',
-  /** Content that must never leave the building was found on the way out. */
-  EXPORT_CONTENT_REFUSED: 'EXPORT_CONTENT_REFUSED',
-} as const;
-
-export type ExportErrorCode = (typeof EXPORT_ERROR_CODES)[keyof typeof EXPORT_ERROR_CODES];
-
 /**
  * What the caller may choose.
  *
