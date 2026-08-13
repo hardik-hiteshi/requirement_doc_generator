@@ -109,10 +109,23 @@ export async function assertCleanSlate(): Promise<void> {
         const indexes = await db.collection(collection).indexes();
         const scoped = `projectId_1_type_1_documentVersion_1_${field}_1`;
 
-        if (!indexes.some((index) => index.name === scoped)) {
+        /*
+         * The scoped index is only expected where the application creates indexes.
+         *
+         * `autoIndex` is off in production, deliberately, and one of the two servers this
+         * suite starts runs in production mode — so its database has whatever a deployment
+         * would have created, which here is nothing. Demanding the index there fails the
+         * run over a database no document scenario touches.
+         */
+        if (databaseName === DATABASE_NAME && !indexes.some((index) => index.name === scoped)) {
           throw new Error(`${databaseName}.${collection} is missing ${scoped}: reset dropped it.`);
         }
 
+        /*
+         * The obsolete index is checked everywhere, because this one does damage. It
+         * cannot appear by itself — only by being carried over from before Phase 10 — and
+         * wherever it is, content is silently lost instead of a conflict being reported.
+         */
         const globallyUnique = indexes.find(
           (index) => index.unique === true && Object.keys(index.key).length === 1,
         );
