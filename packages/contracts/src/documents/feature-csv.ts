@@ -5,6 +5,7 @@ import {
   otherRoleEffort,
   type FeatureRow,
 } from './feature-listing.contract';
+import { spreadsheetSafeText } from './spreadsheet-safe';
 
 /**
  * The strict Feature Listing export.
@@ -62,7 +63,16 @@ export const CSV_LINE_ENDING = '\r\n';
 export function csvField(value: string): string {
   const flattened = value.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim();
 
-  return `"${flattened.replace(/"/g, '""')}"`;
+  /*
+   * Neutralised before quoting, because quoting is not protection.
+   *
+   * The quotes below are CSV's escaping, stripped by the parser before the spreadsheet
+   * decides what a cell means — so `"=1+1"` still opens as a formula. A module or feature
+   * description is user text, and user text starting `=` in a file a client double-clicks
+   * is a hazard the export owns. See `spreadsheetSafeText`: ordinary values pass through
+   * untouched, so the eight-column contract and every existing value are unchanged.
+   */
+  return `"${spreadsheetSafeText(flattened).replace(/"/g, '""')}"`;
 }
 
 /** An hours figure for a cell. Blank when the role has no work on this row. */

@@ -21,6 +21,7 @@ export * from './project/timeline.contract';
 export * from './project/start-date.contract';
 export * from './project/team-capacity.contract';
 export * from './project/output-preferences.contract';
+export * from './project/branding.contract';
 export * from './project/project.contract';
 export * from './project/project-access.contract';
 export * from './project/project-routes';
@@ -97,6 +98,8 @@ export * from './documents/feature-listing.contract';
 export * from './documents/document-correction.contract';
 export * from './documents/document-clipboard';
 export * from './documents/feature-csv';
+export * from './documents/spreadsheet-safe';
+export * from './documents/document-export.contract';
 
 /* Phase 8 — Acceptance Criteria, Assumptions and the Statement of Work. */
 export * from './documents/acceptance-criteria.contract';
