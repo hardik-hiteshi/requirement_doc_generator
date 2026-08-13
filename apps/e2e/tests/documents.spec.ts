@@ -155,6 +155,25 @@ async function approveUnderstanding(page: Page): Promise<void> {
   await page.getByTestId('document-open-OUR_UNDERSTANDING').click();
 }
 
+/**
+ * The version currently on screen, as a number.
+ *
+ * Every content change cuts a version, so how many a document has had depends on how
+ * many edits, rewrites and proposal decisions came before — which is not what most of
+ * these tests are about. Reading the number off the screen and carrying it forward keeps
+ * them about the behaviour they name instead of about arithmetic.
+ */
+async function versionNumber(page: Page): Promise<number> {
+  const label = await page.getByTestId('document-version').textContent();
+  const parsed = Number(/v(\d+)/.exec(label ?? '')?.[1]);
+
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`Expected a version like "v3" on screen, found ${JSON.stringify(label)}.`);
+  }
+
+  return parsed;
+}
+
 /** Opens Our Understanding and writes it deterministically. */
 async function generateUnderstanding(page: Page): Promise<void> {
   await page.getByTestId('document-open-OUR_UNDERSTANDING').click();
@@ -238,9 +257,20 @@ test.describe('Documents', () => {
     await expect(page.getByTestId('section-origin-project-overview')).toHaveText('Yours');
     await expect(page.getByTestId('section-body-project-overview')).toContainText('my own words');
 
-    /* 9 & 10. Rewrite the whole document; the edit survives, as a choice. */
+    /*
+     * 9 & 10. Rewrite the whole document; the edit survives, as a choice.
+     *
+     * Waiting for the version to *change* rather than to read v2. The edit above already
+     * took it to v2, so the old assertion was true the instant it ran and waited for
+     * nothing — which is how a test comes to fire its next click into a request that is
+     * still in flight.
+     */
+    const beforeRewrite = await versionNumber(page);
+
     await page.getByTestId('generate-without-ai').click();
-    await expect(page.getByTestId('document-version')).toHaveText('v2', { timeout: 60_000 });
+    await expect(page.getByTestId('document-version')).not.toHaveText(`v${beforeRewrite}`, {
+      timeout: 60_000,
+    });
 
     await expect(page.getByTestId('section-body-project-overview')).toContainText('my own words');
     await expect(page.getByTestId('proposal-project-overview')).toBeVisible();
@@ -271,8 +301,21 @@ test.describe('Documents', () => {
       'Version one text.',
     );
 
+    /*
+     * The version holding the first wording, read rather than counted.
+     *
+     * It is not v1: v1 is what the generator wrote, and saving the edit above cut a new
+     * version for it. Nor is the rewrite below v2 — the proposal decision that follows is
+     * itself a content change and cuts one too. Hard-coding these numbers made this test
+     * assert the shape of the version model rather than compare-and-restore, and it broke
+     * the moment every content change started cutting a version.
+     */
+    const first = await versionNumber(page);
+
     await page.getByTestId('generate-without-ai').click();
-    await expect(page.getByTestId('document-version')).toHaveText('v2', { timeout: 60_000 });
+    await expect(page.getByTestId('document-version')).not.toHaveText(`v${first}`, {
+      timeout: 60_000,
+    });
 
     await page.getByTestId('proposal-KEEP_CURRENT-project-overview').click();
     await expect(page.getByTestId('section-proposal-project-overview')).toBeHidden();
@@ -284,22 +327,26 @@ test.describe('Documents', () => {
       'Version two text.',
     );
 
-    /* 11. Compare. */
-    await expect(versionsPanel(page).getByTestId('version-1')).toBeVisible();
+    const second = await versionNumber(page);
+
+    /* 11. Compare what the generator wrote against the first wording. */
+    await expect(versionsPanel(page).getByTestId(`version-${first}`)).toBeVisible();
     await page.getByTestId('compare-left-1').click();
-    await page.getByTestId('compare-right-2').click();
+    await page.getByTestId(`compare-right-${first}`).click();
 
     await expect(page.getByTestId('version-diff')).toBeVisible();
     await expect(page.getByTestId('diff-project-overview')).toContainText('Version one text.');
 
-    /* 12. Restore version one — as a new version, not a rewind. */
-    await page.getByTestId('restore-1').click();
-    await expect(page.getByTestId('document-version')).toHaveText('v3', { timeout: 30_000 });
+    /* 12. Restore the first wording — as a new version, not a rewind. */
+    await page.getByTestId(`restore-${first}`).click();
+    await expect(page.getByTestId('document-version')).not.toHaveText(`v${second}`, {
+      timeout: 30_000,
+    });
     await expect(page.getByTestId('section-body-project-overview')).toContainText(
       'Version one text.',
     );
-    /* And version two is still there. */
-    await expect(versionsPanel(page).getByTestId('version-2')).toBeVisible();
+    /* And the second wording is still in the history. */
+    await expect(versionsPanel(page).getByTestId(`version-${second}`)).toBeVisible();
   });
 
   test('validates, refuses approval while something is blocking, then approves', async ({

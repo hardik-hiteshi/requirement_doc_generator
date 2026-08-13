@@ -1,8 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { DOCUMENT_LABELS } from '@wdrg/contracts';
+import { DOCUMENT_LABELS, DOCUMENT_ROUTES } from '@wdrg/contracts';
 
 import { expectNoAccessibilityViolations } from './support/accessibility';
+import { mutate, read } from './support/api';
 import { createProject, enterWorkspace, saveSection, section } from './support/workspace';
 
 /**
@@ -451,12 +452,15 @@ test.describe('Document lifecycle', () => {
     await expect(contentPanel(page)).toBeVisible({ timeout: 90_000 });
 
     /*
-     * Open the editor, then move the document on underneath it.
+     * Open the editor, then move the document on without telling the page.
      *
-     * A second browser tab would be the truer picture of two people, and it is a great
-     * deal of machinery for the thing under test: what matters is that a save carrying a
-     * version that is no longer current is explained rather than applied. Regenerating
-     * while the editor is open produces exactly that, in one tab.
+     * The change has to arrive from outside this page's knowledge, which is what makes
+     * the save stale. Pressing Regenerate here would not do it: the page handles its own
+     * response, re-renders on the new version and closes the editor, so there is no stale
+     * save left to make. A second tab would be the truer picture of two people and is a
+     * lot of machinery for the thing under test — a call on the same session, which is
+     * what the other tab would be doing anyway, leaves the editor exactly where a person
+     * left it.
      */
     const key = (await contentPanel(page)
       .locator('[data-testid^="section-edit-"]')
@@ -468,10 +472,25 @@ test.describe('Document lifecycle', () => {
 
     const before = await page.getByTestId('document-version').textContent();
 
-    await page.getByTestId('generate-without-ai').click();
-    await expect(page.getByTestId('document-version')).not.toHaveText(before ?? '', {
-      timeout: 90_000,
-    });
+    const current = await read(page.context(), DOCUMENT_ROUTES.document('OUR_UNDERSTANDING'));
+    const snapshot = (await current.json()) as { document: { recordVersion: number } };
+
+    const moved = await mutate(
+      page.context(),
+      'POST',
+      DOCUMENT_ROUTES.generate('OUR_UNDERSTANDING'),
+      {
+        useAi: false,
+        reason: 'Rewritten by somebody else while this editor was open.',
+        expectedVersion: snapshot.document.recordVersion,
+      },
+    );
+
+    expect(moved.status()).toBe(201);
+
+    /* The page still shows the version it read, and still has the editor open. */
+    await expect(page.getByTestId('document-version')).toHaveText(before ?? '');
+    await expect(page.getByTestId(`section-input-${key}`)).toBeVisible();
 
     /* 37. Now save from what is now a stale read. */
     await page.getByTestId(`section-save-${key}`).click();
