@@ -35,12 +35,22 @@ const PNG = Buffer.from(
 
 /* --------------------------------------------------------------- the chain */
 
-/** A project sitting on the documents step with everything upstream approved. */
-async function reachDocuments(page: Page): Promise<void> {
+/**
+ * A new project, sitting on its first step.
+ *
+ * Split out from `reachDocuments` because branding is configured here and the workflow
+ * offers no way back: once the documents step is open, the nav has no clickable step
+ * buttons — only "Back to requirement input" — so anything on the project step has to be
+ * done on the way through. That is also the order somebody would work in.
+ */
+async function startProject(page: Page): Promise<void> {
   await page.goto('/');
   await createProject(page, { name: 'Export and branding' });
   await enterWorkspace(page);
+}
 
+/** Everything upstream of the documents step, for a project that already exists. */
+async function walkToDocuments(page: Page): Promise<void> {
   const details = section(page, 'details');
   await details.getByRole('checkbox', { name: 'Web application', exact: true }).check();
   await saveSection(page, 'details');
@@ -115,6 +125,12 @@ async function reachDocuments(page: Page): Promise<void> {
 
   await page.getByRole('button', { name: 'Document generation' }).click();
   await expect(documentsPanel(page)).toBeVisible();
+}
+
+/** A project sitting on the documents step with everything upstream approved. */
+async function reachDocuments(page: Page): Promise<void> {
+  await startProject(page);
+  await walkToDocuments(page);
 }
 
 /** Open a document, waiting for the pane to show this one. Idempotent. */
@@ -232,7 +248,12 @@ test.describe('Export and branding', () => {
     /* 5. DOCX. */
     const docx = await downloadFormat(page, 'DOCX');
 
-    expect(docx.name).toMatch(/\.docx$/);
+    /*
+     * The whole filename, not just its extension. Chromium supplies an extension from the
+     * content type when it has no name to work with, so matching only the suffix passes
+     * even when the server's filename never reached the browser.
+     */
+    expect(docx.name).toMatch(/^Export-and-branding_Our-Understanding_v\d+\.docx$/);
     expect(isZip(docx.body)).toBe(true);
     expect(docx.body.byteLength).toBeGreaterThan(0);
     expect(docxText(docx.body)).toContain('Our Understanding');
@@ -240,7 +261,7 @@ test.describe('Export and branding', () => {
     /* 6. PDF. */
     const pdf = await downloadFormat(page, 'PDF');
 
-    expect(pdf.name).toMatch(/\.pdf$/);
+    expect(pdf.name).toMatch(/^Export-and-branding_Our-Understanding_v\d+\.pdf$/);
     expect(isPdf(pdf.body)).toBe(true);
 
     /* 25. The document did not move. */
@@ -269,7 +290,7 @@ test.describe('Export and branding', () => {
     /* 7. The strict CSV, with its eight headers intact. */
     const csv = await downloadFormat(page, 'CSV');
 
-    expect(csv.name).toMatch(/\.csv$/);
+    expect(csv.name).toMatch(/^Export-and-branding_Feature-Listing_v\d+\.csv$/);
 
     const header = csv.body
       .toString('utf8')
@@ -283,7 +304,7 @@ test.describe('Export and branding', () => {
     /* 8. And the workbook. */
     const xlsx = await downloadFormat(page, 'XLSX');
 
-    expect(xlsx.name).toMatch(/\.xlsx$/);
+    expect(xlsx.name).toMatch(/^Export-and-branding_Feature-Listing_v\d+\.xlsx$/);
     expect(isZip(xlsx.body)).toBe(true);
 
     /* 9. Acceptance Criteria as a spreadsheet. */
@@ -291,30 +312,24 @@ test.describe('Export and branding', () => {
 
     const criteria = await downloadFormat(page, 'XLSX');
 
-    expect(criteria.name).toMatch(/\.xlsx$/);
+    expect(criteria.name).toMatch(/^Export-and-branding_Acceptance-Criteria_v\d+\.xlsx$/);
     expect(isZip(criteria.body)).toBe(true);
   });
 
   /* 2, 3, 4, 26. */
-  test('branding changes the file and leaves every document alone', async ({ page }) => {
-    await reachDocuments(page);
-    await settle(page, 'OUR_UNDERSTANDING', 'Our Understanding');
+  test('branding reaches the file and leaves the document alone', async ({ page }) => {
+    await startProject(page);
 
-    const plain = await downloadFormat(page, 'DOCX');
-    const versionBefore = await page.getByTestId('document-version').textContent();
-
-    /* Back to the project step, where branding lives. */
-    await page.getByRole('button', { name: 'Project details' }).click();
+    /* 2. An organisation name and a footer. */
     await expect(brandingPanel(page)).toBeVisible();
-
-    /* 2. An organisation name. */
     await brandingPanel(page).getByTestId('branding-organization').fill('Hiteshi');
     await brandingPanel(page).getByTestId('branding-footer').fill('Commercial in confidence');
 
     /* 4. An accent colour. */
     await brandingPanel(page).getByTestId('branding-accent').fill('#1F3A5F');
+    await expect(brandingPanel(page).getByTestId('branding-accent-error')).toHaveCount(0);
 
-    /* 3. A logo. */
+    /* 3. A logo, uploaded and scanned like any other file. */
     await brandingPanel(page)
       .getByTestId('branding-logo-input')
       .setInputFiles({ name: 'mark.png', mimeType: 'image/png', buffer: PNG });
@@ -325,25 +340,45 @@ test.describe('Export and branding', () => {
 
     await brandingPanel(page).getByTestId('branding-save').click();
 
-    await page.getByRole('button', { name: 'Document generation' }).click();
-    await openDocument(page, 'OUR_UNDERSTANDING', 'Our Understanding');
+    /*
+     * Wait for the save to land before touching another section. Both share the project's
+     * record version, so continuing while this is in flight would send the next save with
+     * a stale one and earn a conflict the product is right to report.
+     */
+    await expect(brandingPanel(page).getByText('Saved', { exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
 
+    /* Now walk to the documents and export under that branding. */
+    await walkToDocuments(page);
+    await settle(page, 'OUR_UNDERSTANDING', 'Our Understanding');
+
+    const versionBefore = await page.getByTestId('document-version').textContent();
     const branded = await downloadFormat(page, 'DOCX');
 
-    /* The file changed. */
+    /* The branding is in the file. */
     expect(docxText(branded.body)).toContain('Hiteshi');
-    expect(branded.body.equals(plain.body)).toBe(false);
 
-    /* 26. The document did not, and is not out of date because a colour changed. */
+    /* 26. And the document has not moved: branding is presentation, not authority. */
     await expect(page.getByTestId('document-version')).toHaveText(versionBefore ?? '');
     await expect(page.getByTestId('detail-status')).toHaveText('Approved');
   });
 
+  test('an unbranded export carries no organisation name', async ({ page }) => {
+    await reachDocuments(page);
+    await settle(page, 'OUR_UNDERSTANDING', 'Our Understanding');
+
+    const plain = await downloadFormat(page, 'DOCX');
+
+    /* The default is genuinely unbranded rather than branded with a placeholder. */
+    expect(docxText(plain.body)).not.toContain('Hiteshi');
+    expect(docxText(plain.body)).toContain('Our Understanding');
+  });
+
   /* Branding validation, and that a bad value never reaches a document. */
   test('refuses an accent colour that is not a colour', async ({ page }) => {
-    await reachDocuments(page);
+    await startProject(page);
 
-    await page.getByRole('button', { name: 'Project details' }).click();
     await brandingPanel(page).getByTestId('branding-accent').fill('rgb(0,0,0)');
 
     await expect(brandingPanel(page).getByTestId('branding-accent-error')).toBeVisible();
@@ -414,7 +449,7 @@ test.describe('Export and branding', () => {
     /* 18. The issued file names its lifecycle. */
     const issued = await downloadFormat(page, 'PDF');
 
-    expect(issued.name).toContain('Issued');
+    expect(issued.name).toMatch(/^Export-and-branding_Our-Understanding_v\d+_Issued\.pdf$/);
     expect(isPdf(issued.body)).toBe(true);
 
     /* 19. Revise it. */
@@ -449,7 +484,13 @@ test.describe('Export and branding', () => {
     ] as const) {
       test(`on ${name}`, async ({ page }) => {
         await page.setViewportSize(viewport);
-        await reachDocuments(page);
+        await startProject(page);
+
+        /* Branding first, because the workflow does not come back to this step. */
+        await expect(brandingPanel(page)).toBeVisible();
+        await expectNoAccessibilityViolations(page);
+
+        await walkToDocuments(page);
         await settle(page, 'OUR_UNDERSTANDING', 'Our Understanding');
 
         await expect(exportPanel(page)).toBeVisible();
@@ -461,11 +502,6 @@ test.describe('Export and branding', () => {
         );
 
         expect(overflow).toBeLessThanOrEqual(1);
-
-        await expectNoAccessibilityViolations(page);
-
-        await page.getByRole('button', { name: 'Project details' }).click();
-        await expect(brandingPanel(page)).toBeVisible();
 
         await expectNoAccessibilityViolations(page);
       });

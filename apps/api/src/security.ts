@@ -72,6 +72,13 @@ export function configureCors(app: INestApplication, config: AppConfigService): 
     credentials: true,
     // Without this the browser cannot read the correlation id, which defeats
     // the point of returning it.
-    exposedHeaders: [CORRELATION_ID_HEADER],
+    //
+    // Content-Disposition is here for the same reason. It is not a
+    // CORS-safelisted response header, so a cross-origin download cannot read
+    // the filename the server chose and every file saves as "document" plus
+    // whatever extension the browser infers from the type — losing the project,
+    // the version and the "Issued" marker that make an exported file
+    // identifiable once it is sitting in somebody's downloads folder.
+    exposedHeaders: [CORRELATION_ID_HEADER, 'Content-Disposition'],
   });
 }
