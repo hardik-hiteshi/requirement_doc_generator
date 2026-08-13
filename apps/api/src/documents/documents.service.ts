@@ -688,7 +688,7 @@ export class DocumentsService {
       { requirementId, reason, excludedAt: new Date() },
     ];
 
-    await this.repository.update(context.projectId, type, record.recordVersion, { exclusions });
+    await this.commit(context.projectId, type, record.recordVersion, { exclusions });
 
     await this.afterContentChange(context, type, record, 'DOCUMENT_EDITED', {
       excludedRequirement: requirementId,
@@ -758,7 +758,7 @@ export class DocumentsService {
       modelAssisted,
     });
 
-    await this.repository.update(context.projectId, type, record.recordVersion, {
+    await this.commit(context.projectId, type, record.recordVersion, {
       validation: validation,
     });
 
@@ -801,7 +801,7 @@ export class DocumentsService {
         : finding,
     );
 
-    await this.repository.update(context.projectId, type, record.recordVersion, {
+    await this.commit(context.projectId, type, record.recordVersion, {
       validation: {
         ...validation,
         findings,
@@ -867,7 +867,7 @@ export class DocumentsService {
 
     const now = new Date();
 
-    await this.repository.update(context.projectId, type, record.recordVersion, {
+    await this.commit(context.projectId, type, record.recordVersion, {
       status: 'APPROVED',
       approvedAt: now,
     });
@@ -1192,7 +1192,7 @@ export class DocumentsService {
 
     const now = new Date();
 
-    await this.repository.update(context.projectId, type, record.recordVersion, {
+    await this.commit(context.projectId, type, record.recordVersion, {
       status: 'FINAL',
       finalAt: now,
     });
@@ -1288,7 +1288,7 @@ export class DocumentsService {
       excludedReason: row.excludedReason ?? '',
     }));
 
-    await this.repository.update(context.projectId, type, record.recordVersion, {
+    await this.commit(context.projectId, type, record.recordVersion, {
       version,
       status: 'DRAFT',
       supersedesVersion: record.version,
@@ -1509,6 +1509,43 @@ export class DocumentsService {
   }
 
   /**
+   * Writes to the record, or says the race was lost. Never neither.
+   *
+   * `repository.update` matches on `recordVersion` and returns `null` when the document
+   * has moved on — which is the whole point, and worthless if the caller drops it. Every
+   * such write was, so a request that lost a race answered `201` having changed nothing:
+   * a validation the user asked for silently not stored and the panel left reading "not
+   * checked", an approval that did not approve, a new version allocated while the record
+   * went on pointing at the old one.
+   *
+   * A lost race here is the same event the rest of the step already models, so it gets
+   * the same answer — 409, `version_conflict` — which the interface knows how to explain
+   * and never retries on its own. This tightens optimistic concurrency rather than
+   * loosening it: the conflict was always real, it just used to pass unnoticed.
+   */
+  private async commit(
+    projectId: string,
+    type: DocumentType,
+    expectedRecordVersion: number,
+    changes: Record<string, unknown>,
+    unset: readonly string[] = [],
+  ): Promise<DocumentDocument> {
+    const updated = await this.repository.update(
+      projectId,
+      type,
+      expectedRecordVersion,
+      changes,
+      unset,
+    );
+
+    if (!updated) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_NOT_FOUND, 409, 'version_conflict');
+    }
+
+    return updated;
+  }
+
+  /**
    * After any content change: an approved document returns to draft.
    *
    * Editing approved content silently would leave "approved" meaning nothing.
@@ -1556,17 +1593,13 @@ export class DocumentsService {
      */
     const live = (await this.repository.find(context.projectId, type)) ?? record;
 
-    const bumped = await this.repository.update(context.projectId, type, live.recordVersion, {
+    await this.commit(context.projectId, type, live.recordVersion, {
       version,
       ...(wasApproved ? { status: 'DRAFT' } : {}),
       supersedesVersion: record.version,
       /* The stored result described the previous content. */
       validation: null,
     });
-
-    if (!bumped) {
-      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_NOT_FOUND, 409, 'version_conflict');
-    }
 
     await this.repository.replaceSections(
       context.projectId,
@@ -2579,7 +2612,7 @@ export class DocumentsService {
     const previous = await this.currentContent(context.projectId, record);
     await this.archive(context.projectId, record, previous);
 
-    await this.repository.update(context.projectId, type, record.recordVersion, {
+    await this.commit(context.projectId, type, record.recordVersion, {
       version,
       status: 'DRAFT',
       supersedesVersion: record.version,
@@ -3340,7 +3373,7 @@ export class DocumentsService {
       });
     });
 
-    await this.repository.update(context.projectId, type, record.recordVersion, {
+    await this.commit(context.projectId, type, record.recordVersion, {
       version,
       status: record.status === 'APPROVED' ? 'DRAFT' : record.status,
       supersedesVersion: record.version,

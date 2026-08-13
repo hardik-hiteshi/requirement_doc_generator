@@ -363,11 +363,21 @@ test.describe('Documents 3 to 5', () => {
     await expect(page.getByTestId('section-body-objective')).toContainText('spreadsheet process');
 
     /*
-     * Rewriting one section does not cut a new document version — it replaces that
-     * section's text and takes the document back to draft. What matters here is that
-     * it left the section somebody edited alone.
+     * Rewriting one section cuts a new document version, as any content change now does,
+     * and takes the document back to draft. What matters here is that it left the section
+     * somebody edited alone.
+     *
+     * The new version is also the only reliable sign that the rewrite has landed. Waiting
+     * on the status does not work: the edit above already took the document to draft, so
+     * that assertion passes instantly and the next step runs while the rewrite is still in
+     * flight — which is how this test came to press Validate mid-request.
      */
+    const beforeRewrite = await page.getByTestId('document-version').textContent();
+
     await page.getByTestId('section-regenerate-scope-of-work').click();
+    await expect(page.getByTestId('document-version')).not.toHaveText(beforeRewrite ?? '', {
+      timeout: 60_000,
+    });
     await expect(page.getByTestId('detail-status')).toHaveText('Draft', { timeout: 60_000 });
     await expect(page.getByTestId('section-body-objective')).toContainText('spreadsheet process');
 

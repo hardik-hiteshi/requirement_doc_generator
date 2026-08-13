@@ -1,12 +1,12 @@
 import { mkdir } from 'node:fs/promises';
 
 import { ARTIFACT_DIR } from './environment';
-import { resetTestData } from './database';
+import { assertCleanSlate, resetTestData } from './database';
 
 /**
- * Clears the suite's data before the first test.
+ * Clears the suite's data before the first test, and checks that it worked.
  *
- * Documents only — see `resetTestData`. Log files are truncated earlier, by
+ * Stored data only — see `resetTestData`. Log files are truncated earlier, by
  * `scripts/prepare-run.mjs`, because Playwright starts the web servers before it
  * runs this hook and clearing them here would erase the run's own startup
  * output.
@@ -17,4 +17,5 @@ import { resetTestData } from './database';
 export default async function globalSetup(): Promise<void> {
   await mkdir(ARTIFACT_DIR, { recursive: true });
   await resetTestData();
+  await assertCleanSlate();
 }

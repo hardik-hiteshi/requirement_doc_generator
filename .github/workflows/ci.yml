@@ -265,7 +265,11 @@ jobs:
   browser:
     name: Browser end-to-end tests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The suite builds the workspace, starts the API and the web app and then drives the
+    # whole application through a browser one worker at a time, so it is the long job by
+    # some margin. Headroom over the observed run time, not a target: a cancelled job
+    # reports nothing, which is worse than a slow one that tells you what broke.
+    timeout-minutes: 45
 
     services:
       mongodb:

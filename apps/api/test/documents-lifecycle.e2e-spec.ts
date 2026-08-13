@@ -1031,6 +1031,58 @@ describe('Document lifecycle (e2e)', () => {
   /* ============================ 7. concurrency and security ============= */
 
   describe('concurrency and security', () => {
+    /*
+     * A request that loses a race must say so, not answer 201 having done nothing.
+     *
+     * Validation is stored against the record it read. Every content change now cuts a
+     * new version, so a validation that overlaps one is writing against a record that has
+     * moved — and that write used to be dropped on the floor: the response said 201, the
+     * stored validation was never written, and the panel went on reading "not checked" no
+     * matter how many times somebody pressed the button. It is reachable by hand, because
+     * a person can press Validate while a regeneration is still in flight.
+     *
+     * Either outcome is correct — the validation is stored, or the conflict is reported —
+     * so the race not landing on a given run cannot fail this. What it cannot be is
+     * success with nothing to show for it.
+     */
+    it('33. a validation that overlaps a content change is stored or refused, never lost', async () => {
+      const session = await project();
+      await generate(session, UNDERSTANDING);
+
+      const document = await read(session, UNDERSTANDING);
+      const section = document.sections[0]!;
+
+      const [edit, validation] = await Promise.all([
+        session.agent
+          .put(DOCUMENT_ROUTES.section(UNDERSTANDING, section.sectionId))
+          .set('x-csrf-token', session.csrf)
+          .send({
+            body: 'Reworded while the check was running.',
+            expectedVersion: document.recordVersion,
+          }),
+        session.agent
+          .post(DOCUMENT_ROUTES.validate(UNDERSTANDING))
+          .set('x-csrf-token', session.csrf)
+          .send({ useAi: false }),
+      ]);
+
+      expect([200, 409]).toContain(edit.status);
+      expect([201, 409]).toContain(validation.status);
+
+      if (validation.status === 201) {
+        const snapshot = validation.body.document as DocumentSnapshot;
+
+        /*
+         * A validation reported as run has a result. The one case where `null` is
+         * right is a content change that landed after it and invalidated it — which
+         * shows up as the edit having won, not as a validation that never happened.
+         */
+        if (edit.status !== 200) {
+          expect(snapshot.validation).not.toBeNull();
+        }
+      }
+    });
+
     it('31. a stale edit is refused rather than overwriting somebody else', async () => {
       const session = await project();
       await generate(session, UNDERSTANDING);

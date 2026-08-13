@@ -48,18 +48,73 @@ for (const [collection, index] of [
 }
 ```
 
-Idempotent: an index that is not there reports as already gone, which is the expected
-result on a database created at Phase 10 or later.
+Safe to re-run. Each drop is attempted independently and a missing index reports as
+already gone, so running it twice — or on a database created at Phase 10 or later, or
+after a half-finished attempt — leaves the same result and fails nothing. It does not
+touch data, and it creates nothing.
 
 The replacement indexes — `(projectId, type, documentVersion, id)`, unique — are created
 automatically wherever `autoIndex` is on, and should be created as part of your deployment
 process where it is off (production defaults to off).
 
-## Checking
+### What changes
+
+Per collection, before and after:
+
+| Collection          | Must be gone  | Must exist                                         |
+| ------------------- | ------------- | -------------------------------------------------- |
+| `document_sections` | `sectionId_1` | `projectId_1_type_1_documentVersion_1_sectionId_1` |
+| `document_features` | `featureId_1` | `projectId_1_type_1_documentVersion_1_featureId_1` |
+| `document_rows`     | `rowId_1`     | `projectId_1_type_1_documentVersion_1_rowId_1`     |
+
+Everything else is left alone — the non-unique `sectionId_1`-style lookup indexes the
+current schema still declares, the `order` indexes, and anything added by hand.
+
+Uniqueness is narrowed, not removed. After the migration a section id may appear once per
+version of one document, and a second row claiming the same id inside the same version is
+still rejected with E11000. `apps/api/test/document-indexes.e2e-spec.ts` asserts both
+halves, so a future schema change cannot quietly drop the protection instead of scoping it.
+
+### Verifying
 
 ```js
-db.document_sections.getIndexes().map((index) => index.name);
+// mongosh "<your MONGODB_URI>"
+for (const [collection, field] of [
+  ['document_sections', 'sectionId'],
+  ['document_features', 'featureId'],
+  ['document_rows', 'rowId'],
+]) {
+  const names = db
+    .getCollection(collection)
+    .getIndexes()
+    .map((index) => index.name);
+  const obsolete = names.includes(`${field}_1`);
+  const scoped = names.includes(
+    `projectId_1_type_1_documentVersion_1_${field}_1`,
+  );
+  print(`${collection}: ${!obsolete && scoped ? 'ok' : 'NEEDS ATTENTION'}`);
+}
 ```
 
-Expect a compound index ending in `documentVersion_1_sectionId_1`, and no bare
-`sectionId_1`.
+Three `ok` lines and the database is ready.
+
+### If something goes wrong
+
+Dropping an index cannot lose data, so recovery is to recreate what was dropped:
+
+```js
+db.document_sections.createIndex(
+  { sectionId: 1 },
+  { unique: true, name: 'sectionId_1' },
+);
+```
+
+That puts the database back to its Phase 9 shape, where Phase 9 code runs and Phase 10
+code cannot save a second document version. Recreating it is therefore a step backwards to
+take alongside rolling the application back, not a fix on its own.
+
+One case does need care: if a Phase 10 application has already written more than one
+version of a document, the old unique index can no longer be created — the repeated ids it
+forbids are legitimately there. Recreating it then requires removing the superseded
+versions first, which discards history. Take a database backup before the migration and
+restore that instead.
