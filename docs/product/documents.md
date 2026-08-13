@@ -368,6 +368,44 @@ nobody knows is outstanding.
 **You can issue it with things still outstanding.** That is the point — it is what you
 send in order to ask.
 
+## Changing your mind
+
+**Every change is kept.** Edit a section, correct an entry, remove one — each becomes a
+version you can go back to, and the version before it stays exactly as it was. The list
+says what each one _is_: an edit, a rewrite, an approval, content brought back from
+earlier. Approved and issued versions are marked, because those are the two you will
+usually be looking for.
+
+**Comparing two versions shows the fields that changed**, with both values, and says
+whether what moved was the wording, what the entry traces to, or its status. On a phone
+the old and new sit one above the other — you should never have to scroll sideways to
+understand a change.
+
+**Approving applies to the words you approved.** Change an approved document and it needs
+approving again, because what is in front of you is no longer what anybody signed off. If
+something _upstream_ changes instead, the document stays approved and is marked as no
+longer current: the decision was true when it was made, and nothing has been rewritten
+for you.
+
+**Restoring brings content forward.** It never rewinds, and it does not bring the old
+approval with it — the content is back, and it needs reading and approving again.
+
+**An issued document cannot be edited.** Revise it, and a new version opens beside the
+issued one, which stays exactly as it was sent.
+
+**If somebody else saved first**, you are told. Your text stays where it is, and you are
+asked to look at what changed before applying it again — nothing of theirs is quietly
+overwritten, and nothing of yours is quietly thrown away.
+
+## Following a requirement through
+
+Below the document list, every requirement you approved is listed with the documents that
+mention it — and, first, the ones that are missing. A requirement that was agreed, priced
+and never planned is the kind of gap that is invisible until somebody is building.
+
+Assumptions and the Client Dependency Sheet are marked as applying only where relevant: a
+requirement with no assumption is completely normal, not a problem.
+
 ## What it is not, yet
 
 Copy-to-clipboard and the strict CSV preview work now. **Full DOCX, PDF and XLSX

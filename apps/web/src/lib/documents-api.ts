@@ -8,7 +8,10 @@ import {
   type RejectAssumption,
   type ResolveRowProposal,
   type ReceiveDependency,
+  type ArtifactTrace,
+  type RemoveRow,
   type RequestDependency,
+  type TraceabilityView,
   type SettleAssumption,
   type ValidateDependency,
   DOCUMENT_ROUTES,
@@ -447,6 +450,35 @@ export async function validateDependency(
 ): Promise<DocumentView> {
   return apiFetch<DocumentView>(DOCUMENT_ROUTES.validateDependency(type, rowId), {
     method: 'POST',
+    body: request,
+    headers: mutationHeaders(),
+  });
+}
+
+/* ---------------------------------- Phase 10: traceability --------------- */
+
+/** Every approved requirement, followed through every document that cites it. */
+export async function fetchTraceability(): Promise<{ traceability: TraceabilityView }> {
+  return apiFetch<{ traceability: TraceabilityView }>(DOCUMENT_ROUTES.traceability);
+}
+
+/** What each entry in one document traces back to. */
+export async function fetchDocumentTraceability(
+  type: DocumentType,
+): Promise<{ artifacts: readonly ArtifactTrace[] }> {
+  return apiFetch<{ artifacts: readonly ArtifactTrace[] }>(
+    DOCUMENT_ROUTES.documentTraceability(type),
+  );
+}
+
+/** Take an entry out of the working document. Every earlier version keeps it. */
+export async function removeRow(
+  type: DocumentType,
+  rowId: string,
+  request: RemoveRow,
+): Promise<DocumentView> {
+  return apiFetch<DocumentView>(DOCUMENT_ROUTES.removeRow(type, rowId), {
+    method: 'DELETE',
     body: request,
     headers: mutationHeaders(),
   });

@@ -157,7 +157,18 @@ async function settle(page: Page, type: string): Promise<void> {
   await expect(page.getByTestId(`document-lock-${type}`)).toBeHidden({ timeout: 60_000 });
   await openDocument(page, type);
   await page.getByTestId('generate-without-ai').click();
-  await expect(page.getByTestId('document-version')).toHaveText('v1', { timeout: 90_000 });
+
+  /*
+   * Wait for the document to exist, not for a version number.
+   *
+   * A document that has not been written yet is described honestly but still reports a
+   * version — the version it would be written as — so waiting for "v1" was satisfied the
+   * instant it ran, and validation then went out while the generation was still in
+   * flight. Leaving "Not started" is the first thing that is only true afterwards.
+   */
+  await expect(page.getByTestId('detail-status')).not.toHaveText('Not started', {
+    timeout: 90_000,
+  });
   await settleOpenDocument(page);
 }
 
@@ -363,11 +374,21 @@ test.describe('Documents 3 to 5', () => {
     await expect(page.getByTestId('section-body-objective')).toContainText('spreadsheet process');
 
     /*
-     * Rewriting one section does not cut a new document version — it replaces that
-     * section's text and takes the document back to draft. What matters here is that
-     * it left the section somebody edited alone.
+     * Rewriting one section cuts a new document version, as any content change now does,
+     * and takes the document back to draft. What matters here is that it left the section
+     * somebody edited alone.
+     *
+     * The new version is also the only reliable sign that the rewrite has landed. Waiting
+     * on the status does not work: the edit above already took the document to draft, so
+     * that assertion passes instantly and the next step runs while the rewrite is still in
+     * flight — which is how this test came to press Validate mid-request.
      */
+    const beforeRewrite = await page.getByTestId('document-version').textContent();
+
     await page.getByTestId('section-regenerate-scope-of-work').click();
+    await expect(page.getByTestId('document-version')).not.toHaveText(beforeRewrite ?? '', {
+      timeout: 60_000,
+    });
     await expect(page.getByTestId('detail-status')).toHaveText('Draft', { timeout: 60_000 });
     await expect(page.getByTestId('section-body-objective')).toContainText('spreadsheet process');
 

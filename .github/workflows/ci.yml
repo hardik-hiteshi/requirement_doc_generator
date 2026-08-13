@@ -265,7 +265,14 @@ jobs:
   browser:
     name: Browser end-to-end tests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The suite builds the workspace, starts the API and the web app and then drives the
+    # whole application through a browser one worker at a time — see the note in
+    # apps/e2e/playwright.config.ts for why one worker. A green run takes about 15
+    # minutes here; the headroom is for a hung test, which costs its whole ten-minute
+    # budget and then does it again on the retry. At 30 minutes that combination
+    # cancelled the job, and a cancelled job uploads no diagnostics, so the failure that
+    # caused it was invisible.
+    timeout-minutes: 45
 
     services:
       mongodb:

@@ -37,12 +37,30 @@ export default defineConfig({
   outputDir: resolve(ARTIFACT_DIR, 'test-results'),
 
   /*
-   * Serial, single worker, deliberately.
+   * Serial, single worker, deliberately — and it costs about half an hour.
    *
    * Every scenario drives one shared API and one shared database, and several
    * assert on process-wide state — the contents of the application log, the
    * cookies a browser context holds. Running them concurrently would make those
    * assertions depend on what another test happened to be doing.
+   *
+   * The log is the part that cannot be worked around. `expectSecretConfined` reads
+   * the API, production-API and web logs in full and asserts a recovery secret was
+   * never written to any of them; with several workers those files interleave output
+   * from scenarios the assertion knows nothing about, so a pass would stop meaning
+   * what it claims. A leak going unnoticed is a worse outcome than a slow suite, so
+   * the suite stays serial.
+   *
+   * What that costs, measured rather than assumed: a healthy full run of 134 scenarios
+   * is about 13 minutes locally and 15 on a hosted runner, one worker throughout.
+   *
+   * Earlier runs of 25 to 37 minutes were not the suite being slow. They were failing
+   * tests sitting out their budgets — a hung test costs its whole ten minutes, twice
+   * over once CI retries it — which is also what pushed the job past its original
+   * thirty-minute limit and had it cancelled rather than reported. The limit is now 45
+   * minutes so that one hung test and its retry still produce a report, and the figures
+   * above are the ones to compare against: a green run creeping toward the limit is a
+   * regression to investigate, not a limit to raise again.
    */
   fullyParallel: false,
   workers: 1,

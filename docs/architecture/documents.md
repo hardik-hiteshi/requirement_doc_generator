@@ -461,6 +461,45 @@ work breakdown, confirmed assumptions or unanswered clarifications; `isTooVague`
 wording nobody can close. Outstanding items are reported, never a blocker — the sheet is
 how you ask. See ADR-0039.
 
+## Editing, versioning and history
+
+**Every content change cuts a version.** A section edit, a row edit, an addition, a
+removal, a regeneration, accepting a proposal, applying a correction: each reads the
+mutated content back and re-keys it to the next version, leaving the previous version's
+snapshot exactly as it was archived. Reads, comparisons and history listings create
+nothing. Implemented once in `afterContentChange` rather than in each mutation path — see
+ADR-0040.
+
+**Identity survives a version bump.** `sectionId`, `featureId` and `rowId` are unique
+within a version and carried forward by a mutation, so an open editor, a multi-step
+dependency flow and a comparison all keep working. Every id lookup is scoped by version.
+
+**A version says why it exists.** `changeType`, `restoredFromVersion`,
+`revisedFromVersion` and `actor` are written at the moment of the change and never
+overwritten later. `actor` is `USER` or `SYSTEM` — projects are anonymous, so anything
+more specific would be invented.
+
+**Reopening an approved document cuts a working version.** The approved version keeps its
+status and `approvedAt` and stays immutable; work continues on the next one. Revising an
+issued document does the same beside the FINAL snapshot.
+
+**Comparison is keyed and per field.** Sections match on their key, rows on their own
+stable key — a criterion key, an outline number, a dependency key — so a row that moved
+reads as unchanged. Each changed field says whether the change was to content, to what the
+row traces to, to lifecycle metadata, or to the authority it was written against.
+
+**Removal is distinct from exclusion.** An exclusion stays on the sheet with its reason,
+which is right for scope deliberately left out. A removal takes a row out of the working
+document; every earlier version keeps it, and coverage notices if it was the only thing
+covering approved scope.
+
+## Traceability
+
+`TraceabilityService` walks the links the documents already record and returns every
+approved requirement with the documents that cite it, per-document coverage, and the gaps.
+Nothing is inferred from prose; Assumptions and the Client Dependency Sheet are conditional
+and reported without penalty. See ADR-0041.
+
 ## Known limitations
 
 - **Export is a later phase.** See below.
@@ -477,6 +516,17 @@ how you ask. See ADR-0039.
 - **The reverse dependency view is derived on every read**, which costs one extra query
   per work-breakdown read. Stored denormalisation would be faster and could disagree
   with the sheet, which is the failure that matters here.
+- **The traceability view reads all seven documents** on request. It is not cached, for
+  the same reason: a cache here can disagree with the documents it describes.
+- **A document accumulates a version per edit.** The history is longer than one somebody
+  would design by hand; it is legible because each version says what it is rather than
+  only when it was.
+- **Upgrading an existing database needs one manual step.** The old globally-unique id
+  indexes must be dropped, or the second version of any document fails to save. Nothing
+  drops them automatically — see
+  [operations/schema-changes](../operations/schema-changes.md).
+- **There is no bulk row-edit endpoint.** Rows are edited one at a time, so the atomicity
+  question a bulk endpoint would raise does not arise yet.
 - **Client dependencies are inferred conservatively.** A row appears where an
   integration, a locked third-party technology, an unanswered clarification or a
   clearly client-facing assumption implies one. A dependency implied only by domain

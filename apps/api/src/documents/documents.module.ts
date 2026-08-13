@@ -12,6 +12,7 @@ import { DocumentsController } from './documents.controller';
 import { DocumentsRepository } from './documents.repository';
 import { DocumentsService } from './documents.service';
 import { DocumentsAiService } from './documents-ai.service';
+import { TraceabilityService } from './traceability.service';
 import { UpstreamReader } from './upstream.reader';
 import { AcceptanceCriteriaComposer } from './composers/acceptance-criteria.composer';
 import { AssumptionsComposer } from './composers/assumptions.composer';
@@ -79,6 +80,7 @@ import {
   providers: [
     DocumentsRepository,
     UpstreamReader,
+    TraceabilityService,
     UnderstandingComposer,
     FeatureListingComposer,
     AcceptanceCriteriaComposer,

@@ -2,6 +2,7 @@ import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import {
   CORRECTION_OUTCOMES,
   CORRECTION_TARGET_KINDS,
+  DOCUMENT_CHANGE_TYPES,
   DOCUMENT_ROW_KINDS,
   DOCUMENT_RUN_KINDS,
   DOCUMENT_RUN_STATUSES,
@@ -167,7 +168,12 @@ DocumentSchema.index({ projectId: 1, type: 1 }, { unique: true });
   versionKey: false,
 })
 export class DocumentSectionRecord {
-  @Prop({ type: String, required: true, unique: true, index: true })
+  /*
+   * Unique *within a version*. See the note on `DocumentFeatureRecord.featureId`: a
+   * mutation carries a section's identity forward so an open editor and a comparison
+   * both still refer to the same section.
+   */
+  @Prop({ type: String, required: true, index: true })
   sectionId!: string;
 
   @Prop({ type: String, required: true, index: true })
@@ -218,6 +224,10 @@ export class DocumentSectionRecord {
 export type DocumentSectionDocument = HydratedDocument<DocumentSectionRecord>;
 export const DocumentSectionSchema = SchemaFactory.createForClass(DocumentSectionRecord);
 DocumentSectionSchema.index({ projectId: 1, type: 1, documentVersion: 1, order: 1 });
+DocumentSectionSchema.index(
+  { projectId: 1, type: 1, documentVersion: 1, sectionId: 1 },
+  { unique: true },
+);
 
 /* --------------------------------------------------------------- features */
 
@@ -228,7 +238,15 @@ DocumentSectionSchema.index({ projectId: 1, type: 1, documentVersion: 1, order: 
   versionKey: false,
 })
 export class DocumentFeatureRecord {
-  @Prop({ type: String, required: true, unique: true, index: true })
+  /*
+   * Unique *within a version*, not globally.
+   *
+   * A feature row keeps its id when a new version is cut, so "the payroll export row"
+   * is the same row in v3 and v4 and a comparison can match them. A globally unique
+   * index would force a new id on every version, which would make every row read as
+   * deleted-and-added and lose the identity a reviewer is following.
+   */
+  @Prop({ type: String, required: true, index: true })
   featureId!: string;
 
   @Prop({ type: String, required: true, index: true })
@@ -303,6 +321,10 @@ export class DocumentFeatureRecord {
 export type DocumentFeatureDocument = HydratedDocument<DocumentFeatureRecord>;
 export const DocumentFeatureSchema = SchemaFactory.createForClass(DocumentFeatureRecord);
 DocumentFeatureSchema.index({ projectId: 1, type: 1, documentVersion: 1, order: 1 });
+DocumentFeatureSchema.index(
+  { projectId: 1, type: 1, documentVersion: 1, featureId: 1 },
+  { unique: true },
+);
 
 /* --------------------------------------------------------------- versions */
 
@@ -366,6 +388,34 @@ export class DocumentVersionRecord {
 
   @Prop({ type: Date, required: false })
   finalAt?: Date;
+
+  /*
+   * Why this version exists, recorded at the moment it was cut.
+   *
+   * Not inferred later from what differs: "this row's wording changed" and "this came
+   * back from version 4 and the wording happens to differ" produce the same diff and
+   * are different events. A history that cannot tell them apart is a list of numbers.
+   */
+  @Prop({ type: String, required: false, enum: DOCUMENT_CHANGE_TYPES })
+  changeType?: string;
+
+  /** The version this content was restored from, when it was. */
+  @Prop({ type: Number, required: false })
+  restoredFromVersion?: number;
+
+  /** The issued version this working revision was opened beside. */
+  @Prop({ type: Number, required: false })
+  revisedFromVersion?: number;
+
+  /**
+   * Who caused it: `USER` or `SYSTEM`.
+   *
+   * Deliberately not a name. Projects here are anonymous by design — there is no
+   * account to attribute to — so recording anything more specific would either be
+   * empty or invented.
+   */
+  @Prop({ type: String, required: false })
+  actor?: string;
 
   createdAt!: Date;
 }
@@ -592,7 +642,15 @@ DocumentValidationSchema.index({ projectId: 1, type: 1, createdAt: -1 });
  */
 @Schema({ collection: 'document_rows', timestamps: true, minimize: false })
 export class DocumentRowRecord {
-  @Prop({ type: String, required: true, unique: true, index: true })
+  /*
+   * Unique *within a version*.
+   *
+   * A mutation carries a row's identity forward, so a caller that has just edited AC-004
+   * can act on it again without re-reading, and a multi-step flow — request, receive,
+   * check a client dependency — works on one id throughout. Comparison matches on the
+   * payload's own key regardless; this is about the caller's handle on a row.
+   */
+  @Prop({ type: String, required: true, index: true })
   rowId!: string;
 
   @Prop({ type: String, required: true, index: true })
@@ -641,3 +699,4 @@ export class DocumentRowRecord {
 export type DocumentRowDocument = HydratedDocument<DocumentRowRecord>;
 export const DocumentRowSchema = SchemaFactory.createForClass(DocumentRowRecord);
 DocumentRowSchema.index({ projectId: 1, type: 1, documentVersion: 1, order: 1 });
+DocumentRowSchema.index({ projectId: 1, type: 1, documentVersion: 1, rowId: 1 }, { unique: true });

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -28,6 +29,7 @@ import {
   regenerateRowGroupSchema,
   regenerateRowSchema,
   rejectAssumptionSchema,
+  removeRowSchema,
   resolveRowProposalSchema,
   receiveDependencySchema,
   requestDependencySchema,
@@ -41,6 +43,7 @@ import {
   type RegenerateRow,
   type RegenerateRowGroup,
   type RejectAssumption,
+  type RemoveRow,
   type ResolveRowProposal,
   type ReceiveDependency,
   type RequestDependency,
@@ -71,7 +74,9 @@ import {
   type DocumentSnapshot,
   type DocumentSummary,
   type DocumentType,
+  type ArtifactTrace,
   type DocumentVersionSummary,
+  type TraceabilityView,
   type FeatureRow,
   type GenerateDocument,
   type MarkFinal,
@@ -92,6 +97,7 @@ import {
 import { DocumentError } from './documents.errors';
 import { DocumentsAiService } from './documents-ai.service';
 import { DocumentsRepository } from './documents.repository';
+import { TraceabilityService } from './traceability.service';
 import { DocumentsService, type DocumentContext } from './documents.service';
 import { toDocumentRun } from './documents.mapper';
 
@@ -141,6 +147,7 @@ export class DocumentsController {
     private readonly documents: DocumentsService,
     private readonly ai: DocumentsAiService,
     private readonly repository: DocumentsRepository,
+    private readonly trace: TraceabilityService,
   ) {}
 
   @Get()
@@ -154,6 +161,39 @@ export class DocumentsController {
     @Req() request: AuthenticatedRequest,
   ): Promise<{ documents: readonly DocumentSummary[] }> {
     return { documents: await this.documents.list(context(request)) };
+  }
+
+  @Get('traceability')
+  @ApiOperation({
+    summary: 'Every approved requirement, followed through every document',
+    description:
+      'Walks the links the documents already record — a section’s references, a feature row’s requirement ids, a criterion’s, a work package’s — so a gap is visible rather than discovered during delivery. Nothing is inferred from prose. Assumptions and the Client Dependency Sheet are conditional: a requirement with no entry there is the ordinary case, not a gap.',
+  })
+  @ApiOkResponse({ description: 'The traceability view.' })
+  async traceability(
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ traceability: TraceabilityView }> {
+    const ctx = context(request);
+
+    return { traceability: await this.trace.view(ctx.projectId, ctx.correlationId) };
+  }
+
+  @Get(':type/traceability')
+  @ApiOperation({
+    summary: 'What each entry in this document traces back to',
+    description:
+      'The reverse direction: for a work package or a dependency row, the approved requirements behind it. An entry citing nothing is either legitimate delivery overhead or something nobody agreed to, and the response says which.',
+  })
+  @ApiOkResponse({ description: 'One entry per row or section.' })
+  async documentTraceability(
+    @Param('type') type: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ artifacts: readonly ArtifactTrace[] }> {
+    const ctx = context(request);
+
+    return {
+      artifacts: await this.trace.reverse(ctx.projectId, documentType(type), ctx.correlationId),
+    };
   }
 
   @Get(':type')
@@ -597,6 +637,24 @@ export class DocumentsController {
   ): Promise<{ document: DocumentSnapshot }> {
     return {
       document: await this.documents.excludeRow(context(request), documentType(type), rowId, body),
+    };
+  }
+
+  @Delete(':type/rows/:rowId')
+  @ApiOperation({
+    summary: 'Take an entry out of the working document',
+    description:
+      'Removal, not exclusion: use this for an entry that should not have been there. Every earlier version keeps it, so the history still shows what the document said and when the entry went. If it was the only thing covering approved scope, validation says so.',
+  })
+  @ApiOkResponse({ description: 'The document without that entry.' })
+  async removeRow(
+    @Param('type') type: string,
+    @Param('rowId') rowId: string,
+    @Body(new ZodValidationPipe(removeRowSchema)) body: RemoveRow,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<{ document: DocumentSnapshot }> {
+    return {
+      document: await this.documents.removeRow(context(request), documentType(type), rowId, body),
     };
   }
 

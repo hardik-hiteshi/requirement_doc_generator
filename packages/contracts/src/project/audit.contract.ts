@@ -154,6 +154,16 @@ export const AUDIT_EVENT_TYPES = [
   /** Requested, received or checked. Keys and states only. */
   'CLIENT_DEPENDENCY_STATUS_CHANGED',
   'CLIENT_DEPENDENCIES_VALIDATED',
+
+  /* Phase 10 — editing, versioning, invalidation and traceability.
+     Keys, versions, field names and counts. Never document text: a section body
+     or a dependency row can name a system, a person or a commercial figure, and
+     an audit trail is read by people who were not cleared for the document. */
+  'DOCUMENT_ROW_REMOVED',
+  'DOCUMENT_REVISION_CREATED',
+  'DOCUMENT_VERSION_RESTORED',
+  'DOCUMENT_VERSION_COMPARED',
+  'DOCUMENT_TRACEABILITY_VIEWED',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];

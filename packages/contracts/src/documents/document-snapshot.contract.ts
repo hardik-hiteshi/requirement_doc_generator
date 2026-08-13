@@ -219,6 +219,49 @@ export type DocumentSummary = z.infer<typeof documentSummarySchema>;
 /* ------------------------------------------------------------- versions */
 
 /** A stored earlier version, listed for comparison and restoration. */
+/**
+ * Why a version exists.
+ *
+ * Recorded at the moment of the change rather than inferred later from what differs,
+ * because "this row's wording changed" and "this came back from version 4 and the
+ * wording happens to differ" are different events with the same diff.
+ */
+export const DOCUMENT_CHANGE_TYPES = [
+  'GENERATED',
+  'REGENERATED',
+  'TARGETED_REGENERATION',
+  'SECTION_EDITED',
+  'ROW_ADDED',
+  'ROW_EDITED',
+  'ROW_REMOVED',
+  'PROPOSAL_ACCEPTED',
+  'CORRECTION_APPLIED',
+  'RESTORED',
+  'REVISED_FROM_FINAL',
+  'REOPENED',
+  'APPROVED',
+  'ISSUED',
+] as const;
+
+export type DocumentChangeType = (typeof DOCUMENT_CHANGE_TYPES)[number];
+
+export const DOCUMENT_CHANGE_TYPE_LABELS: Readonly<Record<DocumentChangeType, string>> = {
+  GENERATED: 'Written',
+  REGENERATED: 'Written again',
+  TARGETED_REGENERATION: 'Part of it written again',
+  SECTION_EDITED: 'A section edited',
+  ROW_ADDED: 'An entry added',
+  ROW_EDITED: 'An entry edited',
+  ROW_REMOVED: 'An entry removed',
+  PROPOSAL_ACCEPTED: 'A suggested rewrite accepted',
+  CORRECTION_APPLIED: 'A correction applied',
+  RESTORED: 'Content brought back from an earlier version',
+  REVISED_FROM_FINAL: 'Opened for revision beside the issued version',
+  REOPENED: 'Reopened after approval',
+  APPROVED: 'Approved',
+  ISSUED: 'Issued',
+};
+
 export const documentVersionSummarySchema = z
   .object({
     version: z.number().int().positive(),
@@ -243,6 +286,20 @@ export const documentVersionSummarySchema = z
     userEditedCount: z.number().int().nonnegative(),
     regenerationReason: z.string().max(500).optional(),
     validationSeverity: z.string().max(20).nullable(),
+    /**
+     * What produced this version.
+     *
+     * A history of nine versions all saying "regenerated" is a list, not a history.
+     * This is the difference between "somebody edited a section" and "this came back
+     * from version 4", which is what a reader is looking for.
+     */
+    changeType: z.enum(DOCUMENT_CHANGE_TYPES).optional(),
+    /** The version whose content this one was restored from. */
+    restoredFromVersion: z.number().int().positive().optional(),
+    /** The issued version this working revision was opened beside. */
+    revisedFromVersion: z.number().int().positive().optional(),
+    /** Who caused it. `USER` or `SYSTEM`, never a name this application invents. */
+    actor: z.string().max(40).optional(),
   })
   .strict();
 
@@ -252,14 +309,67 @@ export type DocumentVersionSummary = z.infer<typeof documentVersionSummarySchema
 export const DIFF_KINDS = ['ADDED', 'REMOVED', 'CHANGED', 'UNCHANGED'] as const;
 export type DiffKind = (typeof DIFF_KINDS)[number];
 
+/**
+ * What kind of thing changed.
+ *
+ * An upstream version moving and a reviewer rewriting a paragraph both make a
+ * document differ from its predecessor, and treating them alike is how "this
+ * changed" stops meaning anything. A reader deciding whether to re-approve needs to
+ * know which of these they are looking at.
+ */
+export const DIFF_CHANGE_KINDS = [
+  /** The words, the figures, the rows themselves. */
+  'CONTENT',
+  /** Which requirement, feature, unit or technology a row cites. */
+  'TRACEABILITY',
+  /** Status, approval or issue metadata. */
+  'LIFECYCLE',
+  /** The upstream versions the content was composed against. */
+  'AUTHORITY',
+  /** The validation result recorded against the version. */
+  'VALIDATION',
+] as const;
+
+export type DiffChangeKind = (typeof DIFF_CHANGE_KINDS)[number];
+
+export const DIFF_CHANGE_KIND_LABELS: Readonly<Record<DiffChangeKind, string>> = {
+  CONTENT: 'Content',
+  TRACEABILITY: 'What it traces to',
+  LIFECYCLE: 'Status',
+  AUTHORITY: 'What it was written against',
+  VALIDATION: 'Validation',
+};
+
+/** One field that differs, with both values as a reader would read them. */
+export const documentFieldDiffSchema = z
+  .object({
+    field: z.string().min(1).max(64),
+    /** The field's name as the interface shows it. */
+    label: z.string().max(120),
+    changeKind: z.enum(DIFF_CHANGE_KINDS),
+    left: z.string().max(4_000),
+    right: z.string().max(4_000),
+  })
+  .strict();
+
+export type DocumentFieldDiff = z.infer<typeof documentFieldDiffSchema>;
+
 export const documentDiffEntrySchema = z
   .object({
     kind: z.enum(DIFF_KINDS),
-    /** Section key or feature id. */
+    /** Section key, feature id, or the row's own stable key. */
     key: z.string().min(1).max(64),
     title: z.string().max(300),
     left: z.string().max(20_000).optional(),
     right: z.string().max(20_000).optional(),
+    /**
+     * Which fields differ, for a row document.
+     *
+     * Empty for a section, whose body is the whole comparison. A row has a dozen
+     * fields and "this row changed" is not a useful answer when one of them is a
+     * status and another is the hours somebody will plan against.
+     */
+    fields: z.array(documentFieldDiffSchema).max(60),
   })
   .strict();
 
@@ -271,6 +381,15 @@ export const documentDiffSchema = z
     rightVersion: z.number().int().positive(),
     entries: z.array(documentDiffEntrySchema).max(2_000),
     changedCount: z.number().int().nonnegative(),
+    /**
+     * How the two versions differ apart from their content.
+     *
+     * A version can differ from its predecessor without a word changing: it was
+     * approved, or the baseline underneath it moved. Reported separately so the
+     * interface can say "nothing in this document changed — what changed is what it
+     * was written against", which is the single most useful sentence in a history.
+     */
+    metadata: z.array(documentFieldDiffSchema).max(40),
   })
   .strict();
 
@@ -298,14 +417,29 @@ export function diffDocuments(
     const after = rightByKey.get(key);
 
     if (!before) {
-      return { kind: 'ADDED', key, title: after?.title ?? key, right: after?.body ?? '' };
+      return {
+        kind: 'ADDED',
+        key,
+        title: after?.title ?? key,
+        right: after?.body ?? '',
+        fields: [],
+      };
     }
 
     if (!after) {
-      return { kind: 'REMOVED', key, title: before.title, left: before.body };
+      return { kind: 'REMOVED', key, title: before.title, left: before.body, fields: [] };
     }
 
-    const changed = normalise(before.body) !== normalise(after.body);
+    const fields = [...diffFields(before.fields ?? [], after.fields ?? [])];
+    /*
+     * A row whose fields all match is unchanged even if its rendered summary differs,
+     * and a row with a changed field is changed even if the summary happens to match.
+     * The fields are the content; the summary is a convenience for reading.
+     */
+    const changed =
+      before.fields || after.fields
+        ? fields.length > 0
+        : normalise(before.body) !== normalise(after.body);
 
     return {
       kind: changed ? 'CHANGED' : 'UNCHANGED',
@@ -313,6 +447,7 @@ export function diffDocuments(
       title: after.title,
       left: before.body,
       right: after.body,
+      fields,
     };
   });
 
@@ -321,7 +456,34 @@ export function diffDocuments(
     rightVersion: right.version,
     entries,
     changedCount: entries.filter((entry) => entry.kind !== 'UNCHANGED').length,
+    metadata: [],
   };
+}
+
+/** The fields that differ between two versions of the same row. */
+export function diffFields(
+  left: NonNullable<ContentEntry['fields']>,
+  right: NonNullable<ContentEntry['fields']>,
+): readonly DocumentFieldDiff[] {
+  const leftByField = new Map(left.map((entry) => [entry.field, entry]));
+  const rightByField = new Map(right.map((entry) => [entry.field, entry]));
+
+  const normalise = (value: string): string => value.replace(/\s+/g, ' ').trim();
+
+  return [...new Set([...leftByField.keys(), ...rightByField.keys()])]
+    .map((field) => {
+      const before = leftByField.get(field);
+      const after = rightByField.get(field);
+
+      return {
+        field,
+        label: after?.label ?? before?.label ?? field,
+        changeKind: after?.changeKind ?? before?.changeKind ?? ('CONTENT' as const),
+        left: before?.value ?? '',
+        right: after?.value ?? '',
+      };
+    })
+    .filter((entry) => normalise(entry.left) !== normalise(entry.right));
 }
 
 /** The comparable projection of a document, whatever its shape. */
@@ -329,6 +491,13 @@ export interface ContentEntry {
   readonly key: string;
   readonly title: string;
   readonly body: string;
+  /** Per-field values, for a row document. Absent for a section. */
+  readonly fields?: readonly {
+    readonly field: string;
+    readonly label: string;
+    readonly changeKind: DiffChangeKind;
+    readonly value: string;
+  }[];
 }
 
 /* --------------------------------------------------------- write shapes */

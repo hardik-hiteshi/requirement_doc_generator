@@ -29,6 +29,7 @@ import {
 } from '@/hooks/use-documents';
 import { AssumptionsPanel } from './assumptions-panel';
 import { DependencySheet } from './dependency-sheet';
+import { TraceabilityPanel } from './traceability-panel';
 import { CriteriaTable } from './criteria-table';
 import { FeatureTable } from './feature-table';
 import { WbsTable } from './wbs-table';
@@ -110,6 +111,15 @@ export function DocumentsStep({
       </Card>
 
       {openType ? <DocumentDetail type={openType} /> : null}
+
+      {/*
+       * Traceability sits below the list rather than inside a document, because it is
+       * the one view that is about all of them at once — and the gaps it finds are
+       * invisible from inside any single document.
+       */}
+      {list.some((summary) => summary.version > 0) ? (
+        <TraceabilityPanel onOpen={(type) => setOpenType(type)} />
+      ) : null}
     </div>
   );
 }
