@@ -1045,7 +1045,7 @@ describe('Document lifecycle (e2e)', () => {
      * so the race not landing on a given run cannot fail this. What it cannot be is
      * success with nothing to show for it.
      */
-    it('33. a validation that overlaps a content change is stored or refused, never lost', async () => {
+    it('39. a validation that overlaps a content change is stored or refused, never lost', async () => {
       const session = await project();
       await generate(session, UNDERSTANDING);
 
