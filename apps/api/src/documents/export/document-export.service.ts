@@ -188,8 +188,22 @@ export class DocumentExportService {
     document: ProjectDocument,
     version: number | undefined,
   ): Promise<DocumentSnapshot> {
+    const working = await this.documents.read(context, document);
+
+    /*
+     * Asking for the version that is currently open is not a historical read.
+     *
+     * The interface passes the version on screen, which is usually the working one — and
+     * the working version is not in the archive until something supersedes it. Answering
+     * "no such version" for the document somebody is looking at would be absurd, so the
+     * live snapshot is returned when the numbers agree. It is the same content either way.
+     */
+    if (version !== undefined && version === working.version && working.status !== 'NOT_STARTED') {
+      return working;
+    }
+
     if (version === undefined) {
-      const snapshot = await this.documents.read(context, document);
+      const snapshot = working;
 
       /*
        * A document nobody has written cannot be exported. It reports the version it would

@@ -507,7 +507,7 @@ describe('Document export (e2e)', () => {
         .patch(DOCUMENT_ROUTES.row(CRITERIA, row!.rowId))
         .set('x-csrf-token', session.csrf)
         .send({
-          patch: { then: '=cmd|calc' },
+          payload: { ...(row!.payload as object), then: '=cmd|calc' },
           expectedVersion: criteria.recordVersion,
         })
         .expect(200);
@@ -649,7 +649,7 @@ describe('Document export (e2e)', () => {
       await session.agent
         .post(DOCUMENT_ROUTES.revise(UNDERSTANDING))
         .set('x-csrf-token', session.csrf)
-        .send({ expectedVersion: issued.recordVersion })
+        .send({ reason: 'A second issue is needed', expectedVersion: issued.recordVersion })
         .expect(201);
 
       const afterRevision = await download(session, UNDERSTANDING, 'PDF', issued.version);
