@@ -700,7 +700,19 @@ test.describe('Estimation and timeline', () => {
     });
     await expect(page.getByTestId('calendar-summary')).toContainText('4 working days a week');
     await expect(page.getByTestId('calendar-summary')).toContainText('1 non-working date');
-    expect(await schedulePanel(page).innerText()).not.toBe(scheduleBefore);
+    /*
+     * Polled, not sampled once.
+     *
+     * The calendar summary above updates from the response to the save; the schedule is a
+     * separate read that lands a moment later. Taking its text immediately compares the
+     * old schedule with itself, which passes or fails depending on timing rather than on
+     * whether rescheduling happened.
+     */
+    await expect
+      .poll(() => schedulePanel(page).innerText(), { timeout: 30_000 })
+      .not.toBe(scheduleBefore);
+
+    /* The effort is unchanged — checked after the schedule has settled, not during. */
     expect(await effortPanel(page).innerText()).toBe(effortBefore);
 
     /* 16. And it survives a reload. */

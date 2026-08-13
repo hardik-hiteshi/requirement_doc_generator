@@ -156,7 +156,18 @@ async function settle(page: Page, type: string): Promise<void> {
   await expect(page.getByTestId(`document-lock-${type}`)).toBeHidden({ timeout: 60_000 });
   await openDocument(page, type);
   await page.getByTestId('generate-without-ai').click();
-  await expect(page.getByTestId('document-version')).toHaveText('v1', { timeout: 90_000 });
+
+  /*
+   * Wait for the document to exist, not for a version number.
+   *
+   * A document that has not been written yet is described honestly but still reports a
+   * version — the version it would be written as — so waiting for "v1" was satisfied the
+   * instant it ran, and validation then went out while the generation was still in
+   * flight. Leaving "Not started" is the first thing that is only true afterwards.
+   */
+  await expect(page.getByTestId('detail-status')).not.toHaveText('Not started', {
+    timeout: 90_000,
+  });
   await settleOpenDocument(page);
 }
 
