@@ -101,7 +101,7 @@ function understandingProse(snapshot: DocumentSnapshot, blocks: Block[]): ProseP
       blocks.push({
         kind: 'note',
         text:
-          section.omittedReason === ''
+          section.omittedReason === undefined || section.omittedReason === ''
             ? 'Nothing in the approved requirements covers this.'
             : section.omittedReason,
       });

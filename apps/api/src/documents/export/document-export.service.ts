@@ -273,17 +273,46 @@ export class DocumentExportService {
     });
   }
 
-  /** Defensive, because the model has no field for a secret and never should. */
+  /**
+   * A last look before the bytes leave, aimed where a credential could plausibly be.
+   *
+   * Phase 9's rule is about the client dependency sheet: a credential must be recorded as
+   * metadata — "we need the API key, sent separately" — and never as row text. The model
+   * has no field for a value, and the write path refuses one, so anything found here came
+   * from data that predates that rule or was corrupted.
+   *
+   * Scoped to that document's free-text fields rather than every string on every row. A
+   * blanket scan is worse than no scan: `looksLikeSecret` includes a pattern for long
+   * base64-ish runs, which ordinary content can trip, and an export that refuses a valid
+   * document teaches people to route around the check.
+   */
   private refuseSecrets(snapshot: DocumentSnapshot, document: ProjectDocument): void {
-    const suspect = snapshot.rows.some((row) => {
+    if (document !== 'CLIENT_DEPENDENCY_SHEET') {
+      return;
+    }
+
+    const TEXT_FIELDS = [
+      'dependency',
+      'description',
+      'purpose',
+      'remarks',
+      'validationNote',
+      'expectedFormat',
+      'impactIfDelayed',
+    ] as const;
+
+    const found = snapshot.rows.some((row) => {
       const payload = row.payload as Record<string, unknown>;
 
-      return Object.values(payload).some(
-        (value) => typeof value === 'string' && looksLikeSecret(value),
-      );
+      return TEXT_FIELDS.some((field) => {
+        const value = payload[field];
+
+        /* `looksLikeSecret` answers with labels; an empty list means nothing matched. */
+        return typeof value === 'string' && looksLikeSecret(value).length > 0;
+      });
     });
 
-    if (suspect) {
+    if (found) {
       throw new DocumentError(DOCUMENT_ERROR_CODES.EXPORT_CONTENT_REFUSED, 422, undefined, {
         documentType: document,
         /* Says that something was refused. Never what, and never the value. */
