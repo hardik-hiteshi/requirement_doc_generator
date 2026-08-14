@@ -164,6 +164,15 @@ export const AUDIT_EVENT_TYPES = [
   'DOCUMENT_VERSION_RESTORED',
   'DOCUMENT_VERSION_COMPARED',
   'DOCUMENT_TRACEABILITY_VIEWED',
+
+  /* Phase 11 — export and branding. An export is a read, so these record which
+     document, which version and which format left the building, plus the size of
+     what was produced. Never the bytes, never a row, never a secret: an audit
+     trail holding the document would be a second copy of it with weaker rules. */
+  'DOCUMENT_EXPORT_REQUESTED',
+  'DOCUMENT_EXPORTED',
+  'DOCUMENT_EXPORT_FAILED',
+  'BRANDING_UPDATED',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];

@@ -3,12 +3,14 @@ import {
   Controller,
   Delete,
   Get,
+  Inject,
   Param,
   Patch,
   Post,
   Put,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -86,8 +88,13 @@ import {
   type ResolveSectionProposal,
   type RestoreVersion,
   type UpdateSection,
+  EXPORT_FORMATS,
+  brandingSchema,
+  type Branding,
 } from '@wdrg/contracts';
 import { z } from 'zod';
+
+import type { Response } from 'express';
 
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe';
 import {
@@ -96,6 +103,9 @@ import {
 } from '../project-access/project-session.guard';
 import { DocumentError } from './documents.errors';
 import { DocumentsAiService } from './documents-ai.service';
+import { DocumentExportService } from './export/document-export.service';
+import { ProjectRepository } from '../projects/project.repository';
+import { FILE_STORAGE_PORT, type FileStoragePort } from '../ports';
 import { DocumentsRepository } from './documents.repository';
 import { TraceabilityService } from './traceability.service';
 import { DocumentsService, type DocumentContext } from './documents.service';
@@ -148,7 +158,47 @@ export class DocumentsController {
     private readonly ai: DocumentsAiService,
     private readonly repository: DocumentsRepository,
     private readonly trace: TraceabilityService,
+    private readonly exports: DocumentExportService,
+    private readonly projects: ProjectRepository,
+    @Inject(FILE_STORAGE_PORT) private readonly storage: FileStoragePort,
   ) {}
+
+  /**
+   * The logo, read from the project's own storage, or nothing.
+   *
+   * By object id, never by a path or a URL: the branding contract stores a reference, so
+   * there is no filename here to traverse with and no host to fetch from. A logo that
+   * cannot be read is a branding error rather than a silent omission — substituting
+   * somebody else's mark, or quietly dropping the one they configured, are both worse than
+   * saying so.
+   */
+  private async logoFor(
+    projectId: string,
+    branding: Branding,
+  ): Promise<{ logo?: { content: Buffer; contentType: 'image/png' | 'image/jpeg' } }> {
+    if (!branding.logo) {
+      return {};
+    }
+
+    try {
+      const stream = await this.storage.getStream({
+        projectId,
+        objectId: branding.logo.objectId,
+      });
+
+      const chunks: Buffer[] = [];
+
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk as Buffer));
+      }
+
+      return {
+        logo: { content: Buffer.concat(chunks), contentType: branding.logo.contentType },
+      };
+    } catch {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.EXPORT_BRANDING_INVALID, 422);
+    }
+  }
 
   @Get()
   @ApiOperation({
@@ -823,6 +873,79 @@ export class DocumentsController {
     @Req() request: AuthenticatedRequest,
   ): Promise<{ csv: string }> {
     return { csv: await this.documents.csv(context(request), documentType(type)) };
+  }
+
+  @Get(':type/export')
+  @ApiOperation({
+    summary: 'The document as a file',
+    description:
+      'Renders the selected version — the working one by default, an archived one when `version` is given — in one of the formats offered for that document. A read: nothing about the document changes, so no version is created and no lifecycle or currentness moves. An OUTDATED or DRAFT version exports as it stands, saying so on the page rather than being silently brought up to date.',
+  })
+  @ApiOkResponse({
+    description: 'The file, as an attachment.',
+    content: {
+      'text/csv': { schema: { type: 'string', format: 'binary' } },
+      'application/pdf': { schema: { type: 'string', format: 'binary' } },
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': {
+        schema: { type: 'string', format: 'binary' },
+      },
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': {
+        schema: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  async exportDocument(
+    @Param('type') type: string,
+    @Query('format') format: string,
+    @Query('version') version: string | undefined,
+    @Req() request: AuthenticatedRequest,
+    @Res() response: Response,
+  ): Promise<void> {
+    const documentContext = context(request);
+    const parsedFormat = z.enum(EXPORT_FORMATS).safeParse(format);
+
+    if (!parsedFormat.success) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.UNSUPPORTED_EXPORT_FORMAT, 422);
+    }
+
+    const project = await this.projects.findByProjectId(documentContext.projectId);
+
+    if (!project) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.DOCUMENT_NOT_FOUND, 404);
+    }
+
+    /*
+     * Branding is re-validated on the way out rather than trusted.
+     *
+     * It was written through a validating boundary, but a stored document can predate a
+     * schema change, and an unusable colour or logo reference must be a clear branding
+     * error rather than a renderer crash three layers down.
+     */
+    const branding = brandingSchema.safeParse(project.branding ?? {});
+
+    if (!branding.success) {
+      throw new DocumentError(DOCUMENT_ERROR_CODES.EXPORT_BRANDING_INVALID, 422);
+    }
+
+    const result = await this.exports.export({
+      context: documentContext,
+      document: documentType(type),
+      format: parsedFormat.data,
+      ...(version !== undefined ? { version: positiveInteger(version) } : {}),
+      projectName: project.name,
+      branding: branding.data,
+      ...(await this.logoFor(documentContext.projectId, branding.data)),
+    });
+
+    response
+      .status(200)
+      .setHeader('content-type', result.contentType)
+      .setHeader('content-disposition', result.disposition)
+      .setHeader('content-length', String(result.byteLength))
+      /* A generated file is specific to a version and a moment; caching it would serve
+         yesterday's document after a re-export. */
+      .setHeader('cache-control', 'no-store')
+      .end(result.content);
   }
 
   @Post(':type/validate')

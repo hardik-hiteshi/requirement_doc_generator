@@ -24,6 +24,12 @@ export const PROJECT_ROUTES = {
   teamCapacity: buildApiPath('projects/current/team-capacity'),
   outputPreferences: buildApiPath('projects/current/output-preferences'),
 
+  /** GET/PUT — how exported documents are presented. Presentation only. */
+  branding: buildApiPath('projects/current/branding'),
+
+  /** POST — the optional logo, stored like any other upload and scanned the same way. */
+  brandingLogo: buildApiPath('projects/current/branding/logo'),
+
   /** DELETE — request deletion of the current project. */
   delete: buildApiPath('projects/current'),
 } as const;

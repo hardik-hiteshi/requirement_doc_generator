@@ -1,3 +1,4 @@
+import type { Branding, BrandingLogo } from '@wdrg/contracts';
 import {
   CSRF_COOKIE,
   CSRF_HEADER,
@@ -130,6 +131,39 @@ export async function updateOutputPreferences(
   return apiFetch<ProjectResponse>(PROJECT_ROUTES.outputPreferences, {
     method: 'PUT',
     body: payload,
+    headers: mutationHeaders(),
+  });
+}
+
+export async function readBranding(): Promise<{ branding: Branding }> {
+  return apiFetch<{ branding: Branding }>(PROJECT_ROUTES.branding);
+}
+
+export async function updateBranding(
+  payload: VersionedUpdate & { branding: Branding },
+): Promise<ProjectResponse> {
+  return apiFetch<ProjectResponse>(PROJECT_ROUTES.branding, {
+    method: 'PUT',
+    body: payload,
+    headers: mutationHeaders(),
+  });
+}
+
+/**
+ * Upload the logo.
+ *
+ * `FormData` rather than JSON, and deliberately without a `content-type` header: the
+ * browser has to set the multipart boundary itself, and naming the type here overwrites it
+ * with one that has no boundary at all.
+ */
+export async function uploadBrandingLogo(file: File): Promise<{ logo: BrandingLogo }> {
+  const body = new FormData();
+
+  body.append('logo', file);
+
+  return apiFetch<{ logo: BrandingLogo }>(PROJECT_ROUTES.brandingLogo, {
+    method: 'POST',
+    rawBody: body,
     headers: mutationHeaders(),
   });
 }

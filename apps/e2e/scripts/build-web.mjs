@@ -27,9 +27,14 @@ const DIST_DIR = '.next-e2e';
  * was given, so building for the suite leaves the repository dirty with a path the
  * ordinary build does not use. Restored afterwards: a run should not change tracked
  * files, and committing `.next-e2e` here breaks type resolution for everyone else.
+ *
+ * Restoring the previous contents is not enough on its own. A run that is killed
+ * between the build and the restore leaves the suite's directory in the file, and
+ * the next run would then faithfully put that back — so the reference is normalised
+ * to the ordinary build's directory rather than merely preserved.
  */
 const envTypes = resolve(webRoot, 'next-env.d.ts');
-const envTypesBefore = readFileSync(envTypes, 'utf8');
+const envTypesBefore = readFileSync(envTypes, 'utf8').split(`${DIST_DIR}/`).join('.next/');
 
 const result = spawnSync('pnpm', ['exec', 'next', 'build'], {
   cwd: webRoot,

@@ -8,7 +8,6 @@ import { AppConfigService } from '../config/app-config.service';
 import { ProjectAccessModule } from '../project-access/project-access.module';
 import {
   FILE_EXTRACTION_PORT,
-  FILE_STORAGE_PORT,
   JOB_QUEUE_PORT,
   LEGACY_CONVERSION_PORT,
   OCR_PROVIDER_PORT,
@@ -20,6 +19,7 @@ import { PdfExtractor } from './extraction/pdf-extractor';
 import { CsvExtractor, TxtExtractor } from './extraction/text-extractors';
 import { LibreOfficeConversionAdapter } from './legacy/libreoffice-conversion.adapter';
 import { MalwareModule } from './malware/malware.module';
+import { FileStorageModule } from './storage/file-storage.module';
 import { TesseractOcrAdapter } from './ocr/tesseract-ocr.adapter';
 import { ExtractionQueue } from './queue/extraction.queue';
 import { ExtractionWorker } from './queue/extraction.worker';
@@ -33,8 +33,6 @@ import {
   RequirementSourceRecord,
   RequirementSourceSchema,
 } from './schemas/requirement-source.schema';
-import { LocalFileStorageAdapter } from './storage/local-file-storage.adapter';
-import { S3FileStorageAdapter } from './storage/s3-file-storage.adapter';
 import { FileValidator } from './validation/file-validator';
 
 /**
@@ -52,6 +50,7 @@ import { FileValidator } from './validation/file-validator';
     AuditModule,
     ProjectAccessModule,
     MalwareModule,
+    FileStorageModule,
     MongooseModule.forFeature([
       { name: RequirementSourceRecord.name, schema: RequirementSourceSchema },
       { name: ExtractedContentRecord.name, schema: ExtractedContentSchema },
@@ -98,30 +97,12 @@ import { FileValidator } from './validation/file-validator';
     ExtractionService,
 
     /* Adapters. Concrete classes, bound to tokens below. */
-    LocalFileStorageAdapter,
-    S3FileStorageAdapter,
     MongoJobQueueAdapter,
     TesseractOcrAdapter,
     LibreOfficeConversionAdapter,
 
-    /*
-     * Storage is chosen by configuration, not by environment.
-     *
-     * A deployment says which adapter it wants; nothing is inferred from
-     * NODE_ENV. That is what lets a staging environment run the same object
-     * storage as production, and what stops "it worked in development" from
-     * meaning "it used a different storage engine".
-     */
-    {
-      provide: FILE_STORAGE_PORT,
-      inject: [AppConfigService, LocalFileStorageAdapter, S3FileStorageAdapter],
-      useFactory: (
-        config: AppConfigService,
-        filesystem: LocalFileStorageAdapter,
-        s3: S3FileStorageAdapter,
-      ) => (config.upload.adapter === 's3' ? s3 : filesystem),
-    },
-
+    /* Storage itself is bound in FileStorageModule, which both this module and
+       project branding import. */
     { provide: JOB_QUEUE_PORT, useExisting: MongoJobQueueAdapter },
     { provide: FILE_EXTRACTION_PORT, useExisting: ExtractionService },
     { provide: OCR_PROVIDER_PORT, useExisting: TesseractOcrAdapter },

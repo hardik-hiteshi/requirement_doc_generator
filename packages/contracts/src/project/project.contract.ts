@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { brandingSchema } from './branding.contract';
 import { outputPreferencesSchema } from './output-preferences.contract';
 import { PROJECT_ID_PATTERN } from './project-identifiers';
 import { PROJECT_STATUSES } from './project-status';
@@ -87,6 +88,8 @@ export const projectResponseSchema = z.object({
   startDate: startDateSchema.optional(),
   teamCapacity: teamCapacitySchema.optional(),
   outputPreferences: outputPreferencesSchema.optional(),
+  /** How exports are presented. Presentation only; never document authority. */
+  branding: brandingSchema.optional(),
 
   createdAt: z.string(),
   updatedAt: z.string(),

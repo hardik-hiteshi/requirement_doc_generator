@@ -98,6 +98,16 @@ export class Project {
   @Prop({ type: Object })
   outputPreferences?: Record<string, unknown>;
 
+  /**
+   * How exports are presented. Presentation only.
+   *
+   * Beside the output preferences because it answers the same kind of question — what a
+   * generated file looks like — and because it must never be mistaken for document
+   * authority: changing it cannot move a version or make anything outdated.
+   */
+  @Prop({ type: Object })
+  branding?: Record<string, unknown>;
+
   /* ------------------------------------------------------------- lifecycle */
 
   @Prop({ type: Date, required: true, index: true })

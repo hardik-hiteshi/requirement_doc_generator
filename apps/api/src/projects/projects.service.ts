@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  type Branding,
   API_ERROR_CODES,
   PROJECT_ACCESS_DENIED_MESSAGE,
   PROJECT_NOT_MODIFIABLE_MESSAGE,
@@ -20,6 +21,7 @@ import { AppException, ValidationFailedException } from '../common/errors';
 import { canRead, canWrite, effectiveStatus, statusAfterEdit } from './domain/project-lifecycle';
 import {
   toDetailsMutation,
+  toBrandingMutation,
   toOutputPreferencesMutation,
   toProjectResponse,
   toStartDateMutation,
@@ -162,6 +164,31 @@ export class ProjectsService {
       (status) => toTeamCapacityMutation(capacity, statusAfterEdit(status)),
       'TEAM_CAPACITY_UPDATED',
       { customRoleCount: capacity.customRoles?.length ?? 0 },
+    );
+  }
+
+  /**
+   * Save how exports are presented.
+   *
+   * Goes through the same write path as every other section — optimistic concurrency, one
+   * audit event — but deliberately does not advance the project's status: branding is not
+   * scope, and a document must never become outdated because a colour changed. The audit
+   * records that branding was set and whether a logo is present, never the values.
+   */
+  async updateBranding(
+    branding: Branding,
+    context: SectionUpdateContext,
+  ): Promise<ProjectResponse> {
+    return this.applyUpdate(
+      context,
+      (status) => toBrandingMutation(branding, status),
+      'BRANDING_UPDATED',
+      {
+        organizationNamePresent: Boolean(branding.organizationName),
+        footerPresent: Boolean(branding.footerText),
+        accentPresent: Boolean(branding.accentColor),
+        logoPresent: Boolean(branding.logo),
+      },
     );
   }
 

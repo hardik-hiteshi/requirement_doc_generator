@@ -53,6 +53,16 @@ export const DOCUMENT_ERROR_CODES = {
   DEPENDENCY_STATUS_NOT_EDITABLE_HERE: 'DEPENDENCY_STATUS_NOT_EDITABLE_HERE',
   WBS_PARENT_NOT_FOUND: 'WBS_PARENT_NOT_FOUND',
   UNKNOWN_WBS_REFERENCE: 'UNKNOWN_WBS_REFERENCE',
+
+  /* Phase 11 — export and branding. Same envelope as every other refusal above:
+     a caller should not have to learn a second error shape because the file
+     happens to be binary. */
+  UNSUPPORTED_EXPORT_FORMAT: 'UNSUPPORTED_EXPORT_FORMAT',
+  EXPORT_VERSION_NOT_FOUND: 'EXPORT_VERSION_NOT_FOUND',
+  EXPORT_RENDER_FAILED: 'EXPORT_RENDER_FAILED',
+  EXPORT_BRANDING_INVALID: 'EXPORT_BRANDING_INVALID',
+  EXPORT_TOO_LARGE: 'EXPORT_TOO_LARGE',
+  EXPORT_CONTENT_REFUSED: 'EXPORT_CONTENT_REFUSED',
 } as const;
 
 export type DocumentErrorCode = (typeof DOCUMENT_ERROR_CODES)[keyof typeof DOCUMENT_ERROR_CODES];
@@ -124,4 +134,14 @@ export const DOCUMENT_ERROR_MESSAGES: Readonly<Record<DocumentErrorCode, string>
     'That parent is not part of this breakdown, so there is nothing to add the work under.',
   UNKNOWN_WBS_REFERENCE:
     'One of the work items referenced is not in this project’s work breakdown. A dependency has to point at work that exists, or nobody can tell what it is holding up.',
+  UNSUPPORTED_EXPORT_FORMAT:
+    'That file type is not offered for this document. Choose one of the formats listed beside it.',
+  EXPORT_VERSION_NOT_FOUND: 'That version of this document could not be found.',
+  EXPORT_RENDER_FAILED:
+    'The file could not be produced. The document itself is unchanged — try the download again.',
+  EXPORT_BRANDING_INVALID:
+    'The branding saved for this project could not be used. Check the logo and colour in project settings.',
+  EXPORT_TOO_LARGE: 'The generated file was too large to send.',
+  EXPORT_CONTENT_REFUSED:
+    'This document contains a value that looks like a credential, so it was not exported. Remove it from the document and try again.',
 };

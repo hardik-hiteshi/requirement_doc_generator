@@ -121,6 +121,19 @@ describe('configureSecurity — production', () => {
     expect(response.headers['access-control-expose-headers']).toContain('x-correlation-id');
   });
 
+  /*
+   * Without this a download saves as "document" plus a guessed extension: the browser
+   * hides Content-Disposition from cross-origin script unless it is exposed, so the
+   * project, version and lifecycle the server put in the filename never arrive.
+   */
+  it('exposes the filename header so a download keeps the name the server chose', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/probe')
+      .set('Origin', 'http://localhost:3000');
+
+    expect(response.headers['access-control-expose-headers']).toContain('Content-Disposition');
+  });
+
   it('allows a configured origin and does not reflect an unknown one', async () => {
     const allowed = await request(app.getHttpServer())
       .get('/probe')

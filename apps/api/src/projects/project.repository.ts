@@ -26,6 +26,7 @@ export interface ProjectRecord {
   readonly startDate?: Record<string, unknown>;
   readonly teamCapacity?: Record<string, unknown>;
   readonly outputPreferences?: Record<string, unknown>;
+  readonly branding?: Record<string, unknown>;
   readonly createdAt: Date;
   readonly updatedAt: Date;
   readonly lastAccessedAt: Date;
@@ -56,6 +57,7 @@ export interface ProjectMutation {
   readonly startDate?: Record<string, unknown>;
   readonly teamCapacity?: Record<string, unknown>;
   readonly outputPreferences?: Record<string, unknown>;
+  readonly branding?: Record<string, unknown>;
   readonly status?: ProjectStatus;
 }
 
@@ -226,6 +228,7 @@ function toRecord(document: LeanProject): ProjectRecord {
     startDate: document.startDate,
     teamCapacity: document.teamCapacity,
     outputPreferences: document.outputPreferences,
+    branding: document.branding,
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
     lastAccessedAt: document.lastAccessedAt,

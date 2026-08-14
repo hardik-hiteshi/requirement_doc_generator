@@ -56,6 +56,13 @@ export interface DocumentFixture {
    * duration for a document to quote.
    */
   readonly withoutTeam?: boolean;
+  /**
+   * The project's timeline, when the default weeks-based one is not the point.
+   *
+   * Export has to preserve a fixed deadline exactly and invent one nowhere, and that
+   * cannot be asserted against a project whose timeline never had a date in it.
+   */
+  readonly timeline?: Record<string, unknown>;
 }
 
 const WEB_STACK = [
@@ -181,7 +188,7 @@ export async function approvedEstimateProject(
   await agent
     .put(PROJECT_ROUTES.timeline)
     .set('x-csrf-token', csrf)
-    .send({ timeline: { mode: 'WEEKS', weeks: 12 }, version: 0 })
+    .send({ timeline: fixture.timeline ?? { mode: 'WEEKS', weeks: 12 }, version: 0 })
     .expect(200);
 
   /* Requirements, reviewed. */
