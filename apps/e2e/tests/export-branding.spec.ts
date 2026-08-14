@@ -2,6 +2,7 @@ import { expect, test, type Download, type Page } from '@playwright/test';
 import { inflateRawSync } from 'node:zlib';
 
 import { expectNoAccessibilityViolations } from './support/accessibility';
+import { API_URL } from './support/environment';
 import { createProject, enterWorkspace, saveSection, section } from './support/workspace';
 
 /**
@@ -421,6 +422,23 @@ test.describe('Export and branding', () => {
     expect(second.body.equals(first.body)).toBe(false);
     expect(docxText(second.body)).toContain('later version');
     expect(docxText(first.body)).not.toContain('later version');
+
+    /*
+     * 15, 16. And the earlier version can be downloaded from here, now, without restoring
+     * it — which is the point: restoring to obtain a download would overwrite the version
+     * somebody is working on in order to read an older one.
+     */
+    const earlier = (firstVersion ?? 'v1').replace('v', '');
+
+    await exportPanel(page).getByTestId('export-version-select').selectOption(earlier);
+    await expect(exportPanel(page).getByTestId('export-version')).toHaveText(`v${earlier}`);
+
+    const archived = await downloadFormat(page, 'DOCX');
+
+    /* 17. The bytes are the earlier version's, and the document has not moved. */
+    expect(docxText(archived.body)).not.toContain('later version');
+    expect(archived.name).toContain(`_v${earlier}`);
+    await expect(page.getByTestId('document-version')).not.toHaveText(firstVersion ?? '');
   });
 
   /* 21, 22. */
@@ -461,6 +479,173 @@ test.describe('Export and branding', () => {
     const versionsPanel = page.getByRole('region', { name: 'Document versions' });
 
     await expect(versionsPanel.getByText('Issued').first()).toBeVisible({ timeout: 30_000 });
+
+    const issuedVersion = /_v(\d+)_Issued/.exec(issued.name)![1]!;
+
+    await exportPanel(page).getByTestId('export-version-select').selectOption(issuedVersion);
+    await expect(exportPanel(page).getByTestId('export-status')).toHaveText('Issued');
+
+    const again = await downloadFormat(page, 'PDF');
+
+    /* The same issued version, named as itself: the revision did not replace it. */
+    expect(again.name).toBe(issued.name);
+    expect(isPdf(again.body)).toBe(true);
+    expect(again.body.byteLength).toBeGreaterThan(0);
+  });
+
+  /* 21. */
+  test('an approved document that has gone stale says so, and still exports', async ({ page }) => {
+    await reachDocuments(page);
+    await settle(page, 'OUR_UNDERSTANDING', 'Our Understanding');
+    await settle(page, 'FEATURE_LISTING', 'Feature Listing');
+
+    /* Reopen Our Understanding, which leaves the approved Feature Listing behind it. */
+    await openDocument(page, 'OUR_UNDERSTANDING', 'Our Understanding');
+    await page.getByTestId('document-reason').fill('The client changed the scope.');
+    await page.getByTestId('reopen-document').click();
+    await expect(page.getByTestId('detail-status')).toHaveText('Needs changes', {
+      timeout: 60_000,
+    });
+
+    await openDocument(page, 'FEATURE_LISTING', 'Feature Listing');
+
+    /* The panel says the file will carry the warning, before anybody downloads it. */
+    await expect(exportPanel(page).getByTestId('export-outdated-note')).toBeVisible({
+      timeout: 60_000,
+    });
+
+    const docx = await downloadFormat(page, 'DOCX');
+    const text = docxText(docx.body);
+
+    /* Exported, not refused — and it does not read as current. */
+    expect(text).toContain('inputs that have since changed');
+    expect(text).toContain('Approved');
+  });
+
+  /* 24. */
+  test('a download that fails is explained, and can be retried', async ({ page }) => {
+    await reachDocuments(page);
+    await settle(page, 'OUR_UNDERSTANDING', 'Our Understanding');
+
+    const versionBefore = await page.getByTestId('document-version').textContent();
+
+    /* Fail the render once, at the transport, which is what a renderer fault looks like. */
+    await page.route('**/documents/OUR_UNDERSTANDING/export**', async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'The file could not be produced. Please try again.' }),
+      });
+    });
+
+    await exportPanel(page).getByTestId('export-PDF').click();
+
+    const error = exportPanel(page).getByTestId('export-error');
+
+    await expect(error).toBeVisible({ timeout: 60_000 });
+    await expect(error).toContainText('try again', { ignoreCase: true });
+
+    /* The document did not fail: only the file did. */
+    await expect(page.getByTestId('document-version')).toHaveText(versionBefore ?? '');
+    await expect(page.getByTestId('detail-status')).toHaveText('Approved');
+
+    /* And the retry works. */
+    await page.unroute('**/documents/OUR_UNDERSTANDING/export**');
+
+    const pdf = await downloadFormat(page, 'PDF');
+
+    expect(isPdf(pdf.body)).toBe(true);
+    await expect(exportPanel(page).getByTestId('export-error')).toHaveCount(0);
+  });
+
+  /* 10, 11, 12, 13, 14. */
+  test('exports the planning and dependency documents in every offered format', async ({
+    page,
+  }) => {
+    await reachDocuments(page);
+
+    for (const [type, title] of [
+      ['OUR_UNDERSTANDING', 'Our Understanding'],
+      ['FEATURE_LISTING', 'Feature Listing'],
+      ['ACCEPTANCE_CRITERIA', 'Acceptance Criteria'],
+      ['ASSUMPTIONS', 'Assumptions'],
+      ['STATEMENT_OF_WORK', 'Statement of Work'],
+      ['WORK_BREAKDOWN_STRUCTURE', 'Work Breakdown Structure'],
+      ['CLIENT_DEPENDENCY_SHEET', 'Client Dependency Sheet'],
+    ] as const) {
+      await settle(page, type, title);
+    }
+
+    /* 10. The SOW as a PDF. */
+    await openDocument(page, 'STATEMENT_OF_WORK', 'Statement of Work');
+
+    const sow = await downloadFormat(page, 'PDF');
+
+    expect(isPdf(sow.body)).toBe(true);
+    expect(sow.name).toMatch(/_Statement-of-Work_v\d+\.pdf$/);
+
+    /* 11, 12. The WBS as a workbook and as a document. */
+    await openDocument(page, 'WORK_BREAKDOWN_STRUCTURE', 'Work Breakdown Structure');
+
+    const wbsXlsx = await downloadFormat(page, 'XLSX');
+
+    expect(isZip(wbsXlsx.body)).toBe(true);
+    expect(wbsXlsx.name).toMatch(/_Work-Breakdown-Structure_v\d+\.xlsx$/);
+
+    const wbsPdf = await downloadFormat(page, 'PDF');
+
+    expect(isPdf(wbsPdf.body)).toBe(true);
+
+    /* 13, 14. And the dependency sheet, which is the one that must never leak. */
+    await openDocument(page, 'CLIENT_DEPENDENCY_SHEET', 'Client Dependency Sheet');
+
+    const cdsXlsx = await downloadFormat(page, 'XLSX');
+
+    expect(isZip(cdsXlsx.body)).toBe(true);
+
+    const cdsPdf = await downloadFormat(page, 'PDF');
+
+    expect(isPdf(cdsPdf.body)).toBe(true);
+  });
+
+  /* 23, 27. */
+  test('refuses an unsupported format, and another project entirely', async ({ page, browser }) => {
+    await reachDocuments(page);
+    await settle(page, 'OUR_UNDERSTANDING', 'Our Understanding');
+
+    const version = (await page.getByTestId('document-version').textContent())!.replace('v', '');
+
+    /*
+     * 23. The interface never offers a CSV for a prose document, so asking for one has to
+     * be done directly — and the answer must be a refusal rather than a file.
+     */
+    const unsupported = await page.request.get(
+      `${API_URL}/api/v1/projects/current/documents/OUR_UNDERSTANDING/export?format=CSV`,
+    );
+
+    expect(unsupported.status()).toBe(422);
+
+    /* 27. A second session cannot reach this project's document, current or historical. */
+    const other = await browser.newContext();
+    const otherPage = await other.newPage();
+
+    await otherPage.goto('/');
+    await createProject(otherPage, { name: 'Stranger' });
+
+    for (const query of [`format=PDF`, `format=PDF&version=${version}`]) {
+      const response = await otherPage.request.get(
+        `${API_URL}/api/v1/projects/current/documents/OUR_UNDERSTANDING/export?${query}`,
+      );
+
+      /* Never the owner's bytes, and refused the same way whatever was guessed. */
+      expect([403, 404, 422]).toContain(response.status());
+
+      const body = await response.body();
+
+      expect(body.subarray(0, 5).toString('latin1')).not.toBe('%PDF-');
+    }
+
+    await other.close();
   });
 
   /* 28. */

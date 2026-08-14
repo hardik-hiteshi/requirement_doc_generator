@@ -1,4 +1,5 @@
 import type { ExportMetadata } from '@wdrg/contracts';
+import * as fs from 'node:fs';
 
 import type { ProseProjection, TableProjection } from './export-projection';
 import { renderCsv, UTF8_BOM } from './renderers/csv.renderer';
@@ -12,7 +13,7 @@ import { renderXlsx } from './renderers/xlsx.renderer';
  * A snapshot test of a binary tells you it changed, not whether it is valid. So these
  * assert the properties that matter to whoever opens the file: that a `.docx` really is an
  * OOXML package, that a formula-shaped cell arrives as text, that 4.48 hours is still 4.48,
- * and that Devanagari does not become mojibake.
+ * and that Devanagari, Arabic, accented Latin and a rupee sign do not become mojibake.
  */
 
 const metadata: ExportMetadata = {
@@ -44,6 +45,11 @@ const table: TableProjection = {
       { kind: 'text', value: 'रिपोर्ट' },
       { kind: 'text', value: '+1-555-0100' },
       { kind: 'number', value: 0.01 },
+    ],
+    [
+      { kind: 'text', value: 'تقرير الجدول الزمني' },
+      { kind: 'text', value: 'Réunion d’équipe — façade “quoted” … ₹1,20,000 · €980' },
+      { kind: 'number', value: 1.05 },
     ],
     [{ kind: 'text', value: 'Empty' }, { kind: 'empty' }, { kind: 'number', value: 1.2 }],
     [
@@ -123,8 +129,22 @@ describe('the CSV renderer', () => {
     expect(csv()).toContain('"a ""quoted"", comma"');
   });
 
-  it('survives non-Latin text', () => {
+  it('survives every script and symbol the specification names', () => {
+    /* Hindi, Arabic, accented Latin, typographic punctuation and currency. */
     expect(csv()).toContain('रिपोर्ट');
+    expect(csv()).toContain('تقرير الجدول الزمني');
+    expect(csv()).toContain('Réunion d’équipe — façade');
+    expect(csv()).toContain('“quoted” …');
+    expect(csv()).toContain('₹1,20,000 · €980');
+  });
+
+  it('writes UTF-8, so a byte-level reader sees the same text', () => {
+    const bytes = renderCsv(table);
+
+    expect(bytes.toString('utf8')).toContain('₹1,20,000');
+    /* The byte-order mark, once, at the very front. */
+    expect(bytes.subarray(0, 3).toString('hex')).toBe('efbbbf');
+    expect(bytes.subarray(3).toString('utf8')).not.toContain('\uFEFF');
   });
 
   it('ends every line with CRLF', () => {
@@ -132,8 +152,8 @@ describe('the CSV renderer', () => {
   });
 
   it('writes one line per row and no more', () => {
-    /* Header, four rows, and the trailing terminator. */
-    expect(csv().trimEnd().split('\r\n')).toHaveLength(5);
+    /* Header plus one line for each row in the projection, and nothing else. */
+    expect(csv().trimEnd().split('\r\n')).toHaveLength(table.rows.length + 1);
   });
 });
 
@@ -252,5 +272,72 @@ describe('the PDF renderer', () => {
     });
 
     expect(body.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  });
+
+  it('reports a logo it cannot decode rather than producing a broken page', async () => {
+    /* A PNG header with nothing valid behind it: what a corrupt stored logo looks like. */
+    const corrupt = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from('not the rest of a PNG'.repeat(4), 'utf8'),
+    ]);
+
+    await expect(
+      renderPdf({
+        projection: prose,
+        metadata,
+        accentColor: '#1F3A5F',
+        logo: { content: corrupt, contentType: 'image/png' },
+      }),
+    ).rejects.toThrow();
+  });
+});
+
+/*
+ * Every renderer works in memory.
+ *
+ * The specification allows temporary files and requires them to be cleaned up after both
+ * success and failure. These renderers avoid the question by never writing one — which is
+ * only worth relying on if it is checked, so the filesystem is watched while all four run.
+ */
+describe('the renderers and the filesystem', () => {
+  const WRITERS = [
+    'writeFile',
+    'writeFileSync',
+    'createWriteStream',
+    'open',
+    'openSync',
+    'mkdtemp',
+    'mkdtempSync',
+    'appendFile',
+    'appendFileSync',
+  ] as const;
+
+  it('writes nothing to disk while producing any of the four formats', async () => {
+    const spies = WRITERS.map((name) =>
+      jest.spyOn(fs, name as never).mockImplementation((...args: unknown[]) => {
+        throw new Error(`A renderer called fs.${name} with ${String(args[0])}`);
+      }),
+    );
+
+    try {
+      expect(renderCsv(table).byteLength).toBeGreaterThan(0);
+      expect(
+        (await renderXlsx({ projection: table, metadata, accentColor: '#1F3A5F' })).byteLength,
+      ).toBeGreaterThan(0);
+      expect(
+        (await renderDocx({ projection: prose, metadata, accentColor: '#1F3A5F' })).byteLength,
+      ).toBeGreaterThan(0);
+      expect(
+        (await renderPdf({ projection: prose, metadata, accentColor: '#1F3A5F' })).byteLength,
+      ).toBeGreaterThan(0);
+
+      for (const spy of spies) {
+        expect(spy).not.toHaveBeenCalled();
+      }
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
   });
 });

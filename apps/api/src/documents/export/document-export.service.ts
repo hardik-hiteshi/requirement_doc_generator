@@ -114,7 +114,7 @@ export class DocumentExportService {
      * corrupted. Failing closed is the only safe answer: a redacted client document is a
      * conversation, a leaked key is an incident.
      */
-    this.refuseSecrets(snapshot, document);
+    await this.refuseSecrets(input, snapshot);
 
     let content: Buffer;
 
@@ -300,7 +300,17 @@ export class DocumentExportService {
    * base64-ish runs, which ordinary content can trip, and an export that refuses a valid
    * document teaches people to route around the check.
    */
-  private refuseSecrets(snapshot: DocumentSnapshot, document: ProjectDocument): void {
+  private async refuseSecrets(
+    input: {
+      readonly context: DocumentContext;
+      readonly document: ProjectDocument;
+      readonly format: ExportFormat;
+      readonly version?: number;
+    },
+    snapshot: DocumentSnapshot,
+  ): Promise<void> {
+    const { document } = input;
+
     if (document !== 'CLIENT_DEPENDENCY_SHEET') {
       return;
     }
@@ -327,6 +337,16 @@ export class DocumentExportService {
     });
 
     if (found) {
+      /*
+       * Recorded like any other export failure. This is the failure most worth having in
+       * the trail — either the data is corrupt or something tried to carry a credential out
+       * of the system — and a REQUESTED event with no outcome reads as a lost response.
+       */
+      await this.record('DOCUMENT_EXPORT_FAILED', input, {
+        reason: 'credential_shaped_value',
+        documentVersion: snapshot.version,
+      });
+
       throw new DocumentError(DOCUMENT_ERROR_CODES.EXPORT_CONTENT_REFUSED, 422, undefined, {
         documentType: document,
         /* Says that something was refused. Never what, and never the value. */
