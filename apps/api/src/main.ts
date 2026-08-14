@@ -8,7 +8,12 @@ import { Logger } from 'nestjs-pino';
 
 import { AppModule } from './app.module';
 import { AppConfigService } from './config';
-import { checkProductionPolicy, describeViolations } from './config/production-policy';
+import {
+  checkProductionPolicy,
+  describeAdvisories,
+  describeViolations,
+  productionAdvisories,
+} from './config/production-policy';
 import { setupOpenApi } from './openapi';
 import { configureSecurity } from './security';
 
@@ -37,6 +42,17 @@ async function bootstrap(): Promise<void> {
     await app.close();
     process.exitCode = 1;
     return;
+  }
+
+  /*
+   * Choices that are consequential rather than wrong: logged, not fatal. Refusing to
+   * start over a lawful data-retention policy would be the tool overruling its
+   * operator — see `productionAdvisories`.
+   */
+  const advisories = productionAdvisories(config);
+
+  if (advisories.length > 0) {
+    app.get(Logger).warn(describeAdvisories(advisories));
   }
 
   // Transport hardening: helmet, body limits and CORS. Defined in ./security so

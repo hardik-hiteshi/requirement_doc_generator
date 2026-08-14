@@ -101,6 +101,16 @@ export const apiEnv: Record<string, string> = {
   API_PORT: String(API_PORT),
   API_PUBLIC_URL: API_URL,
   MONGODB_URI: mongoUri(DATABASE_NAME),
+  /*
+   * No request ceilings. The suite walks whole workflows at machine speed from one
+   * address, which is the shape the limiter refuses — and a browser test failing on a
+   * 429 it did not set out to cause is a test that has stopped describing anything.
+   *
+   * What the browser layer owns is what a person *sees* when the server refuses, and
+   * that is asserted by injecting the refusal at the transport. Enforcement is proved
+   * against a running application in apps/api/test/operations.e2e-spec.ts.
+   */
+  RATE_LIMIT_ENABLED: 'false',
 };
 
 /**

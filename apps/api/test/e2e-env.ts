@@ -25,6 +25,22 @@
  */
 process.env.EXTRACTION_WORKER_ENABLED ??= 'false';
 
+/*
+ * No request ceilings in the general integration suites.
+ *
+ * These suites create a project per test and drive whole workflows as fast as the
+ * machine allows, all from one address — which is exactly the shape the limiter is
+ * built to refuse. Leaving it on made 389 tests fail for a reason unrelated to
+ * anything they assert, and a suite fighting a limiter proves nothing about the
+ * subject it was written for.
+ *
+ * The limiter itself is exercised against a running application in
+ * `operations.e2e-spec.ts`, which turns it on with its own tight ceilings by
+ * overriding the config provider — the environment cannot be used for that, because
+ * `ConfigModule` reads it when `app.module.ts` is imported.
+ */
+process.env.RATE_LIMIT_ENABLED ??= 'false';
+
 process.env.AI_PROVIDER ??= 'deterministic';
 process.env.AI_MODEL_PROFILE ??= 'deterministic-test';
 process.env.AI_BASE_URL ??= 'http://127.0.0.1:11434';

@@ -1,4 +1,8 @@
-import { checkInferenceEndpoint, isProductionUsable } from '@wdrg/contracts';
+import {
+  ADMIN_TOKEN_MIN_LENGTH,
+  checkInferenceEndpoint,
+  isProductionUsable,
+} from '@wdrg/contracts';
 
 import { findModelProfile } from '../analysis/models/model-profiles';
 import type { AppConfigService } from './app-config.service';
@@ -190,6 +194,43 @@ export function checkProductionPolicy(config: AppConfigService): PolicyViolation
     }
   }
 
+  /* -------------------------------------------------- abuse and retention */
+
+  /*
+   * A production deployment with no request ceilings has no defence against a
+   * script, a stuck client or a deliberate flood — and the expensive paths here run
+   * a model or render a document, so the cost of an unbounded caller is real.
+   */
+  if (!config.rateLimit.enabled) {
+    violations.push({
+      setting: 'RATE_LIMIT_ENABLED',
+      problem: 'is false, so nothing limits how fast one caller can run models or render exports.',
+      fix: 'Leave it at its default of true. Adjust the individual RATE_LIMIT_* ceilings instead.',
+    });
+  }
+
+  /*
+   * Purging the moment a deletion is requested removes the window in which a
+   * mistake can be undone, and with it the point of the pending state.
+   */
+  if (config.retention.enabled && config.retention.policy.deletionGraceDays === 0) {
+    violations.push({
+      setting: 'RETENTION_DELETION_GRACE_DAYS',
+      problem: 'is 0, so a deletion is irreversible the moment it is requested.',
+      fix: 'Allow at least a day, so an accidental deletion can be caught.',
+    });
+  }
+
+  /* ------------------------------------------------------ operator surface */
+
+  if (config.admin.enabled && config.admin.token.length < ADMIN_TOKEN_MIN_LENGTH) {
+    violations.push({
+      setting: 'ADMIN_API_TOKEN',
+      problem: `is shorter than ${ADMIN_TOKEN_MIN_LENGTH} characters, which is guessable for a credential that reads the audit trail.`,
+      fix: `Generate at least ${ADMIN_TOKEN_MIN_LENGTH} random characters, or leave it empty to disable the operator surface.`,
+    });
+  }
+
   return violations;
 }
 
@@ -210,4 +251,52 @@ export function describeViolations(violations: readonly PolicyViolation[]): stri
 function isLoopback(endpoint: string): boolean {
   const host = endpoint.replace(/^https?:\/\//, '').split(':')[0] ?? '';
   return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+/**
+ * Configuration worth saying out loud that must not stop a deployment.
+ *
+ * The difference from a violation is whether the setting is *wrong* or merely
+ * *consequential*. A forgeable session secret is wrong: no deployment wants it, and
+ * booting anyway would hand out cookies anybody can mint. Keeping every project for
+ * ever is a decision — some deployments are contractually required to — and refusing
+ * to start over somebody's lawful data policy would be the tool overruling its
+ * operator.
+ *
+ * So these are logged loudly at startup and the process continues. The distinction
+ * matters in practice: without it, the only way to run with retention off is to have
+ * the API refuse to boot, which is how a check that was meant to inform becomes a
+ * check people work around.
+ */
+export function productionAdvisories(config: AppConfigService): PolicyViolation[] {
+  if (!config.isProduction) {
+    return [];
+  }
+
+  const advisories: PolicyViolation[] = [];
+
+  if (!config.retention.enabled) {
+    advisories.push({
+      setting: 'RETENTION_ENABLED',
+      problem:
+        'is false, so expired and deleted projects keep their content — including uploaded client files — indefinitely.',
+      fix: 'Set RETENTION_ENABLED=true with windows your data policy allows, or record the decision to keep everything.',
+    });
+  }
+
+  return advisories;
+}
+
+/** The advisory list, phrased so nobody mistakes it for a refusal. */
+export function describeAdvisories(advisories: readonly PolicyViolation[]): string {
+  const lines = advisories.map(
+    (advisory) => `  - ${advisory.setting} ${advisory.problem}\n      ${advisory.fix}`,
+  );
+
+  return [
+    'This deployment has started, with operational choices worth reviewing:',
+    ...lines,
+    '',
+    'See docs/operations/retention.md.',
+  ].join('\n');
 }

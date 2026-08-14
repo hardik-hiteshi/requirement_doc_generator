@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { LogLevel, NodeEnvironment } from '@wdrg/config';
+import type { RateLimitClass, RateLimitPolicy, RetentionPolicy } from '@wdrg/contracts';
 
 import type { ApiEnvironment } from './env.schema';
 
@@ -102,6 +103,24 @@ export interface ExtractionConfig {
   readonly maxUncompressedBytes: number;
 }
 
+export interface RateLimitConfig {
+  readonly enabled: boolean;
+  readonly maxKeys: number;
+  readonly policies: Readonly<Record<RateLimitClass, RateLimitPolicy>>;
+}
+
+export interface RetentionConfig {
+  readonly enabled: boolean;
+  readonly sweepIntervalMs: number;
+  readonly policy: RetentionPolicy;
+}
+
+export interface AdminConfig {
+  /** Empty means the operator surface is not mounted. */
+  readonly token: string;
+  readonly enabled: boolean;
+}
+
 export interface OcrConfig {
   readonly enabled: boolean;
   readonly binary: string;
@@ -199,6 +218,61 @@ export class AppConfigService {
       maxFilesPerRequest: this.config.get('UPLOAD_MAX_FILES_PER_REQUEST', { infer: true }),
       maxFilenameLength: this.config.get('UPLOAD_MAX_FILENAME_LENGTH', { infer: true }),
     };
+  }
+
+  get rateLimit(): RateLimitConfig {
+    return {
+      enabled: this.config.get('RATE_LIMIT_ENABLED', { infer: true }),
+      maxKeys: this.config.get('RATE_LIMIT_MAX_KEYS', { infer: true }),
+      policies: {
+        default: {
+          limit: this.config.get('RATE_LIMIT_DEFAULT', { infer: true }),
+          windowSeconds: this.config.get('RATE_LIMIT_DEFAULT_WINDOW_SECONDS', { infer: true }),
+        },
+        mutation: {
+          limit: this.config.get('RATE_LIMIT_MUTATION', { infer: true }),
+          windowSeconds: this.config.get('RATE_LIMIT_MUTATION_WINDOW_SECONDS', { infer: true }),
+        },
+        expensive: {
+          limit: this.config.get('RATE_LIMIT_EXPENSIVE', { infer: true }),
+          windowSeconds: this.config.get('RATE_LIMIT_EXPENSIVE_WINDOW_SECONDS', { infer: true }),
+        },
+        export: {
+          limit: this.config.get('RATE_LIMIT_EXPORT', { infer: true }),
+          windowSeconds: this.config.get('RATE_LIMIT_EXPORT_WINDOW_SECONDS', { infer: true }),
+        },
+        upload: {
+          limit: this.config.get('RATE_LIMIT_UPLOAD', { infer: true }),
+          windowSeconds: this.config.get('RATE_LIMIT_UPLOAD_WINDOW_SECONDS', { infer: true }),
+        },
+        access: {
+          limit: this.config.get('RATE_LIMIT_ACCESS', { infer: true }),
+          windowSeconds: this.config.get('RATE_LIMIT_ACCESS_WINDOW_SECONDS', { infer: true }),
+        },
+        create: {
+          limit: this.config.get('RATE_LIMIT_CREATE', { infer: true }),
+          windowSeconds: this.config.get('RATE_LIMIT_CREATE_WINDOW_SECONDS', { infer: true }),
+        },
+      },
+    };
+  }
+
+  get retention(): RetentionConfig {
+    return {
+      enabled: this.config.get('RETENTION_ENABLED', { infer: true }),
+      sweepIntervalMs: this.config.get('RETENTION_SWEEP_INTERVAL_MS', { infer: true }),
+      policy: {
+        deletionGraceDays: this.config.get('RETENTION_DELETION_GRACE_DAYS', { infer: true }),
+        expiredGraceDays: this.config.get('RETENTION_EXPIRED_GRACE_DAYS', { infer: true }),
+        batchSize: this.config.get('RETENTION_BATCH_SIZE', { infer: true }),
+      },
+    };
+  }
+
+  get admin(): AdminConfig {
+    const token = this.config.get('ADMIN_API_TOKEN', { infer: true });
+
+    return { token, enabled: token.length > 0 };
   }
 
   get extraction(): ExtractionConfig {

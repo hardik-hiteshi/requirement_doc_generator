@@ -648,6 +648,62 @@ test.describe('Export and branding', () => {
     await other.close();
   });
 
+  /* A ceiling, as somebody working would meet it. */
+  test('explains a refused download when a ceiling is reached, and stays usable', async ({
+    page,
+  }) => {
+    await reachDocuments(page);
+    await settle(page, 'OUR_UNDERSTANDING', 'Our Understanding');
+
+    const versionBefore = await page.getByTestId('document-version').textContent();
+
+    /*
+     * The refusal is injected at the transport rather than by exhausting a real
+     * budget: the suite's API runs with production-shaped ceilings, and spending six
+     * hundred requests to observe one would take longer than the rest of the suite.
+     * What the browser layer is responsible for is what a person sees when the server
+     * refuses — the enforcement itself is proved against a running application in
+     * apps/api/test/operations.e2e-spec.ts.
+     */
+    await page.route('**/documents/OUR_UNDERSTANDING/export**', async (route) => {
+      await route.fulfill({
+        status: 429,
+        headers: { 'retry-after': '42' },
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: {
+            code: 'RATE_LIMITED',
+            message:
+              'That was too many requests in a short time. Nothing has been changed — please wait a moment and try again.',
+            status: 429,
+          },
+        }),
+      });
+    });
+
+    await exportPanel(page).getByTestId('export-PDF').click();
+
+    const error = exportPanel(page).getByTestId('export-error');
+
+    await expect(error).toBeVisible({ timeout: 60_000 });
+
+    /* The server's own words, not a generic shrug: it says what to do about it. */
+    await expect(error).toContainText('too many requests');
+    await expect(error).toContainText('Nothing has been changed');
+
+    /* Nothing about the document moved, and the workflow is not locked. */
+    await expect(page.getByTestId('document-version')).toHaveText(versionBefore ?? '');
+    await expect(page.getByTestId('detail-status')).toHaveText('Approved');
+    await expect(exportPanel(page).getByTestId('export-PDF')).toBeEnabled();
+
+    /* And once the ceiling releases, the same download works. */
+    await page.unroute('**/documents/OUR_UNDERSTANDING/export**');
+
+    const pdf = await downloadFormat(page, 'PDF');
+
+    expect(isPdf(pdf.body)).toBe(true);
+  });
+
   /* 28. */
   test('works with no AI provider at all', async ({ page }) => {
     await reachDocuments(page);

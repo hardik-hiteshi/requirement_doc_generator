@@ -110,6 +110,7 @@ import { DocumentsRepository } from './documents.repository';
 import { TraceabilityService } from './traceability.service';
 import { DocumentsService, type DocumentContext } from './documents.service';
 import { toDocumentRun } from './documents.mapper';
+import { RateLimit } from '../abuse/rate-limit.decorator';
 
 const excludeRequirementSchema = z
   .object({
@@ -258,6 +259,7 @@ export class DocumentsController {
     return { document: await this.documents.read(context(request), documentType(type)) };
   }
 
+  @RateLimit('expensive')
   @Post(':type/generate')
   @ApiOperation({
     summary: 'Write the document, or write it again',
@@ -875,6 +877,7 @@ export class DocumentsController {
     return { csv: await this.documents.csv(context(request), documentType(type)) };
   }
 
+  @RateLimit('export')
   @Get(':type/export')
   @ApiOperation({
     summary: 'The document as a file',
@@ -948,6 +951,7 @@ export class DocumentsController {
       .end(result.content);
   }
 
+  @RateLimit('expensive')
   @Post(':type/validate')
   @ApiOperation({
     summary: 'Check the document against what it claims to be based on',

@@ -55,6 +55,7 @@ import { EstimationService, type EstimateView, type EstimationContext } from './
 import { EstimationAiService } from './estimation-ai.service';
 import { EstimationRepository } from './estimation.repository';
 import { toRun } from './estimation.mapper';
+import { RateLimit } from '../abuse/rate-limit.decorator';
 
 const versionOnlySchema = z.object({ expectedVersion: z.number().int().nonnegative() }).strict();
 
@@ -118,6 +119,7 @@ export class EstimationController {
 
   /* -------------------------------------------------------- estimating */
 
+  @RateLimit('expensive')
   @Post('run')
   @ApiOperation({ summary: 'Estimate the requirements. Works with or without AI.' })
   @ApiCreatedResponse({ description: 'The estimate, with the new lines in it.' })
@@ -241,6 +243,7 @@ export class EstimationController {
     );
   }
 
+  @RateLimit('expensive')
   @Post('schedule/recalculate')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
