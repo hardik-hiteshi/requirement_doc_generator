@@ -106,7 +106,7 @@ export async function assertCleanSlate(): Promise<void> {
           continue;
         }
 
-        const indexes = await db.collection(collection).indexes();
+        let indexes = await db.collection(collection).indexes();
         const scoped = `projectId_1_type_1_documentVersion_1_${field}_1`;
 
         /*
@@ -117,8 +117,30 @@ export async function assertCleanSlate(): Promise<void> {
          * would have created, which here is nothing. Demanding the index there fails the
          * run over a database no document scenario touches.
          */
-        if (databaseName === DATABASE_NAME && !indexes.some((index) => index.name === scoped)) {
-          throw new Error(`${databaseName}.${collection} is missing ${scoped}: reset dropped it.`);
+        if (databaseName === DATABASE_NAME) {
+          /*
+           * Waited for rather than demanded instantly.
+           *
+           * Mongoose builds indexes in the background after connecting, and the servers are
+           * started before this runs — so on a database that did not already have them, the
+           * collection can exist a moment before its index does. Asserting immediately turns
+           * that ordinary startup ordering into a failed run, which is what happened on a
+           * fresh hosted database while every warm local one passed. The property being
+           * protected is that the reset did not drop the index, and waiting a bounded moment
+           * still proves it: the index either arrives or it genuinely is not there.
+           */
+          const deadline = Date.now() + 30_000;
+
+          while (!indexes.some((index) => index.name === scoped) && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            indexes = await db.collection(collection).indexes();
+          }
+
+          if (!indexes.some((index) => index.name === scoped)) {
+            throw new Error(
+              `${databaseName}.${collection} is missing ${scoped}: reset dropped it.`,
+            );
+          }
         }
 
         /*
