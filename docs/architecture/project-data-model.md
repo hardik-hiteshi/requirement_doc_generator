@@ -51,10 +51,11 @@ A TTL index on `expiresAt` would delete documents outright. That would:
 - silently discard data a user can still legitimately read — an expired project
   is readable, just not editable.
 
-Expiry here means "no longer usable", not "gone". The transition to `DELETED` and
-any physical removal belong to the retention job in Phase 12, where the retention
-period and what survives it are defined. Until then a project stays in
-`DELETION_PENDING`, which is already terminal from the user's point of view.
+Expiry here means "no longer usable", not "gone". The transition to `DELETED` and any
+physical removal belong to the retention job added in Phase 12, which defines the
+retention period and what survives it — see [retention](../operations/retention.md).
+Where retention is disabled, a project stays in `DELETION_PENDING`, which is already
+terminal from the user's point of view.
 
 ## `audit_events`
 

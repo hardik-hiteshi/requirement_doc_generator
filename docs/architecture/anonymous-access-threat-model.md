@@ -1,6 +1,8 @@
 # Threat model: anonymous project access
 
-> Scope: the Phase 2 access model. Updated as each later phase adds surface.
+> Scope: the Phase 2 access model. Updated as each later phase adds surface — last
+> reviewed after Phase 12, which closed the rate-limiting and retention gaps this
+> document had recorded as open.
 
 ## What we are protecting
 
@@ -63,10 +65,13 @@ in the UI, not just here.
    at once — one per exchange — and there is no server-side list of them. What
    ends them all at once is the project being deleted or expiring, or
    `PROJECT_SESSION_SECRET` being rotated.
-6. **No rate limiting yet.** The integration point exists (the session guard is
-   the single choke point for every project operation) but limits are Phase 12.
-   Until then, brute force is bounded only by the 256-bit secret — infeasible,
-   but unmetered.
+6. **Rate limiting arrived in Phase 12.** When this was written, brute force was
+   bounded only by the 256-bit secret — infeasible, but unmetered. Recovery
+   attempts now draw on their own address-keyed budget, deliberately the tightest
+   of the seven classes, so guessing is bounded as well as infeasible. The limiter
+   sits ahead of the session guard rather than behind it, so a flood is refused
+   before any cookie is verified — see
+   [request ceilings](../operations/rate-limiting.md).
 
 ## Phase 3: uploaded files
 
@@ -100,8 +105,10 @@ are the client's own material, not metadata about it.
 2. **Files are stored unencrypted at rest**, beyond whatever the underlying disk
    provides. Encryption at rest belongs with the deployment phase.
 3. **A deleted source's file is removed immediately, but its extracted content
-   revisions are not.** The record is soft-deleted and its content stays until
-   the Phase 12 retention job.
+   revisions are not.** The record is soft-deleted, and its content is removed with
+   the rest of the project's when the retention job purges it — see
+   [retention](../operations/retention.md). Retention is off by default, so a
+   deployment that has not enabled it keeps that content indefinitely.
 4. **Extraction runs in the API process.** A pathological file consumes worker
    time that HTTP requests would otherwise have. Bounded by the timeout and by
    one-job-at-a-time, not eliminated.
@@ -147,15 +154,24 @@ with no field for hours, a status only a person can set.
 
 ## Out of scope for Phase 2
 
-Malware scanning and upload validation (Phase 3, no uploads exist yet); CAPTCHA
-and abuse quotas (Phase 12); a web-application CSP (Phase 12); retention and
-physical deletion of `DELETION_PENDING` records (Phase 12).
+This list is the record as it stood when the Phase 2 access model was written, and is
+kept as written: malware scanning and upload validation (Phase 3, no uploads exist
+yet); CAPTCHA and abuse quotas (Phase 12); a web-application CSP (Phase 12); retention
+and physical deletion of `DELETION_PENDING` records (Phase 12).
+
+**Since then:** upload validation and malware scanning shipped in Phase 3, and abuse
+quotas, retention and the physical removal of `DELETION_PENDING` content shipped in
+Phase 12. A web-application CSP and CAPTCHA remain unimplemented and are not assigned
+to a phase.
 
 ## Residual questions for later phases
 
-- **Retention.** `DELETION_PENDING` is currently terminal for the user but the
-  record persists. Phase 12 must define how long, and what the transition to
-  `DELETED` physically removes versus retains for audit.
+- **Retention — answered in Phase 12.** `DELETION_PENDING` is terminal for the user,
+  and the record now moves to `DELETED` once a configurable grace window has passed.
+  The transition removes the project's content from every collection that holds it,
+  and its objects in storage; the project record and its audit trail survive, because
+  a deletion that cannot be accounted for afterwards is not a better deletion. See
+  [retention](../operations/retention.md).
 - **Session revocation at scale.** Rotating `PROJECT_SESSION_SECRET` invalidates
   every session at once. If per-project revocation is ever needed, the stateless
   session design would have to change — see ADR-0010.

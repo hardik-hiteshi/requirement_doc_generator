@@ -193,7 +193,9 @@ queued job in a database every suite shares. ADR-0032 has the full reasoning.
 
 ## Known limitations
 
-- **Storage is local disk only.** The S3 adapter is not implemented — ADR-0011.
+- **Storage is local disk by default.** `STORAGE_ADAPTER=s3` speaks to a self-hosted
+  S3-compatible server — MinIO in this repository's compose stack — and is verified
+  against a real one in CI. ADR-0011 records why the port exists.
 - **`.doc` and `.xls` conversion is off by default**, and its enabled path is not
   exercised by CI — ADR-0015.
 - **No malware scanner ships.** `MALWARE_SCANNER=none` records `NOT_SCANNED`,
