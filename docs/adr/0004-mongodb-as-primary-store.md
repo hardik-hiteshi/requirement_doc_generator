@@ -52,7 +52,14 @@ fails immediately and readiness reports the truth.
   change across phases.
 - Cross-collection consistency is the application's job. Operations that must be
   atomic across collections use MongoDB transactions (replica set required in
-  production — noted for the deployment phase).
+  production — noted for the deployment phase). **Since then:** no code path opens a
+  transaction. Concurrent edits are held apart by a compare-and-set on a version
+  field, and the places that touch more than one collection — a purge, an audit entry
+  beside the change it records — are ordered so that a failure between them leaves
+  something recoverable rather than something wrong. So a standalone `mongod` is a
+  supported deployment, which is what CI and the compose stack run, and nothing in
+  [deployment](../operations/deployment.md) asks for a replica set. Run one for
+  availability if you want one, not to satisfy this line.
 - Aggregate reporting across projects will need aggregation pipelines rather than
   joins. Acceptable: the reporting in scope is per-project.
 - Because the database does not enforce referential integrity, the domain layer
