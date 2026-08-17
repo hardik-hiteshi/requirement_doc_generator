@@ -1,8 +1,9 @@
 # Threat model: anonymous project access
 
 > Scope: the Phase 2 access model. Updated as each later phase adds surface — last
-> reviewed after Phase 12, which closed the rate-limiting and retention gaps this
-> document had recorded as open.
+> reviewed after Phase 14, which shipped the deployable images and the backup
+> procedure, and so answered where encryption at rest belongs. Phase 12 closed the
+> rate-limiting and retention gaps this document had recorded as open.
 
 ## What we are protecting
 
@@ -103,7 +104,12 @@ are the client's own material, not metadata about it.
    origin, which bounds what an infected upload could do here; it does not bound
    what it could do to whoever downloads it.
 2. **Files are stored unencrypted at rest**, beyond whatever the underlying disk
-   provides. Encryption at rest belongs with the deployment phase.
+   provides. Encryption at rest belongs to the deployment, not to the application —
+   and after Phase 14 that is stated where an operator will meet it rather than left
+   to a later phase: the backup archive contains client documents and
+   [backup and restore](../operations/backup-and-restore.md#encryption-is-your-job-deliberately)
+   says plainly that encrypting it is your job, with the reason a script that invented
+   a key would be worse than none.
 3. **A deleted source's file is removed immediately, but its extracted content
    revisions are not.** The record is soft-deleted, and its content is removed with
    the rest of the project's when the retention job purges it — see

@@ -56,7 +56,9 @@ Turborepo, over plain `pnpm -r` scripts:
   `package.json` files, a task graph, and a caching layer. The cost is one-time
   setup; it is documented in the README so it does not become tribal knowledge.
 - Deployment must select the right app to build. `turbo build --filter` handles
-  this; the deployment phase will use it.
+  this. **Since then:** Phase 14's images select with `pnpm --filter <project> build`
+  instead — inside a container the task graph has nothing to cache against, and each
+  image builds exactly one application plus the two workspace packages it needs.
 - Turborepo collects anonymous telemetry by default. `TURBO_TELEMETRY_DISABLED=1`
   is set in CI, and the README documents `pnpm turbo telemetry disable` for local
   machines.

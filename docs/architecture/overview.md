@@ -1,7 +1,8 @@
 # Architecture overview
 
-> Status: reflects the codebase as of **Phase 1**. Sections describing later
-> phases are marked _(planned)_ and describe intent, not shipped behaviour.
+> Status: reflects the codebase as of **Phase 14**, which is every phase this
+> repository has. Nothing below describes intent rather than shipped behaviour;
+> where something is deliberately absent, it says so and says why.
 
 ## What the system does
 
@@ -38,7 +39,8 @@ link.
               Phase 3        Phase 3     Phase 4       Phase 11   │
                                                                   │
    Everything crossing the process boundary sits behind a port ───┘
-   (ADR-0005). Phase 1 defines the interfaces; no adapters yet.
+   (ADR-0005). Phase 1 defined the interfaces; the phase beneath
+   each one is where its adapter shipped. All of them exist today.
 ```
 
 ## Layers inside the API
@@ -47,7 +49,7 @@ link.
 Controller   HTTP only: routing, status codes, OpenAPI annotations.
              No business logic — a controller that makes a decision is a bug.
      │
-Service      The domain. Orchestrates, enforces rules, owns transactions.
+Service      The domain. Orchestrates, enforces rules, owns the unit of work.
      │
 Repository   Persistence. The only layer that knows about Mongoose.
      │
@@ -99,8 +101,8 @@ project details → requirement input → extraction review → requirement anal
    → estimation & timeline → document generation → export & recovery
 ```
 
-Two rules govern it. Both are live as far as the technology stack; the document
-steps that follow are still planned.
+Two rules govern it, and both are live for every step above — including document
+generation and export, which shipped in Phases 7 to 11.
 
 - **Approval gates progression.** The approved requirement baseline is the source
   of truth for everything downstream, and the technology stack refuses to be
@@ -138,7 +140,9 @@ until the runtime origins it must allow are known.
 
 Added by later phases: anonymous project access and session cookies (2); upload
 validation, magic bytes, malware scanning (3); rate limiting, quotas, retention and
-cleanup (12).
+cleanup (12); an operator surface behind a deployment token, with every access audited
+(12 and 13); and images that run as a non-root user with no package manager in them,
+built from a base pinned by digest (14).
 
 Still not present: a web-application CSP, and CAPTCHA. Neither is assigned to a phase.
 
@@ -150,4 +154,5 @@ Still not present: a web-application CSP, and CAPTCHA. Neither is assigned to a 
 | Why the big decisions      | [../adr/](../adr/)                                                       |
 | Error model and versioning | [../api/README.md](../api/README.md)                                     |
 | Running it locally         | [../operations/local-development.md](../operations/local-development.md) |
+| Running it somewhere real  | [../operations/deployment.md](../operations/deployment.md)               |
 | The external boundaries    | `apps/api/src/ports/README.md`                                           |
