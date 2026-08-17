@@ -108,6 +108,16 @@ import { FileValidator } from './validation/file-validator';
     { provide: OCR_PROVIDER_PORT, useExisting: TesseractOcrAdapter },
     { provide: LEGACY_CONVERSION_PORT, useExisting: LibreOfficeConversionAdapter },
   ],
-  exports: [RequirementSourceService, RequirementSourceRepository, ExtractionWorker],
+  /*
+   * The job-queue port is exported so the operator surface can retry a job through the
+   * same transition the ingestion path uses. A second binding elsewhere would eventually
+   * disagree with this one about what resetting a job means.
+   */
+  exports: [
+    RequirementSourceService,
+    RequirementSourceRepository,
+    ExtractionWorker,
+    JOB_QUEUE_PORT,
+  ],
 })
 export class RequirementsModule {}

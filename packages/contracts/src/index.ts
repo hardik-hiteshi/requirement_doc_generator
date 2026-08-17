@@ -123,3 +123,7 @@ export * from './operations/rate-limit.contract';
 export * from './operations/retention.contract';
 export * from './operations/admin.contract';
 export * from './operations/metrics.contract';
+
+/* Phase 13 — admin, observability and operations. */
+export * from './operations/admin-projects.contract';
+export * from './operations/admin-queue.contract';

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   accentOrNeutral,
   brandingIdentity,
+  METRIC_NAMES,
   contentDisposition,
   DOCUMENT_STATUS_LABELS,
   EXPORT_MIME_TYPES,
@@ -19,6 +20,7 @@ import { AuditService } from '../../audit/audit.service';
 import { DOCUMENT_ERROR_CODES } from '@wdrg/contracts';
 
 import { DocumentError } from '../documents.errors';
+import { MetricsService } from '../../observability/metrics.service';
 import { DocumentsService, type DocumentContext } from '../documents.service';
 import { proseProjection, tableProjection } from './document-projections';
 import { exportMetadata } from './export-projection';
@@ -70,6 +72,7 @@ export class DocumentExportService {
   constructor(
     private readonly documents: DocumentsService,
     private readonly audit: AuditService,
+    private readonly metrics: MetricsService,
   ) {}
 
   async export(input: {
@@ -149,6 +152,13 @@ export class DocumentExportService {
       version: snapshot.version,
       ...(snapshot.status === 'FINAL' ? { lifecycleLabel: DOCUMENT_STATUS_LABELS.FINAL } : {}),
     });
+
+    /*
+     * The second metric Phase 12 declared and never emitted. Labelled by format only:
+     * "how many PDFs are we rendering" is an operational question, and document type
+     * would multiply the series by seven for an answer the audit trail already gives.
+     */
+    this.metrics.increment(METRIC_NAMES.exportsTotal, { format });
 
     await this.audit.record({
       type: 'DOCUMENT_EXPORTED',
