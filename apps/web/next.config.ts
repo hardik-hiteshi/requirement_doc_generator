@@ -8,6 +8,12 @@ import { SECURITY_HEADERS } from './src/lib/security-headers';
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
+  // Traced output for the deployable image: the server plus only the dependencies it
+  // actually reaches, rather than a `node_modules` tree copied wholesale. Set
+  // unconditionally, because a build that produces one artefact in CI and a different
+  // one locally is how a container works on a laptop and not on a runner.
+  output: 'standalone',
+
   // The browser E2E suite builds this app against a different API origin, and
   // `NEXT_PUBLIC_*` values are inlined at build time — so that build cannot share
   // an output directory with the development one without silently poisoning it.

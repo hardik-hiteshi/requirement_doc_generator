@@ -1,0 +1,181 @@
+# Example Prometheus alerting rules. Not loaded by anything in this repository.
+#
+# The application deliberately ships no alerting of its own: a threshold written into the
+# service would be one nobody can tune without a release, and the collector already owns
+# this job. What the application owes an operator is metrics whose meaning is stable, and
+# that is what `GET /api/v1/admin/metrics` provides — see docs/operations/observability.md.
+#
+# So this file is a starting point to copy into your own Prometheus, not a configuration
+# to include. Every number in it is a guess about *your* deployment: an agency running a
+# handful of projects a week and one running a hundred a day should not have the same
+# thresholds. Read each `for` and each comparison as a question to answer, not an answer.
+#
+# Assumes a scrape job whose targets carry an `instance` label and that sends the
+# operator token, because the metrics endpoint is behind it:
+#
+#   scrape_configs:
+#     - job_name: wdrg-api
+#       metrics_path: /api/v1/admin/metrics
+#       authorization:
+#         type: ''            # the token is not a Bearer credential
+#       # Prometheus cannot send an arbitrary header on its own, so either put the
+#       # token in a header via a proxy in front of the scrape, or run the exporter
+#       # side of the scrape on the same host and allow it there.
+#       static_configs:
+#         - targets: ['api.internal:3001']
+#
+# That last point is a real constraint rather than an oversight: Prometheus supports
+# `authorization` and `basic_auth`, not a custom header. Deployments generally solve it
+# with a small local proxy that adds `X-Admin-Token`. It is stated here because
+# discovering it while an incident is in progress is worse.
+
+groups:
+  - name: wdrg-availability
+    interval: 30s
+    rules:
+      # The one alert worth paging on. Everything else in this file is a symptom; this
+      # is the service being down.
+      - alert: WdrgApiDown
+        expr: up{job="wdrg-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'The API is not answering scrapes'
+          description: >-
+            Check `GET /api/health/ready` directly. It reports which dependency is
+            unavailable — MongoDB, process heap, or the malware scanner — rather than
+            just that something is wrong.
+
+      # A restart is normal. A restart every few minutes is a crash loop, and uptime
+      # resetting is the only signal that distinguishes them.
+      - alert: WdrgApiRestarting
+        expr: wdrg_process_uptime_seconds < 300
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'The API process keeps restarting'
+          description: >-
+            Uptime has stayed under five minutes for ten. Look at the startup logs: a
+            production policy violation is refused at boot and says exactly which
+            setting is wrong.
+
+  - name: wdrg-errors
+    interval: 30s
+    rules:
+      # Server errors as a share of traffic, not an absolute count: ten failures an hour
+      # matters at ten requests an hour and does not at ten thousand.
+      - alert: WdrgServerErrorRate
+        expr: |
+          sum(rate(wdrg_http_requests_total{outcome="server_error"}[5m]))
+            /
+          sum(rate(wdrg_http_requests_total[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'More than 5% of requests are failing with a server error'
+          description: >-
+            `wdrg_errors_total` is labelled by error code and will say what kind. The
+            audit trail records which operation, which this metric deliberately does not.
+
+      # Refusals are the rate limiter working, so this is not an error condition — it is
+      # a question about whether the ceilings match how the deployment is actually used.
+      - alert: WdrgSustainedRateLimiting
+        expr: sum(rate(wdrg_rate_limit_refusals_total[15m])) > 1
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: 'Requests are being refused by a rate ceiling, consistently'
+          description: >-
+            Check the `class` label. A sustained `create` refusal is often one office
+            behind a single address rather than an attack — see
+            docs/operations/rate-limiting.md.
+
+  - name: wdrg-latency
+    interval: 30s
+    rules:
+      # The 95th percentile over the fixed buckets. Ten seconds is the top boundary, so
+      # anything above it is reported as +Inf and this expression saturates there.
+      - alert: WdrgSlowRequests
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(wdrg_http_request_duration_seconds_bucket[10m]))
+          ) > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'The 95th percentile request is taking over five seconds'
+          description: >-
+            Above five seconds usually means a model run or a large export rather than a
+            slow read. `GET /admin/queue` shows whether extraction work is backing up.
+
+  - name: wdrg-background-work
+    interval: 1m
+    rules:
+      # The failure this system has that nothing surfaced before Phase 13: an upload
+      # succeeds, the worker that claimed the job dies, and the only signal was a user
+      # saying it had been like that for an hour. The queue's `stalled` flag is on the
+      # operator surface rather than in metrics, so this alert is the metric-side proxy
+      # for it: retention sweeps stopping is the same class of silence.
+      - alert: WdrgRetentionNotRunning
+        expr: |
+          increase(wdrg_retention_sweeps_total[6h]) == 0
+          and on() wdrg_process_uptime_seconds > 21600
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'No retention sweep has completed in six hours'
+          description: >-
+            Only meaningful where RETENTION_ENABLED=true. With retention off this fires
+            permanently and should be removed rather than silenced — a deployment that
+            keeps everything for ever is a lawful choice, and the API says so at startup.
+
+      - alert: WdrgRetentionFailing
+        expr: increase(wdrg_retention_failures_total[1h]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'A retention sweep could not complete for some projects'
+          description: >-
+            The sweep continues past a project it cannot purge, so this does not stop
+            retention — but the same project failing every hour means its content is
+            being kept past the policy. `GET /admin/status` carries the last sweep result.
+
+  - name: wdrg-abuse
+    interval: 1m
+    rules:
+      # Somebody trying the operator token. Not necessarily an attack — a stale
+      # bookmark and a rotated token look identical — but it is the one thing an
+      # operator most wants to see, and the audit trail records every one.
+      - alert: WdrgOperatorAccessRefused
+        expr: increase(wdrg_admin_denied_total{reason="token_mismatch"}[15m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Repeated operator requests with a wrong token'
+          description: >-
+            `reason="surface_disabled"` is different and harmless: it means somebody
+            asked a deployment that has no operator surface. A `token_mismatch` run means
+            a credential is being tried. Query `ADMIN_ACCESS_DENIED` in the audit trail.
+
+      # Unbounded growth here would be a memory leak in the limiter rather than traffic:
+      # keys are evicted, and the ceiling is RATE_LIMIT_MAX_KEYS.
+      - alert: WdrgRateLimiterHoldingTooMuch
+        expr: wdrg_rate_limit_tracked_keys > 40000
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: 'The in-process rate limiter is tracking an unusual number of keys'
+          description: >-
+            Compare against RATE_LIMIT_MAX_KEYS. Approaching it means eviction is
+            running, which weakens the ceiling for the callers whose counters were
+            dropped.

@@ -1,8 +1,15 @@
 name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}
 
-# Local development infrastructure only. Application containers and production
-# images are defined in the deployment phase; running the apps directly with
-# `pnpm dev` keeps the edit-reload loop fast.
+# Infrastructure for development, and the application itself behind a profile.
+#
+# By default this file starts dependencies only — MongoDB, MinIO, ClamAV — because
+# running the apps with `pnpm dev` keeps the edit-reload loop fast, and that is what a
+# developer wants. `--profile app` additionally builds and runs the API and the web
+# application from the deployable images, which is what a deployment wants and what CI
+# uses to prove those images work.
+#
+# Nothing about the default behaviour changed when the app profile was added: a service
+# in a profile does not start unless the profile is named.
 #
 # Every service here is open-source and self-hosted. Nothing in this stack — or
 # in the application it supports — requires a paid API, a managed service or a
@@ -129,6 +136,92 @@ services:
       mongodb:
         condition: service_healthy
 
+  # --------------------------------------------------------------- the application
+  #
+  # Profile-gated, so `docker compose up` still starts dependencies only.
+  #
+  #   docker compose --profile app up --build
+  #
+  # These are the images that ship. Running them here is the only honest test that the
+  # Dockerfiles work: a build that succeeds and a container that cannot reach its
+  # database are different failures, and only the second one matters in production.
+  api:
+    profiles: ['app']
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/api.Dockerfile
+    image: ${API_IMAGE:-wdrg-api:local}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_HOST: 0.0.0.0
+      API_PORT: '3001'
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-http://127.0.0.1:3001}
+      WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-http://127.0.0.1:3000}
+      # Container-to-container, so the container port rather than the host one.
+      MONGODB_URI: mongodb://mongodb:27017/${MONGODB_DATABASE:-wdrg}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Production refuses a filesystem root that moves with the working directory.
+      UPLOAD_STORAGE_ROOT: /var/lib/wdrg/uploads
+      # Filesystem storage on a named volume, and not `s3`, for a specific reason: the
+      # production policy refuses an S3 endpoint that is not on this host and not
+      # behind TLS, and MinIO here is plain HTTP on the compose network. That refusal
+      # is correct — object storage credentials and client documents crossing a network
+      # in the clear is exactly what it is for — so this stack uses the other supported
+      # production configuration rather than weakening the check to make a demo start.
+      #
+      # A deployment that wants object storage sets STORAGE_ADAPTER=s3 with
+      # S3_USE_SSL=true against a MinIO that terminates TLS. See
+      # docs/operations/deployment.md.
+      STORAGE_ADAPTER: ${STORAGE_ADAPTER:-filesystem}
+      S3_ENDPOINT: minio
+      S3_PORT: '9000'
+      S3_USE_SSL: 'false'
+      S3_BUCKET: ${MINIO_BUCKET:-wdrg-requirements}
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-wdrg-dev-access-key}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-wdrg-dev-secret-key}
+      MALWARE_SCANNER: ${MALWARE_SCANNER:-clamav}
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: '3310'
+      # No default. Production refuses the development placeholder, and a compose file
+      # that supplied a working secret would be a compose file people deploy as-is.
+      PROJECT_SESSION_SECRET: ${PROJECT_SESSION_SECRET:?set a random value of at least 32 characters}
+      AI_PROVIDER: ${AI_PROVIDER:-disabled}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
+      RETENTION_ENABLED: ${RETENTION_ENABLED:-false}
+    ports:
+      - '127.0.0.1:${API_HOST_PORT:-3001}:3001'
+    volumes:
+      - uploads-data:/var/lib/wdrg/uploads
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      clamav:
+        condition: service_healthy
+
+  web:
+    profiles: ['app']
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/web.Dockerfile
+      args:
+        # Inlined into the client bundle at build time — see web.Dockerfile. Changing
+        # this needs a rebuild, not a restart.
+        NEXT_PUBLIC_API_BASE_URL: ${API_PUBLIC_URL:-http://127.0.0.1:3001}
+    image: ${WEB_IMAGE:-wdrg-web:local}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      HOSTNAME: 0.0.0.0
+    ports:
+      - '127.0.0.1:${WEB_HOST_PORT:-3000}:3000'
+    depends_on:
+      api:
+        condition: service_healthy
+
 volumes:
   # Namespaced by project so a throwaway verification stack cannot collide with
   # — or destroy — a developer's working data. `docker compose down` removes
@@ -139,3 +232,8 @@ volumes:
     name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-minio-data
   clamav-data:
     name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-clamav-data
+  # Uploaded files, for the app profile's default filesystem adapter. A container
+  # replacement must not take a client's documents with it, so the storage root is a
+  # named volume rather than the container filesystem.
+  uploads-data:
+    name: ${COMPOSE_PROJECT_NAME:-wdrg-dev}-uploads-data

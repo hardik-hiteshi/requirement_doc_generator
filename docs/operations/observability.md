@@ -48,8 +48,16 @@ audit event and is often visible more widely. Labels come from closed sets only 
 class, a format, an outcome, an error code — so cardinality is bounded by the code
 rather than by traffic.
 
-**Alerting.** The collector owns this. A threshold written here would be one nobody can
-tune without a release.
+**Alerting.** The collector owns this. A threshold written into the service would be one
+nobody can tune without a release.
+
+There are example rules to copy in
+[`infrastructure/monitoring/prometheus-alerts.example.yml`](../../infrastructure/monitoring/prometheus-alerts.example.yml)
+— nothing loads them, and every number in them is a guess about a deployment whose traffic
+this repository knows nothing about. Read each threshold as a question to answer. The file
+also records a real constraint worth knowing before an incident: Prometheus cannot send a
+custom header, and this endpoint is behind `X-Admin-Token`, so the scrape needs a small
+local proxy to add it.
 
 **Tracing.** No spans, no propagation. A modular monolith with one database has a call
 graph you can read in the source.

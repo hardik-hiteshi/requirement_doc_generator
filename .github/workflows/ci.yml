@@ -345,6 +345,265 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  # The deployable images, proved by running them.
+  #
+  # A Dockerfile that builds is not evidence of anything. This job builds both images,
+  # starts them against real dependencies, drives the application through them over
+  # HTTP, inspects what is inside them, scans them, and rehearses a backup restore
+  # against a running container. Only then — and only on main — are they pushed.
+  #
+  # Everything it depends on is open source and self-hosted: MongoDB and ClamAV in
+  # containers, Trivy for the scan, GHCR with the token GitHub already issues to the
+  # job. No registry account to create, no scanner subscription, no per-image fee.
+  images:
+    name: Deployable images
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    permissions:
+      contents: read
+      # Needed only by the publish step, which is skipped on pull requests. GITHUB_TOKEN
+      # is issued and rotated by GitHub, so there is no registry credential in this
+      # repository's secrets at all.
+      packages: write
+
+    env:
+      # A user-defined network, rather than service containers: the smoke test and the
+      # restore rehearsal both run containers of their own that need to reach MongoDB and
+      # ClamAV *by name*, and a job-level service container is only reachable from the
+      # runner host.
+      NETWORK: wdrg-ci-images
+      TRIVY_IMAGE: aquasec/trivy:0.74.0
+      # The origin the web bundle is built with. Inlined at build time, so this decides
+      # what the published web image is usable for — see docs/operations/deployment.md.
+      # A repository variable overrides it for a deployment that publishes its own.
+      WEB_API_ORIGIN: ${{ vars.WEB_API_BASE_URL || 'http://127.0.0.1:3001' }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve the release version
+        id: version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Release version: ${version}"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Built with --load so the *verified* image is the one that is later pushed. A
+      # build-and-push in one step would publish an artefact nothing had run.
+      - name: Build the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/api.Dockerfile
+          tags: wdrg-api:ci
+          load: true
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build the web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infrastructure/docker/web.Dockerfile
+          tags: wdrg-web:ci
+          load: true
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=${{ env.WEB_API_ORIGIN }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+      # Contents before behaviour: if a secret or a source tree is in the image, that is
+      # true whether or not the application starts, and it is the cheapest check here.
+      - name: Inspect what is inside the images
+        run: |
+          bash infrastructure/scripts/verify-image.sh wdrg-api:ci --api
+          bash infrastructure/scripts/verify-image.sh wdrg-web:ci --web
+
+      - name: Start the dependencies
+        run: |
+          docker network create "${NETWORK}"
+
+          docker run -d --name mongodb --network "${NETWORK}" mongo:8.0
+
+          # The tagged image ships a signature database, so a first start does not
+          # download several hundred megabytes before it can answer.
+          docker run -d --name clamav --network "${NETWORK}" clamav/clamav:1.4
+
+          echo 'Waiting for MongoDB...'
+          for _ in $(seq 1 30); do
+            docker run --rm --network "${NETWORK}" mongo:8.0 \
+              mongosh mongodb://mongodb:27017 --quiet --eval 'db.adminCommand({ping:1}).ok' \
+              >/dev/null 2>&1 && break
+            sleep 5
+          done
+
+          # ClamAV loads roughly a gigabyte of signatures before it answers, which is
+          # genuinely slow and is why the readiness probe reports it separately.
+          echo 'Waiting for ClamAV...'
+          for _ in $(seq 1 40); do
+            docker exec clamav clamdcheck.sh >/dev/null 2>&1 && break
+            sleep 10
+          done
+
+          docker exec clamav clamdcheck.sh
+
+      - name: Start the application from the images
+        run: |
+          secret="$(openssl rand -hex 24)"
+          admin_token="$(openssl rand -hex 24)"
+          echo "::add-mask::${secret}"
+          echo "::add-mask::${admin_token}"
+          echo "ADMIN_TOKEN=${admin_token}" >> "$GITHUB_ENV"
+
+          start_api() {
+            docker run -d --name "$1" --network "${NETWORK}" \
+              --publish "127.0.0.1:$2:3001" \
+              --volume "$1-uploads:/var/lib/wdrg/uploads" \
+              --env NODE_ENV=production \
+              --env "MONGODB_URI=mongodb://mongodb:27017/$3" \
+              --env LOG_LEVEL=warn \
+              --env STORAGE_ADAPTER=filesystem \
+              --env UPLOAD_STORAGE_ROOT=/var/lib/wdrg/uploads \
+              --env MALWARE_SCANNER=clamav \
+              --env CLAMAV_HOST=clamav \
+              --env CLAMAV_PORT=3310 \
+              --env AI_PROVIDER=disabled \
+              --env RETENTION_ENABLED=false \
+              --env "PROJECT_SESSION_SECRET=${secret}" \
+              --env "API_PUBLIC_URL=http://127.0.0.1:$2" \
+              --env "WEB_PUBLIC_URL=http://127.0.0.1:3000" \
+              --env "ADMIN_API_TOKEN=$4" \
+              wdrg-api:ci
+          }
+
+          # Two API instances, because the operator surface has two states worth
+          # proving: absent when no token is configured, and behind a token boundary
+          # when one is. A container cannot change its environment, so that is two
+          # containers.
+          start_api api 3001 wdrg_ci_images ''
+          start_api api-admin 3002 wdrg_ci_images_admin "${admin_token}"
+
+          docker run -d --name web --network "${NETWORK}" \
+            --publish 127.0.0.1:3000:3000 \
+            --env NODE_ENV=production --env PORT=3000 --env HOSTNAME=0.0.0.0 \
+            wdrg-web:ci
+
+          for target in 3001 3002; do
+            echo "Waiting for the API on ${target}..."
+            for _ in $(seq 1 40); do
+              [[ "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${target}/api/health/ready")" == '200' ]] && break
+              sleep 3
+            done
+          done
+
+          echo 'Waiting for the web application...'
+          for _ in $(seq 1 30); do
+            [[ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/)" == '200' ]] && break
+            sleep 3
+          done
+
+      - name: Smoke test the deployment
+        run: |
+          bash infrastructure/scripts/smoke-test.sh \
+            --api http://127.0.0.1:3001 \
+            --web http://127.0.0.1:3000 \
+            --production \
+            --expect-version '${{ steps.version.outputs.version }}' \
+            --expect-web-api-origin "${WEB_API_ORIGIN}"
+
+      - name: Smoke test the operator surface behind its token
+        run: |
+          bash infrastructure/scripts/smoke-test.sh \
+            --api http://127.0.0.1:3002 \
+            --skip-web \
+            --production \
+            --admin-token "${ADMIN_TOKEN}"
+
+      # The half of a backup procedure that is usually never tested. It destroys data
+      # and gets it back, and it uses its own database and volume so it cannot touch
+      # anything the steps above created.
+      - name: Rehearse a backup restore
+        run: |
+          bash infrastructure/scripts/restore-rehearsal.sh \
+            --network "${NETWORK}" \
+            --database wdrg_ci_rehearsal \
+            --api-image wdrg-api:ci \
+            --port 3399
+
+      # Gating on *fixable* findings only. An unfixed advisory in the Debian base has no
+      # action attached to it — there is no patched version to move to — so gating on it
+      # would make this permanently red and teach everyone to ignore it. The full report
+      # including unfixed is printed either way, which is how the fact that this image
+      # ships no package manager was found in the first place.
+      - name: Scan the images
+        run: |
+          docker pull --quiet "${TRIVY_IMAGE}"
+
+          for image in wdrg-api:ci wdrg-web:ci; do
+            echo "::group::${image} — every HIGH and CRITICAL, including unfixed"
+            docker run --rm \
+              --volume /var/run/docker.sock:/var/run/docker.sock \
+              --volume "${HOME}/.cache/trivy:/root/.cache" \
+              "${TRIVY_IMAGE}" image --scanners vuln --severity HIGH,CRITICAL \
+              --quiet "${image}" || true
+            echo '::endgroup::'
+
+            echo "${image} — fixable HIGH and CRITICAL (gating)"
+            docker run --rm \
+              --volume /var/run/docker.sock:/var/run/docker.sock \
+              --volume "${HOME}/.cache/trivy:/root/.cache" \
+              "${TRIVY_IMAGE}" image --scanners vuln --severity HIGH,CRITICAL \
+              --ignore-unfixed --exit-code 1 --quiet "${image}"
+          done
+
+      - name: Collect container logs
+        if: failure()
+        run: |
+          for container in api api-admin web mongodb clamav; do
+            echo "::group::${container}"
+            docker logs --tail 200 "${container}" 2>&1 || true
+            echo '::endgroup::'
+          done
+
+      # Only from main, and only after every step above passed. `docker push` of the
+      # image that was just verified, rather than a second build — the digest that goes
+      # to the registry is the digest the smoke test ran against.
+      - name: Publish to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          echo '${{ secrets.GITHUB_TOKEN }}' \
+            | docker login ghcr.io --username '${{ github.actor }}' --password-stdin
+
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          sha="${GITHUB_SHA:0:12}"
+
+          for pair in "api:wdrg-api:ci" "web:wdrg-web:ci"; do
+            name="${pair%%:*}"
+            local_tag="${pair#*:}"
+            remote="ghcr.io/${owner}/wdrg-${name}"
+
+            # Three tags, each answering a different question. `sha-` is the immutable
+            # one and the only one worth deploying from: `main` moves, and a version
+            # that has not been bumped points at whatever shipped last under it.
+            for tag in "sha-${sha}" "${VERSION}" main; do
+              docker tag "${local_tag}" "${remote}:${tag}"
+              docker push --quiet "${remote}:${tag}"
+              echo "pushed ${remote}:${tag}"
+            done
+          done
+
+      - name: Stop everything
+        if: always()
+        run: |
+          docker rm -f api api-admin web mongodb clamav >/dev/null 2>&1 || true
+          docker volume rm -f api-uploads api-admin-uploads >/dev/null 2>&1 || true
+          docker network rm "${NETWORK}" >/dev/null 2>&1 || true
+
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
