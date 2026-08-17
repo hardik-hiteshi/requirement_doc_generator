@@ -126,4 +126,74 @@ export const ADMIN_ROUTES = {
   audit: '/api/v1/admin/audit',
   retentionRun: '/api/v1/admin/retention/run',
   metrics: '/api/v1/admin/metrics',
+  projects: '/api/v1/admin/projects',
+  project: (projectId: string) => `/api/v1/admin/projects/${projectId}`,
+  queue: '/api/v1/admin/queue',
+  jobRetry: (jobId: string) => `/api/v1/admin/queue/${jobId}/retry`,
+  config: '/api/v1/admin/config',
 } as const;
+
+/**
+ * Configuration an operator may read, by exact key.
+ *
+ * An allow-list rather than a deny-list, because the failure modes are not
+ * symmetrical: forgetting to add a safe key means an operator asks; forgetting to
+ * deny a new secret means publishing it. A key absent from this list is absent from
+ * the response.
+ *
+ * Nothing here holds a credential. Where the *presence* of a secret matters — is the
+ * session secret set, is the operator token set — the response carries a boolean
+ * instead, which answers the operational question without disclosing anything.
+ */
+export const READABLE_CONFIG_KEYS: readonly string[] = [
+  'NODE_ENV',
+  'LOG_LEVEL',
+  'API_PORT',
+  'API_PUBLIC_URL',
+  'WEB_PUBLIC_URL',
+  'STORAGE_ADAPTER',
+  'UPLOAD_STORAGE_ROOT',
+  'S3_ENDPOINT',
+  'S3_PORT',
+  'S3_USE_SSL',
+  'S3_BUCKET',
+  'MALWARE_SCANNER',
+  'CLAMAV_HOST',
+  'CLAMAV_PORT',
+  'AI_PROVIDER',
+  'AI_BASE_URL',
+  'AI_MODEL_PROFILE',
+  'EXTRACTION_WORKER_ENABLED',
+  'EXTRACTION_POLL_INTERVAL_MS',
+  'EXTRACTION_CLAIM_TIMEOUT_MS',
+  'PROJECT_EXPIRY_DAYS',
+  'RATE_LIMIT_ENABLED',
+  'RATE_LIMIT_MAX_KEYS',
+  'RETENTION_ENABLED',
+  'RETENTION_SWEEP_INTERVAL_MS',
+  'RETENTION_DELETION_GRACE_DAYS',
+  'RETENTION_EXPIRED_GRACE_DAYS',
+  'RETENTION_BATCH_SIZE',
+  'OPENAPI_ENABLED',
+];
+
+/** Secrets reported as set or unset, never by value. */
+export const CONFIG_PRESENCE_KEYS: readonly string[] = [
+  'PROJECT_SESSION_SECRET',
+  'PROJECT_SECRET_PEPPER',
+  'S3_ACCESS_KEY',
+  'S3_SECRET_KEY',
+  'ADMIN_API_TOKEN',
+];
+
+export const adminConfigSchema = z
+  .object({
+    /** Allow-listed values, as strings — a config view is for reading, not parsing. */
+    settings: z.record(z.string().max(60), z.string().max(500)),
+    /** Whether each secret is configured. Never its value, never its length. */
+    secretsConfigured: z.record(z.string().max(60), z.boolean()),
+    observedAt: z.string().datetime(),
+  })
+  .strict();
+
+export type AdminConfig = z.infer<typeof adminConfigSchema>;

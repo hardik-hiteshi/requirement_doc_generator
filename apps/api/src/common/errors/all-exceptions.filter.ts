@@ -3,6 +3,7 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  Optional,
   type ArgumentsHost,
   type ExceptionFilter,
 } from '@nestjs/common';
@@ -10,6 +11,7 @@ import {
   API_ERROR_CODES,
   CORRELATION_ID_HEADER,
   DEFAULT_ERROR_MESSAGES,
+  METRIC_NAMES,
   type ApiErrorCode,
   type ApiErrorDetail,
   type ApiErrorResponse,
@@ -17,6 +19,7 @@ import {
 import type { Request, Response } from 'express';
 import { ZodError } from 'zod';
 
+import { MetricsService } from '../../observability/metrics.service';
 import { AppException } from './app.exception';
 
 /** HTTP status -> error code, for exceptions raised by Nest itself. */
@@ -52,6 +55,13 @@ interface ResolvedError {
 export class AllExceptionsFilter implements ExceptionFilter {
   private readonly logger = new Logger(AllExceptionsFilter.name);
 
+  /**
+   * Optional, and injected rather than imported, so this filter keeps working in the
+   * unit tests that construct it directly. Counting failures is useful; making the
+   * one component that must never throw depend on another is not.
+   */
+  constructor(@Optional() private readonly metrics?: MetricsService) {}
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
     const response = http.getResponse<Response>();
@@ -73,6 +83,13 @@ export class AllExceptionsFilter implements ExceptionFilter {
           : {}),
       },
     };
+
+    /*
+     * Counted by code, so "is anything failing right now" is a scrape rather than a
+     * log search. The code is a closed set from the error contract, so this cannot
+     * grow unbounded — and it is deliberately not labelled by path, which would.
+     */
+    this.metrics?.increment(METRIC_NAMES.errorsTotal, { code: resolved.code });
 
     this.log(exception, resolved, correlationId, request);
 

@@ -1,5 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { METRIC_NAMES, renderMetrics, type MetricName, type MetricSample } from '@wdrg/contracts';
+import {
+  LATENCY_BUCKETS_SECONDS,
+  METRIC_NAMES,
+  renderHistograms,
+  renderMetrics,
+  type HistogramSample,
+  type MetricName,
+  type MetricSample,
+} from '@wdrg/contracts';
 
 /**
  * Counters and gauges, held in this process.
@@ -27,6 +35,10 @@ import { METRIC_NAMES, renderMetrics, type MetricName, type MetricSample } from 
 export class MetricsService {
   private readonly counters = new Map<string, number>();
   private readonly gauges = new Map<string, number>();
+  private readonly histograms = new Map<
+    string,
+    { buckets: number[]; sum: number; count: number }
+  >();
   private readonly startedAt = Date.now();
 
   increment(name: MetricName, labels: Readonly<Record<string, string>> = {}, by = 1): void {
@@ -37,6 +49,41 @@ export class MetricsService {
 
   setGauge(name: MetricName, value: number, labels: Readonly<Record<string, string>> = {}): void {
     this.gauges.set(this.key(name, labels), value);
+  }
+
+  /**
+   * Records one observation against a histogram.
+   *
+   * Buckets are fixed at the boundaries the contract declares, so a series cannot
+   * change shape between releases and leave a collector comparing incomparable data.
+   * A value above the last boundary still counts towards `count` and `sum` — that is
+   * what makes the `+Inf` bucket equal the count, which a collector checks.
+   */
+  observe(name: MetricName, value: number, labels: Readonly<Record<string, string>> = {}): void {
+    const key = this.key(name, labels);
+    const existing = this.histograms.get(key) ?? {
+      buckets: LATENCY_BUCKETS_SECONDS.map(() => 0),
+      sum: 0,
+      count: 0,
+    };
+
+    const index = LATENCY_BUCKETS_SECONDS.findIndex((boundary) => value <= boundary);
+
+    if (index >= 0) {
+      existing.buckets[index] = (existing.buckets[index] ?? 0) + 1;
+    }
+
+    existing.sum += value;
+    existing.count += 1;
+    this.histograms.set(key, existing);
+  }
+
+  /** A histogram's current state. For the operator surface and for tests. */
+  readHistogram(
+    name: MetricName,
+    labels: Readonly<Record<string, string>> = {},
+  ): { buckets: readonly number[]; sum: number; count: number } | undefined {
+    return this.histograms.get(this.key(name, labels));
   }
 
   /** A counter's current value. For the operator surface and for tests. */
@@ -83,13 +130,24 @@ export class MetricsService {
         : left.name.localeCompare(right.name),
     );
 
-    return renderMetrics(samples);
+    const histograms = [...this.histograms].map(([key, value]): HistogramSample => {
+      const parsed = this.parse(key);
+
+      return { name: parsed.name, labels: parsed.labels, ...value };
+    });
+
+    histograms.sort((left, right) => left.name.localeCompare(right.name));
+
+    const rendered = [renderMetrics(samples).trimEnd(), renderHistograms(histograms)];
+
+    return `${rendered.filter((block) => block.length > 0).join('\n')}\n`;
   }
 
   /** For tests, which must not inherit counts from one another. */
   reset(): void {
     this.counters.clear();
     this.gauges.clear();
+    this.histograms.clear();
   }
 
   private key(name: MetricName, labels: Readonly<Record<string, string>>): string {

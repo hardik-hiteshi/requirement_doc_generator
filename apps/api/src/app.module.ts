@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
-import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
 import { AnalysisModule } from './analysis/analysis.module';
 import { StackModule } from './stack/stack.module';
 import { DocumentsModule } from './documents/documents.module';
 import { ObservabilityModule } from './observability/observability.module';
+import { RequestMetricsInterceptor } from './observability/request-metrics.interceptor';
 import { RetentionModule } from './retention/retention.module';
 import { EstimationModule } from './estimation/estimation.module';
 import { AbuseModule } from './abuse/abuse.module';
@@ -66,6 +67,13 @@ import { RequirementsModule } from './requirements/requirements.module';
       // must not become a flood of audit writes.
       provide: APP_GUARD,
       useClass: RateLimitGuard,
+    },
+    {
+      // Registered globally so traffic is counted for every route rather than the
+      // ones somebody remembered to instrument. `wdrg_http_requests_total` was
+      // declared in Phase 12 and never emitted; this is what produces it.
+      provide: APP_INTERCEPTOR,
+      useClass: RequestMetricsInterceptor,
     },
   ],
 })

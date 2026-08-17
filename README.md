@@ -7,8 +7,8 @@ documents.
 The public workspace needs no account: a project is reached through a private
 recovery link.
 
-> **Current state: Phase 12 — operational hardening: request ceilings, retention
-> enforcement, an operator surface and application metrics.**
+> **Current state: Phase 13 — admin, observability and operations: an operator console,
+> per-project support visibility, queue insight and real application metrics.**
 > You can create a project without an account, receive a private recovery link,
 > upload and paste requirement documents, review what was extracted from them,
 > analyse them into a traceable requirement baseline — classification,
@@ -30,9 +30,10 @@ recovery link.
 > exports as a real file in the formats it supports — DOCX, PDF, XLSX and the strict
 > CSV — carrying the project's branding where it is configured, and an archived
 > version can be downloaded without restoring it. Operationally the API defends
-> itself: per-class request ceilings, a retention job that removes expired and
-> deleted content on a schedule you set, and an optional operator surface reporting
-> status, audit events and metrics.
+> itself: per-class request ceilings, a retention job that removes expired and deleted
+> content on a schedule you set, and an optional operator console — at `/admin`, behind a
+> deployment token — reporting system status, per-project support metadata, extraction
+> queue health, audit events and metrics a self-hosted collector can scrape.
 
 ---
 
@@ -119,6 +120,7 @@ Detail: [architecture overview](docs/architecture/overview.md) ·
 [request ceilings](docs/operations/rate-limiting.md) ·
 [retention](docs/operations/retention.md) ·
 [operator surface](docs/operations/operator-surface.md) ·
+[observability](docs/operations/observability.md) ·
 [requirement analysis](docs/product/requirement-analysis.md) ·
 [technology stack](docs/product/technology-stack.md) ·
 [estimation & timeline](docs/product/estimation-and-timeline.md) ·
@@ -387,5 +389,5 @@ of secrets.
 | 10    | Editing, versioning, invalidation                    | **Complete** |
 | 11    | Export and branding                                  | **Complete** |
 | 12    | Operational hardening: abuse controls, retention     | **Complete** |
-| 13    | Not yet specified                                    | Planned      |
+| 13    | Admin, observability and operations                  | **Complete** |
 | 14    | Final hardening and deployment                       | Planned      |

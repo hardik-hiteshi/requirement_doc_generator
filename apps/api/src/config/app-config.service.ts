@@ -1,7 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { LogLevel, NodeEnvironment } from '@wdrg/config';
-import type { RateLimitClass, RateLimitPolicy, RetentionPolicy } from '@wdrg/contracts';
+import {
+  CONFIG_PRESENCE_KEYS,
+  READABLE_CONFIG_KEYS,
+  type RateLimitClass,
+  type RateLimitPolicy,
+  type RetentionPolicy,
+} from '@wdrg/contracts';
 
 import type { ApiEnvironment } from './env.schema';
 
@@ -267,6 +273,51 @@ export class AppConfigService {
         batchSize: this.config.get('RETENTION_BATCH_SIZE', { infer: true }),
       },
     };
+  }
+
+  /**
+   * The configuration this process resolved, for an operator to read.
+   *
+   * Here rather than in the controller because this is the module allowed to touch the
+   * environment — the lint rule that forbids it elsewhere exists so configuration has
+   * exactly one door, and an operator view is still configuration.
+   *
+   * An allow-list, not a deny-list: the failure modes are not symmetrical. Forgetting
+   * to add a safe key means an operator asks a question; forgetting to deny a new
+   * secret means publishing it. Secrets are reported as set or unset, which answers
+   * the operational question without disclosing anything.
+   */
+  operationalSnapshot(): {
+    settings: Record<string, string>;
+    secretsConfigured: Record<string, boolean>;
+  } {
+    const settings: Record<string, string> = {};
+
+    for (const key of READABLE_CONFIG_KEYS) {
+      const value: unknown = this.config.get(key as keyof ApiEnvironment, { infer: true });
+
+      /*
+       * Rendered as strings, narrowly. A config view is for reading, and anything that
+       * is not a scalar is not something an operator can act on from a table.
+       */
+      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+        const rendered = String(value);
+
+        if (rendered.length > 0) {
+          settings[key] = rendered;
+        }
+      }
+    }
+
+    const secretsConfigured: Record<string, boolean> = {};
+
+    for (const key of CONFIG_PRESENCE_KEYS) {
+      const value: unknown = this.config.get(key as keyof ApiEnvironment, { infer: true });
+
+      secretsConfigured[key] = typeof value === 'string' && value.length > 0;
+    }
+
+    return { settings, secretsConfigured };
   }
 
   get admin(): AdminConfig {

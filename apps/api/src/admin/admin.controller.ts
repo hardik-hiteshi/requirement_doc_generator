@@ -1,12 +1,29 @@
-import { Controller, Get, Header, Inject, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Header,
+  Inject,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { getConnectionToken } from '@nestjs/mongoose';
 import { ApiExcludeController, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import {
   adminAuditQuerySchema,
+  adminProjectQuerySchema,
+  API_ERROR_CODES,
   METRIC_NAMES,
   PROJECT_STATUSES,
   type AdminAuditQuery,
   type AdminAuditResponse,
+  type AdminConfig,
+  type AdminProjectDetail,
+  type AdminProjectList,
+  type AdminProjectQuery,
+  type AdminQueueState,
   type AdminStatus,
   type AuditEventType,
   type ProjectStatus,
@@ -22,6 +39,9 @@ import { MetricsService } from '../observability/metrics.service';
 import { RateLimitStore } from '../abuse/rate-limit.store';
 import { RetentionService } from '../retention/retention.service';
 import { RetentionWorker } from '../retention/retention.worker';
+import { AppException } from '../common/errors';
+import { AdminProjectsService } from './admin-projects.service';
+import { AdminQueueService } from './admin-queue.service';
 import { AdminGuard } from './admin.guard';
 
 /**
@@ -50,6 +70,8 @@ export class AdminController {
     private readonly retention: RetentionService,
     private readonly worker: RetentionWorker,
     private readonly audit: AuditService,
+    private readonly adminProjects: AdminProjectsService,
+    private readonly adminQueue: AdminQueueService,
   ) {}
 
   @Get('status')
@@ -148,6 +170,73 @@ export class AdminController {
     await this.worker.runOnce();
 
     return { sweep: this.retention.latestSweep() };
+  }
+
+  @Get('projects')
+  @ApiOperation({ summary: 'Projects, by status — metadata only' })
+  @ApiOkResponse({ description: 'Matching projects, newest activity first.' })
+  async projects(
+    @Query(new ZodValidationPipe(adminProjectQuerySchema)) query: AdminProjectQuery,
+    @Req() request: Request,
+  ): Promise<AdminProjectList> {
+    await this.recordAction(request, 'projects_list');
+
+    return this.adminProjects.list(query);
+  }
+
+  @Get('projects/:projectId')
+  @ApiOperation({ summary: 'One project — metadata and counts, never content' })
+  @ApiOkResponse({ description: "The project's operational shape." })
+  async project(@Param('projectId') projectId: string): Promise<AdminProjectDetail> {
+    const detail = await this.adminProjects.detail(projectId);
+
+    /*
+     * Audited whether or not the project exists, and with the id either way. An
+     * operator looking up a project is a thing that should be on the record — including
+     * a lookup of something that is not there, which is what a probe looks like.
+     */
+    await this.audit.record({
+      type: 'ADMIN_PROJECT_VIEWED',
+      projectId,
+      metadata: { found: detail !== undefined },
+    });
+
+    if (!detail) {
+      throw new AppException(API_ERROR_CODES.NOT_FOUND, { message: 'No such project.' });
+    }
+
+    return detail;
+  }
+
+  @Get('queue')
+  @ApiOperation({ summary: 'Extraction queue depth and the age of its oldest work' })
+  @ApiOkResponse({ description: 'Queue state.' })
+  async queue(@Req() request: Request): Promise<AdminQueueState> {
+    await this.recordAction(request, 'queue');
+
+    return this.adminQueue.state();
+  }
+
+  @Post('queue/:jobId/retry')
+  @ApiOperation({ summary: 'Send a failed extraction job back to the queue' })
+  @ApiOkResponse({ description: 'The job, as it now stands.' })
+  async retryJob(@Param('jobId') jobId: string, @Req() request: Request) {
+    await this.audit.record({
+      type: 'ADMIN_JOB_RETRIED',
+      projectId: 'system',
+      metadata: { jobId, method: request.method },
+    });
+
+    return { job: await this.adminQueue.retry(jobId) };
+  }
+
+  @Get('config')
+  @ApiOperation({ summary: 'The configuration this process resolved, redacted' })
+  @ApiOkResponse({ description: 'Allow-listed settings, and which secrets are set.' })
+  async effectiveConfig(@Req() request: Request): Promise<AdminConfig> {
+    await this.recordAction(request, 'config');
+
+    return { ...this.config.operationalSnapshot(), observedAt: new Date().toISOString() };
   }
 
   @Get('metrics')

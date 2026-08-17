@@ -187,6 +187,12 @@ export const AUDIT_EVENT_TYPES = [
   'ADMIN_ACTION',
   /** An operator request was refused: absent, malformed or wrong token. */
   'ADMIN_ACCESS_DENIED',
+
+  /* Phase 13 — admin, observability and operations. */
+  /** An operator read one project's metadata. Records which project, never content. */
+  'ADMIN_PROJECT_VIEWED',
+  /** An operator sent a failed extraction job back to the queue. */
+  'ADMIN_JOB_RETRIED',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];
