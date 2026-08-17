@@ -535,11 +535,26 @@ export async function downloadDocumentExport(
   }
 }
 
+/**
+ * The server's explanation, or a plain fallback.
+ *
+ * The API answers with `{ error: { message } }` — the envelope every other route
+ * uses. Reading a bare `message` found nothing, so every refusal reached the panel
+ * as "that download could not be produced", including the ones that say precisely
+ * what to do: a rate ceiling asks the reader to wait a moment, and a refused
+ * credential-shaped value is a different problem entirely. Both were flattened into
+ * a shrug.
+ */
 async function exportFailure(response: Response): Promise<Error> {
   try {
-    const body = (await response.json()) as { message?: string };
+    const body = (await response.json()) as {
+      error?: { message?: string };
+      message?: string;
+    };
 
-    return new Error(body.message ?? 'That download could not be produced.');
+    const message = body.error?.message ?? body.message;
+
+    return new Error(message ?? 'That download could not be produced.');
   } catch {
     return new Error('That download could not be produced.');
   }

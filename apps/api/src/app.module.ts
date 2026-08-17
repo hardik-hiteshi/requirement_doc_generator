@@ -1,10 +1,15 @@
 import { Module } from '@nestjs/common';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 
 import { AnalysisModule } from './analysis/analysis.module';
 import { StackModule } from './stack/stack.module';
 import { DocumentsModule } from './documents/documents.module';
+import { ObservabilityModule } from './observability/observability.module';
+import { RetentionModule } from './retention/retention.module';
 import { EstimationModule } from './estimation/estimation.module';
+import { AbuseModule } from './abuse/abuse.module';
+import { RateLimitGuard } from './abuse/rate-limit.guard';
+import { AdminModule } from './admin/admin.module';
 import { AuditModule } from './audit/audit.module';
 import { AllExceptionsFilter } from './common/errors';
 import { LoggingModule } from './common/logging';
@@ -41,6 +46,10 @@ import { RequirementsModule } from './requirements/requirements.module';
     StackModule,
     EstimationModule,
     DocumentsModule,
+    ObservabilityModule,
+    AbuseModule,
+    RetentionModule,
+    AdminModule,
   ],
   providers: [
     {
@@ -48,6 +57,15 @@ import { RequirementsModule } from './requirements/requirements.module';
       // into the standard envelope.
       provide: APP_FILTER,
       useClass: AllExceptionsFilter,
+    },
+    {
+      // Registered globally, and ahead of every other guard, so a new endpoint is
+      // protected the moment it exists rather than when somebody remembers to
+      // annotate it. Cost is checked before identity: refusing a flood should not
+      // require verifying a session first, and a flood of unauthenticated requests
+      // must not become a flood of audit writes.
+      provide: APP_GUARD,
+      useClass: RateLimitGuard,
     },
   ],
 })

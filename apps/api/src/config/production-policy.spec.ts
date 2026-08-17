@@ -1,6 +1,11 @@
 import { MODEL_PROFILES } from '../analysis/models/model-profiles';
 import type { AppConfigService } from './app-config.service';
-import { checkProductionPolicy, describeViolations } from './production-policy';
+import {
+  checkProductionPolicy,
+  describeAdvisories,
+  describeViolations,
+  productionAdvisories,
+} from './production-policy';
 
 /**
  * The rules that make a production deployment refuse to start.
@@ -30,6 +35,14 @@ function config(
     },
     malware: { scanner: 'clamav', host: 'clamav.internal', port: 3310, failClosed: true },
     session: { secret: 'a-real-secret-of-sufficient-length-0000000' },
+    /* A deployment that has made the operational choices Phase 12 introduced. */
+    rateLimit: { enabled: true, maxKeys: 50_000 },
+    retention: {
+      enabled: true,
+      sweepIntervalMs: 3_600_000,
+      policy: { deletionGraceDays: 7, expiredGraceDays: 90, batchSize: 25 },
+    },
+    admin: { enabled: false, token: '' },
     ...rest,
     ai: {
       provider: 'disabled',
@@ -292,5 +305,76 @@ describe('production policy', () => {
     expect(message).toContain('S3_SECRET_KEY');
     // The name of the setting, never what is in it.
     expect(message).not.toContain('development-only-session-secret-value');
+  });
+});
+
+describe('production advisories', () => {
+  it('says nothing when retention is enabled', () => {
+    expect(productionAdvisories(config())).toEqual([]);
+  });
+
+  it('warns, rather than refusing, when nothing is ever purged', () => {
+    /*
+     * The distinction the two lists exist for. A forgeable secret is wrong and stops
+     * the process; keeping every project for ever is a decision some deployments are
+     * required to make, and refusing to start over a lawful data policy would be the
+     * tool overruling its operator.
+     */
+    const advisories = productionAdvisories(
+      config({
+        retention: {
+          enabled: false,
+          sweepIntervalMs: 3_600_000,
+          policy: { deletionGraceDays: 7, expiredGraceDays: 90, batchSize: 25 },
+        },
+      }),
+    );
+
+    expect(advisories.map((advisory) => advisory.setting)).toEqual(['RETENTION_ENABLED']);
+
+    /* And it is not among the reasons a deployment refuses to boot. */
+    expect(
+      checkProductionPolicy(
+        config({
+          retention: {
+            enabled: false,
+            sweepIntervalMs: 3_600_000,
+            policy: { deletionGraceDays: 7, expiredGraceDays: 90, batchSize: 25 },
+          },
+        }),
+      ).map((violation) => violation.setting),
+    ).not.toContain('RETENTION_ENABLED');
+  });
+
+  it('says nothing at all outside production', () => {
+    expect(
+      productionAdvisories(
+        config({
+          isProduction: false,
+          retention: {
+            enabled: false,
+            sweepIntervalMs: 3_600_000,
+            policy: { deletionGraceDays: 7, expiredGraceDays: 90, batchSize: 25 },
+          },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('reads as a warning rather than a refusal', () => {
+    const text = describeAdvisories(
+      productionAdvisories(
+        config({
+          retention: {
+            enabled: false,
+            sweepIntervalMs: 3_600_000,
+            policy: { deletionGraceDays: 7, expiredGraceDays: 90, batchSize: 25 },
+          },
+        }),
+      ),
+    );
+
+    expect(text).toContain('has started');
+    expect(text).not.toContain('not configured safely');
   });
 });

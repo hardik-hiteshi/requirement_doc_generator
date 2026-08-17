@@ -173,6 +173,20 @@ export const AUDIT_EVENT_TYPES = [
   'DOCUMENT_EXPORTED',
   'DOCUMENT_EXPORT_FAILED',
   'BRANDING_UPDATED',
+
+  /* Phase 12 — operational hardening. */
+  /** A caller exceeded a rate ceiling. Recorded once per window, not per refusal. */
+  'RATE_LIMIT_EXCEEDED',
+  /** A retention sweep finished. Carries counts, never which projects. */
+  'RETENTION_SWEEP_COMPLETED',
+  /** A project's content was removed and the record moved to DELETED. */
+  'PROJECT_PURGED',
+  /** An expired-and-abandoned project was queued for deletion by the sweep. */
+  'PROJECT_QUEUED_FOR_DELETION',
+  /** An operator read the status or audit surface. */
+  'ADMIN_ACTION',
+  /** An operator request was refused: absent, malformed or wrong token. */
+  'ADMIN_ACCESS_DENIED',
 ] as const;
 
 export type AuditEventType = (typeof AUDIT_EVENT_TYPES)[number];

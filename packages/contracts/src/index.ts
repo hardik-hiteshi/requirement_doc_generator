@@ -117,3 +117,9 @@ export * from './documents/client-dependency.contract';
 
 /* Phase 10 — editing, versioning, invalidation and traceability. */
 export * from './documents/traceability.contract';
+
+/* Phase 12 — operational hardening. */
+export * from './operations/rate-limit.contract';
+export * from './operations/retention.contract';
+export * from './operations/admin.contract';
+export * from './operations/metrics.contract';

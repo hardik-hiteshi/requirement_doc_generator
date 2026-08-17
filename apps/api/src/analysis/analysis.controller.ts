@@ -55,6 +55,7 @@ import {
   type AuthenticatedRequest,
 } from '../project-access/project-session.guard';
 import { AnalysisService, type AnalysisContext, type BaselineView } from './analysis.service';
+import { RateLimit } from '../abuse/rate-limit.decorator';
 
 /**
  * Requirement analysis for the project the caller's session is bound to.
@@ -78,6 +79,7 @@ export class AnalysisController {
 
   /* --------------------------------------------------------------- runs */
 
+  @RateLimit('expensive')
   @Post('runs')
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({ summary: 'Start an analysis of the reviewed requirement sources' })

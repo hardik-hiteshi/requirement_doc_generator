@@ -51,6 +51,7 @@ import { StackService, type CatalogView, type StackContext, type StackView } fro
 import { RecommendationService } from './recommendation.service';
 import { StackRepository } from './stack.repository';
 import { toRecommendationRun } from './stack.mapper';
+import { RateLimit } from '../abuse/rate-limit.decorator';
 
 const versionOnlySchema = z.object({ expectedVersion: z.number().int().nonnegative() }).strict();
 
@@ -193,6 +194,7 @@ export class StackController {
 
   /* -------------------------------------------------- recommendations */
 
+  @RateLimit('expensive')
   @Post('recommendations')
   @ApiOperation({ summary: 'Ask the AI to suggest technologies for the undecided categories.' })
   @ApiCreatedResponse({ description: 'The stack, with suggestions added.' })

@@ -17,6 +17,7 @@ import { effectiveStatus } from '../projects/domain/project-lifecycle';
 import { toProjectResponse } from '../projects/mappers/project.mapper';
 import { ProjectAccessService } from './project-access.service';
 import { ProjectSessionService } from './project-session.service';
+import { RateLimit } from '../abuse/rate-limit.decorator';
 
 /**
  * Endpoints that establish access. Deliberately unguarded — they are how a
@@ -31,6 +32,7 @@ export class ProjectAccessController {
     private readonly audit: AuditService,
   ) {}
 
+  @RateLimit('create')
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -53,6 +55,7 @@ export class ProjectAccessController {
     return created;
   }
 
+  @RateLimit('access')
   @Post('session')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

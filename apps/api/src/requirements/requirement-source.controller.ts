@@ -51,6 +51,7 @@ import {
 } from '../project-access/project-session.guard';
 import { RequirementSourceService } from './requirement-source.service';
 import type { FileCandidate } from './validation/file-validator';
+import { RateLimit } from '../abuse/rate-limit.decorator';
 
 /**
  * Requirement sources for the project the caller's session is bound to.
@@ -91,6 +92,7 @@ export class RequirementSourceController {
     return this.sources.addTextSource(body, contextOf(request));
   }
 
+  @RateLimit('upload')
   @Post('files')
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(FilesInterceptor(UPLOAD_FIELD_NAME))
@@ -208,6 +210,7 @@ export class RequirementSourceController {
     return this.sources.markReviewed(sourceId, body.version, contextOf(request));
   }
 
+  @RateLimit('expensive')
   @Post(':sourceId/retry')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

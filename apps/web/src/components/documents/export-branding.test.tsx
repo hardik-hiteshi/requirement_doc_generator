@@ -185,6 +185,23 @@ describe('the download panel', () => {
     expect(screen.getByTestId('export-PDF')).toBeEnabled();
   });
 
+  it('passes on what the server said, so a ceiling explains itself', async () => {
+    /*
+     * The API answers with the standard envelope. Reading a bare `message` found
+     * nothing and flattened every refusal into "could not be produced" — including a
+     * rate ceiling, which is the one that tells the reader exactly what to do.
+     */
+    mocks.downloadDocumentExport.mockRejectedValue(
+      new Error('That was too many requests in a short time. Nothing has been changed.'),
+    );
+
+    renderPanel(<ExportPanel type="OUR_UNDERSTANDING" document={snapshot()} />);
+
+    await userEvent.click(screen.getByTestId('export-PDF'));
+
+    expect(await screen.findByTestId('export-error')).toHaveTextContent('too many requests');
+  });
+
   it('retries after a failure and clears the message', async () => {
     mocks.downloadDocumentExport.mockRejectedValueOnce(new Error('Try again.'));
 

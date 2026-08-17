@@ -241,6 +241,86 @@ export const apiEnvSchema = z.object({
    */
   AI_DETERMINISTIC_SCENARIO: z.enum(['', 'echo']).default(''),
 
+  /* ------------------------------------------------- abuse and rate limits */
+  /**
+   * Protective request ceilings.
+   *
+   * On by default, because a deployment that has to remember to enable its own
+   * abuse protection will not have it. Turning it off is supported for a local
+   * machine driving the suite hard; production refuses the off position.
+   *
+   * The limits are per API instance. Behind a load balancer with several
+   * instances the effective ceiling is multiplied by their number — see
+   * docs/operations/rate-limiting.md.
+   */
+  RATE_LIMIT_ENABLED: booleanFromString(true),
+  /** Everything not otherwise classified: reads, small writes, polling. */
+  RATE_LIMIT_DEFAULT: integerSchema({ default: 600, min: 1, max: 1_000_000 }),
+  RATE_LIMIT_DEFAULT_WINDOW_SECONDS: integerSchema({ default: 60, min: 1, max: 86_400 }),
+  /** State-changing requests. */
+  RATE_LIMIT_MUTATION: integerSchema({ default: 120, min: 1, max: 1_000_000 }),
+  RATE_LIMIT_MUTATION_WINDOW_SECONDS: integerSchema({ default: 60, min: 1, max: 86_400 }),
+  /** Model runs, document generation, validation, estimation. */
+  RATE_LIMIT_EXPENSIVE: integerSchema({ default: 10, min: 1, max: 1_000_000 }),
+  RATE_LIMIT_EXPENSIVE_WINDOW_SECONDS: integerSchema({ default: 300, min: 1, max: 86_400 }),
+  /** File rendering and download. */
+  RATE_LIMIT_EXPORT: integerSchema({ default: 30, min: 1, max: 1_000_000 }),
+  RATE_LIMIT_EXPORT_WINDOW_SECONDS: integerSchema({ default: 300, min: 1, max: 86_400 }),
+  /** File ingestion. */
+  RATE_LIMIT_UPLOAD: integerSchema({ default: 30, min: 1, max: 1_000_000 }),
+  RATE_LIMIT_UPLOAD_WINDOW_SECONDS: integerSchema({ default: 3_600, min: 1, max: 86_400 }),
+  /** Recovering a project. The tightest class: what it protects is a secret. */
+  RATE_LIMIT_ACCESS: integerSchema({ default: 10, min: 1, max: 1_000_000 }),
+  RATE_LIMIT_ACCESS_WINDOW_SECONDS: integerSchema({ default: 900, min: 1, max: 86_400 }),
+  /**
+   * Creating a project.
+   *
+   * Separate from recovery, and far more generous: guessing a secret attacks one
+   * project's confidentiality, while creating projects in bulk attacks disk. An
+   * agency starting a dozen projects in an afternoon from one office is ordinary
+   * work, and the credential-guessing budget would have locked them out after ten.
+   */
+  RATE_LIMIT_CREATE: integerSchema({ default: 30, min: 1, max: 1_000_000 }),
+  RATE_LIMIT_CREATE_WINDOW_SECONDS: integerSchema({ default: 3_600, min: 1, max: 86_400 }),
+  /**
+   * Counter keys held before the oldest are dropped.
+   *
+   * A bound on memory rather than a policy: without one, a flood from many
+   * addresses would grow the map until the process died, which is the outcome the
+   * limiter exists to prevent.
+   */
+  RATE_LIMIT_MAX_KEYS: integerSchema({ default: 50_000, min: 100, max: 5_000_000 }),
+
+  /* ------------------------------------------------------------ retention */
+  /**
+   * Whether the retention sweep runs.
+   *
+   * Off by default. Retention deletes data, and a default that quietly removes
+   * things on a machine somebody was using to try the product would be
+   * indefensible — so a deployment opts in, having chosen its windows. Production
+   * startup warns when it is off, because an installation that never purges
+   * accumulates client requirement documents indefinitely.
+   */
+  RETENTION_ENABLED: booleanFromString(false),
+  /** How often the sweep looks for work. */
+  RETENTION_SWEEP_INTERVAL_MS: integerSchema({ default: 3_600_000, min: 1_000, max: 86_400_000 }),
+  /** Days a deletion request stays pending before content is purged. */
+  RETENTION_DELETION_GRACE_DAYS: integerSchema({ default: 7, min: 0, max: 365 }),
+  /** Days after expiry before an abandoned project is queued for deletion. */
+  RETENTION_EXPIRED_GRACE_DAYS: integerSchema({ default: 90, min: 1, max: 3_650 }),
+  /** Projects handled per sweep, so one tick cannot monopolise the database. */
+  RETENTION_BATCH_SIZE: integerSchema({ default: 25, min: 1, max: 500 }),
+
+  /* ------------------------------------------------------ operator surface */
+  /**
+   * Token for the operator endpoints. Empty means the surface does not exist.
+   *
+   * Not a password for a person: a deployment secret, held by whoever runs the
+   * service, compared in constant time and never logged. Production requires at
+   * least 32 characters when it is set at all.
+   */
+  ADMIN_API_TOKEN: z.string().default(''),
+
   /* ---------------------------------------------------------------- docs */
   /** Serve the interactive OpenAPI UI. Disabled by default in production. */
   OPENAPI_ENABLED: booleanFromString(true),
