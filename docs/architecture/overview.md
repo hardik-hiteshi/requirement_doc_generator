@@ -133,12 +133,14 @@ Shipped in Phase 1, each with a test:
 **Content-Security-Policy — the precise position.** The API sends helmet's
 _default_ CSP in production and none outside it (the Swagger UI needs inline
 scripts). The **web application sends no CSP at all**. An
-application-specific policy for the web app is Phase 12, once the runtime origins
-it must allow are known.
+application-specific policy for the web app is not yet assigned to a phase, and waits
+until the runtime origins it must allow are known.
 
-Not present, by phase: anonymous project access and session cookies (2); upload
-validation, magic bytes, malware scanning (3); web CSP, rate limiting, CAPTCHA,
-quotas, retention, cleanup (12).
+Added by later phases: anonymous project access and session cookies (2); upload
+validation, magic bytes, malware scanning (3); rate limiting, quotas, retention and
+cleanup (12).
+
+Still not present: a web-application CSP, and CAPTCHA. Neither is assigned to a phase.
 
 ## Where to look
 

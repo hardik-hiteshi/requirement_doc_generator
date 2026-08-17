@@ -502,11 +502,11 @@ and reported without penalty. See ADR-0041.
 
 ## Known limitations
 
-- **Export is a later phase.** See below.
-- **Export is Phase 11.** Copy-to-clipboard and the strict CSV serialisation exist
-  because the CSV schema is a Phase 7 requirement. DOCX, PDF and XLSX do not — and
-  the work breakdown and dependency sheet have no spreadsheet export yet, which is
-  the form both will most often be wanted in.
+- **Export shipped in Phase 11.** Every document exports in the formats its matrix
+  declares — DOCX and PDF throughout, XLSX for the structured four, and CSV for the
+  Feature Listing, work breakdown and dependency sheet. Copy-to-clipboard and the
+  strict CSV serialisation predate it, because the CSV schema was a Phase 7
+  requirement, and both remain.
 - **The work breakdown has no delivery tracking.** `status` and `percentComplete`
   exist on a work package and nothing moves them: this is a plan, not a progress
   tool, and nothing in this application observes real progress.

@@ -7,8 +7,8 @@ documents.
 The public workspace needs no account: a project is reached through a private
 recovery link.
 
-> **Current state: Phase 10 — editing, immutable version history, comparison,
-> restoration, invalidation and cross-document traceability.**
+> **Current state: Phase 12 — operational hardening: request ceilings, retention
+> enforcement, an operator surface and application metrics.**
 > You can create a project without an account, receive a private recovery link,
 > upload and paste requirement documents, review what was extracted from them,
 > analyse them into a traceable requirement baseline — classification,
@@ -26,9 +26,13 @@ recovery link.
 > documents are then generated from those approved artifacts — Our Understanding,
 > Feature Listing, Acceptance Criteria, Assumptions, Statement of Work, Work
 > Breakdown Structure and Client Dependency Sheet — each locked until the one before
-> it is approved, each quoting its inputs rather than deciding them. **Export is
-> not implemented**: documents can be read, copied and previewed as CSV, and DOCX,
-> PDF and XLSX are a later phase — see [Roadmap](#roadmap).
+> it is approved, each quoting its inputs rather than deciding them. Every document
+> exports as a real file in the formats it supports — DOCX, PDF, XLSX and the strict
+> CSV — carrying the project's branding where it is configured, and an archived
+> version can be downloaded without restoring it. Operationally the API defends
+> itself: per-class request ceilings, a retention job that removes expired and
+> deleted content on a schedule you set, and an optional operator surface reporting
+> status, audit events and metrics.
 
 ---
 
@@ -112,6 +116,9 @@ Detail: [architecture overview](docs/architecture/overview.md) ·
 [dependency inventory](docs/architecture/dependency-and-service-inventory.md) ·
 [self-hosting](docs/operations/self-hosting.md) ·
 [self-hosted inference](docs/operations/self-hosted-inference.md) ·
+[request ceilings](docs/operations/rate-limiting.md) ·
+[retention](docs/operations/retention.md) ·
+[operator surface](docs/operations/operator-surface.md) ·
 [requirement analysis](docs/product/requirement-analysis.md) ·
 [technology stack](docs/product/technology-stack.md) ·
 [estimation & timeline](docs/product/estimation-and-timeline.md) ·
@@ -338,20 +345,28 @@ Implemented in Phase 1, each covered by a test:
 - Request validation that rejects undeclared properties at any depth, refuses
   prototype-polluting keys, and forces an explicit request-to-domain mapping.
 
-Deferred, by phase — none of these are present today:
+Added by later phases, and present today:
 
 | Control                                                | Phase |
 | ------------------------------------------------------ | ----- |
-| **Application-specific CSP for the web app**           | 12    |
 | Anonymous project access, session cookies              | 2     |
 | Upload validation, magic-byte checks, malware scanning | 3     |
-| Rate limiting, CAPTCHA, quotas, retention, cleanup     | 12    |
+| Rate limiting, quotas, retention, cleanup              | 12    |
 
-The web app has no CSP because writing one now means guessing the runtime origins
-it will need (object storage, CAPTCHA, analytics), and a CSP written against a
-guess is one that gets switched off the first time it breaks a feature. The API's
-CSP is real and tested, but it protects API responses only — it does nothing for
-the web app's HTML.
+Still deferred — not present today:
+
+| Control                                      | Phase        |
+| -------------------------------------------- | ------------ |
+| **Application-specific CSP for the web app** | not assigned |
+| CAPTCHA                                      | not assigned |
+
+The web app still has no CSP, because writing one means guessing the runtime origins
+it will need (object storage, CAPTCHA, analytics), and a CSP written against a guess
+is one that gets switched off the first time it breaks a feature. The API's CSP is
+real and tested, but it protects API responses only — it does nothing for the web
+app's HTML. No CAPTCHA ships either: the request ceilings added in Phase 12 address
+the abuse this deployment actually faces, and a CAPTCHA would mean either a
+third-party service or a self-hosted challenge system.
 
 Never commit a `.env`. `.env.example` documents every variable and must stay free
 of secrets.
@@ -370,7 +385,7 @@ of secrets.
 | 8     | Acceptance Criteria, Assumptions, Statement of Work  | **Complete** |
 | 9     | Work Breakdown Structure, Client Dependency Sheet    | **Complete** |
 | 10    | Editing, versioning, invalidation                    | **Complete** |
-| 11    | Export and branding                                  | Planned      |
-| 12    | Security, abuse controls, retention                  | Planned      |
-| 13    | Admin, observability, operations                     | Planned      |
+| 11    | Export and branding                                  | **Complete** |
+| 12    | Operational hardening: abuse controls, retention     | **Complete** |
+| 13    | Not yet specified                                    | Planned      |
 | 14    | Final hardening and deployment                       | Planned      |

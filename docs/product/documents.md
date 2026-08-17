@@ -406,9 +406,13 @@ and never planned is the kind of gap that is invisible until somebody is buildin
 Assumptions and the Client Dependency Sheet are marked as applying only where relevant: a
 requirement with no assumption is completely normal, not a problem.
 
-## What it is not, yet
+## Downloading a document
 
-Copy-to-clipboard and the strict CSV preview work now. **Full DOCX, PDF and XLSX
-export is a later phase** and is not implemented — the sheet you can preview here
-is the exact eight-column schema that export will use, which is why it is built and
-tested now.
+Copy-to-clipboard and the strict CSV preview are joined by real file downloads: every
+document exports in the formats it supports — DOCX and PDF throughout, XLSX for the
+structured four, CSV for the Feature Listing, work breakdown and dependency sheet. The
+eight-column schema you can preview here is exactly the one the CSV export writes,
+which is why it was built and tested before the export existed.
+
+Downloads carry the project's branding where it is configured, and an archived version
+can be downloaded without restoring it over the version you are working on.
