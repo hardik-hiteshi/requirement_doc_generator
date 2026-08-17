@@ -1,0 +1,39 @@
+# Everything by default; the builder copies what it needs explicitly.
+#
+# A deny-list here is how a secret reaches an image: somebody adds a file, nobody
+# updates the ignore list, and it ships. Starting from "exclude everything" means a
+# new file is absent from the image until a COPY names it.
+*
+
+# Source and manifests the build needs.
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!turbo.json
+!apps
+!packages
+!infrastructure
+
+# ...minus anything inside those trees that must never be in an image.
+**/node_modules
+**/dist
+**/.next
+**/.next-e2e
+**/.turbo
+**/coverage
+**/.artifacts
+**/*.tsbuildinfo
+
+# Secrets and local state. Named explicitly as well as excluded by the `*` above,
+# because this is the list somebody will read when asking "could a secret get in".
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+storage
+.git

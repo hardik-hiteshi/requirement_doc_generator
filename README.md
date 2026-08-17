@@ -7,8 +7,9 @@ documents.
 The public workspace needs no account: a project is reached through a private
 recovery link.
 
-> **Current state: Phase 13 — admin, observability and operations: an operator console,
-> per-project support visibility, queue insight and real application metrics.**
+> **Current state: Phase 14 — final hardening and deployment: the application ships as
+> two container images, with a backup procedure that has been restored from and a smoke
+> test that runs against a live deployment.**
 > You can create a project without an account, receive a private recovery link,
 > upload and paste requirement documents, review what was extracted from them,
 > analyse them into a traceable requirement baseline — classification,
@@ -33,7 +34,10 @@ recovery link.
 > itself: per-class request ceilings, a retention job that removes expired and deleted
 > content on a schedule you set, and an optional operator console — at `/admin`, behind a
 > deployment token — reporting system status, per-project support metadata, extraction
-> queue health, audit events and metrics a self-hosted collector can scrape.
+> queue health, audit events and metrics a self-hosted collector can scrape. It deploys as
+> two images that run as a non-root user with no package manager in them, behind a backup
+> and restore procedure that has been rehearsed by destroying data and recovering it, and
+> a smoke test that checks a running deployment end to end from a shell.
 
 ---
 
@@ -121,6 +125,9 @@ Detail: [architecture overview](docs/architecture/overview.md) ·
 [retention](docs/operations/retention.md) ·
 [operator surface](docs/operations/operator-surface.md) ·
 [observability](docs/operations/observability.md) ·
+[deployment](docs/operations/deployment.md) ·
+[backup and restore](docs/operations/backup-and-restore.md) ·
+[releases](docs/operations/releases.md) ·
 [requirement analysis](docs/product/requirement-analysis.md) ·
 [technology stack](docs/product/technology-stack.md) ·
 [estimation & timeline](docs/product/estimation-and-timeline.md) ·
@@ -179,6 +186,34 @@ That is a statement about vendor dependency, not about cost: servers, storage,
 GPUs, backups and patching are still yours, and this is more operational work
 than a managed stack, not less. See [self-hosting](docs/operations/self-hosting.md)
 and the [dependency and service inventory](docs/architecture/dependency-and-service-inventory.md).
+
+## Deploying it
+
+Two images — `wdrg-api` and `wdrg-web` — built from
+[`infrastructure/docker/`](infrastructure/docker/), pinned to a base image by digest,
+running as a non-root user with no package manager left in them. MongoDB is the only hard
+dependency; object storage and malware scanning are configured, and there is no broker,
+scheduler or separate worker to deploy.
+
+```bash
+# Dependencies plus the application, from the images that ship.
+export PROJECT_SESSION_SECRET=$(openssl rand -hex 24)
+export ADMIN_API_TOKEN=$(openssl rand -hex 24)   # optional — this is what opens /admin
+bash infrastructure/scripts/compose.sh --profile app up --build -d
+
+# Then check the running deployment from a shell. It creates a project, uploads a file,
+# recovers a session and deletes what it made — 56 checks, and no toolchain to install.
+infrastructure/scripts/smoke-test.sh --production --expect-version 0.1.0 \
+  --admin-token "${ADMIN_API_TOKEN}"
+```
+
+Production refuses to start when it is configured unsafely, and says every problem at
+once. Backups are yours to take, and there is a procedure that has been restored from
+rather than only written down.
+
+- [Deployment](docs/operations/deployment.md)
+- [Backup and restore](docs/operations/backup-and-restore.md)
+- [Releases](docs/operations/releases.md)
 
 ## Requirement ingestion
 
@@ -315,18 +350,23 @@ Enforced by tooling, not by convention:
 
 CI runs on every push and pull request:
 
-| Gate              | Command                                     |
-| ----------------- | ------------------------------------------- |
-| Formatting        | `pnpm format:check`                         |
-| Lint              | `pnpm lint`                                 |
-| Types             | `pnpm typecheck`                            |
-| Unit tests        | `pnpm test`                                 |
-| Integration tests | `pnpm test:e2e` (MongoDB service container) |
-| Browser E2E       | `pnpm test:browser` (MongoDB + Chromium)    |
-| Production build  | `pnpm build`                                |
-| Dependency audit  | `pnpm audit --audit-level high` (gating)    |
+| Gate              | Command                                                  |
+| ----------------- | -------------------------------------------------------- |
+| Formatting        | `pnpm format:check`                                      |
+| Lint              | `pnpm lint`                                              |
+| Types             | `pnpm typecheck`                                         |
+| Unit tests        | `pnpm test`                                              |
+| Integration tests | `pnpm test:e2e` (MongoDB service container)              |
+| Browser E2E       | `pnpm test:browser` (MongoDB + Chromium)                 |
+| Production build  | `pnpm build`                                             |
+| Dependency audit  | `pnpm audit --audit-level high` (gating)                 |
+| Deployable images | build, inspect, run, smoke test, scan, restore rehearsal |
 
-`pnpm verify` runs the same sequence locally.
+`pnpm verify` runs the gates that need nothing but the repository: formatting, lint,
+types, unit tests and the build. The other three need infrastructure and stay separate —
+MongoDB for the two test suites, and Docker for the images gate, which builds both
+images, runs them, drives them over HTTP, scans them and rehearses a backup restore. What
+it does and what it publishes: [releases](docs/operations/releases.md#what-ci-publishes).
 
 ## Security
 
@@ -349,11 +389,12 @@ Implemented in Phase 1, each covered by a test:
 
 Added by later phases, and present today:
 
-| Control                                                | Phase |
-| ------------------------------------------------------ | ----- |
-| Anonymous project access, session cookies              | 2     |
-| Upload validation, magic-byte checks, malware scanning | 3     |
-| Rate limiting, quotas, retention, cleanup              | 12    |
+| Control                                                    | Phase |
+| ---------------------------------------------------------- | ----- |
+| Anonymous project access, session cookies                  | 2     |
+| Upload validation, magic-byte checks, malware scanning     | 3     |
+| Rate limiting, quotas, retention, cleanup                  | 12    |
+| Non-root images, no package manager, base pinned by digest | 14    |
 
 Still deferred — not present today:
 
@@ -390,4 +431,4 @@ of secrets.
 | 11    | Export and branding                                  | **Complete** |
 | 12    | Operational hardening: abuse controls, retention     | **Complete** |
 | 13    | Admin, observability and operations                  | **Complete** |
-| 14    | Final hardening and deployment                       | Planned      |
+| 14    | Final hardening and deployment                       | **Complete** |

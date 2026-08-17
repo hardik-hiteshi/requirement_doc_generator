@@ -12,15 +12,15 @@ application is not free — see [what it actually costs](#what-this-actually-cos
 
 Every component is open-source and runs on hardware you control.
 
-| Concern                | Component                      | Licence          | Required                 |
-| ---------------------- | ------------------------------ | ---------------- | ------------------------ |
-| Database               | MongoDB Community              | SSPL-1.0         | Always                   |
-| Object storage         | MinIO, or the local filesystem | AGPL-3.0 / —     | One of the two           |
-| Malware scanning       | ClamAV                         | GPL-2.0          | Production               |
-| Text recognition       | Tesseract                      | Apache-2.0       | For images and scans     |
-| Legacy `.doc`/`.xls`   | LibreOffice                    | MPL-2.0          | Optional, off by default |
-| Background work        | A MongoDB collection           | —                | Always                   |
-| AI inference (Phase 4) | Ollama or vLLM                 | MIT / Apache-2.0 | Not yet implemented      |
+| Concern              | Component                             | Licence          | Required                 |
+| -------------------- | ------------------------------------- | ---------------- | ------------------------ |
+| Database             | MongoDB Community                     | SSPL-1.0         | Always                   |
+| Object storage       | MinIO, or the local filesystem        | AGPL-3.0 / —     | One of the two           |
+| Malware scanning     | ClamAV                                | GPL-2.0          | Production               |
+| Text recognition     | Tesseract                             | Apache-2.0       | For images and scans     |
+| Legacy `.doc`/`.xls` | LibreOffice                           | MPL-2.0          | Optional, off by default |
+| Background work      | A MongoDB collection                  | —                | Always                   |
+| AI inference         | Ollama or an OpenAI-compatible server | MIT / Apache-2.0 | For analysis             |
 
 Nothing above calls a vendor API. The full picture, including licence
 obligations, is in the
@@ -50,6 +50,19 @@ pnpm docker:down -- -v    # volumes too — deliberate, and irreversible
 
 Volumes are namespaced by `COMPOSE_PROJECT_NAME`, so a throwaway verification
 stack cannot collide with, or destroy, the data you are working against.
+
+That starts the **dependencies** only, because running the applications with
+`pnpm dev` keeps the edit-reload loop fast. To run the application itself from the
+images that ship:
+
+```bash
+PROJECT_SESSION_SECRET=$(openssl rand -hex 24) \
+  bash infrastructure/scripts/compose.sh --profile app up --build -d
+```
+
+The API and web services live behind the `app` profile, so nothing about the
+default behaviour changed when they were added. See
+[deployment](deployment.md).
 
 Every host port is configurable (`MONGODB_HOST_PORT`, `MINIO_HOST_PORT`,
 `CLAMAV_HOST_PORT`, …) and every service binds to `127.0.0.1`. A development
@@ -100,13 +113,16 @@ Nothing here requires a subscription. That is not the same as free.
   extracted content — which for a large scanned PDF can exceed the file itself.
 - **Backups.** Nobody else is taking them. MongoDB holds every project and every
   extraction; MinIO holds the original documents. Losing either loses client
-  work, and a recovery link cannot restore what is not there.
+  work, and a recovery link cannot restore what is not there. There are scripts
+  and a rehearsed procedure — see
+  [backup and restore](backup-and-restore.md).
 - **Antivirus definitions.** `freshclam` updates them inside the container by
   default. A scanner with stale signatures runs and detects progressively less —
   an air-gapped deployment must mirror the definitions itself.
-- **GPU capacity, from Phase 4.** How much depends entirely on the model chosen,
-  which is a Phase 4 decision. A small model runs on a CPU slowly; anything
-  larger wants a GPU, and that is real capital or rental expense.
+- **GPU capacity.** How much depends entirely on the model chosen. A small model
+  runs on a CPU slowly; anything larger wants a GPU, and that is real capital or
+  rental expense. See
+  [self-hosted inference](self-hosted-inference.md).
 - **Upgrades and patching.** Five services to keep current, including the
   security-sensitive ones.
 - **Licence obligations.** Attribution for MIT/BSD/Apache dependencies; do not
@@ -122,7 +138,7 @@ infrastructure yourself.
 
 Choose it because you want that trade, not because you expect it to be free.
 
-## Model quality, from Phase 4
+## Model quality
 
 Self-hosted inference means output quality is bounded by what you can run. A
 small model on modest hardware is not a frontier model, and the analysis and

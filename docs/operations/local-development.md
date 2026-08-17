@@ -2,11 +2,11 @@
 
 ## Prerequisites
 
-| Tool    | Version                 | Notes                                                 |
-| ------- | ----------------------- | ----------------------------------------------------- |
-| Node.js | 22.12+ (24 recommended) | `.nvmrc` pins 24 — `nvm use`                          |
-| pnpm    | 11+                     | `corepack enable pnpm`                                |
-| Docker  | with Compose v2         | For MongoDB. Optional if you already run one locally. |
+| Tool    | Version         | Notes                                                 |
+| ------- | --------------- | ----------------------------------------------------- |
+| Node.js | 24+             | `.nvmrc` pins 24, CI uses 24, the images ship 24      |
+| pnpm    | 11+             | `corepack enable pnpm`                                |
+| Docker  | with Compose v2 | For MongoDB. Optional if you already run one locally. |
 
 ## First run
 
